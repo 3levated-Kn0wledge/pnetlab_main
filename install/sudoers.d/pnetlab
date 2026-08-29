@@ -1,0 +1,38 @@
+# PNETLab — privilege policy for the web user.
+#
+# Replaces the upstream file, which granted www-data unconditional root:
+#
+#     www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/unl_wrapper
+#     www-data ALL=(ALL) NOPASSWD:ALL     <-- negates the line above
+#     %unl     ALL=(ALL) NOPASSWD:ALL     <-- every lab tenant is root
+#
+# sudo takes the LAST match, so the correctly-scoped first line never applied.
+# On a stock install `sudo -l -U www-data` resolves to "(ALL) NOPASSWD: ALL".
+#
+# Because the web layer has an unescaped-shell-interpolation surface, that made
+# every injection bug an immediate, unauthenticated host compromise.
+#
+# STATUS: NOT YET COMPLETE. See install/README.md before deploying.
+# The web layer sudo-invokes roughly two dozen binaries directly, not only
+# unl_wrapper, so a minimal policy needs the full inventory first. Shipping only
+# the unl_wrapper line breaks packet capture, Docker consoles and node cleanup.
+
+Defaults:www-data    !requiretty, umask_override, umask=0002
+
+# The platform wrapper. This is the intended entry point and must stay.
+www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/unl_wrapper
+
+# TODO(phase-02): enumerate and scope the remaining call sites. Inventory of
+# binaries the web layer currently sudo-invokes directly, by reference count:
+#
+#   rm(13) ip(11) chown(9) docker(7) service(6) qemu-img(6) brctl(5) tunctl(4)
+#   ovs-vsctl(4) kill(4) echo(4) pkill(3) mkdir(3) fuser(3) touch(2) tc(2)
+#   php(2) nsenter(2) nc(2) ifconfig(2) dos2unix(2) docker_wrapper(2) dmidecode(2)
+#
+# Several take fully attacker-influenced arguments, so a NOPASSWD entry per
+# binary is not in itself a boundary. The intended end state is that all of
+# these move behind unl_wrapper, and this file keeps exactly one rule.
+
+# Deliberately ABSENT — do not reinstate:
+#   www-data ALL=(ALL) NOPASSWD:ALL
+#   %unl     ALL=(ALL) NOPASSWD:ALL
