@@ -1,0 +1,30 @@
+# Dependencies
+/store/vendor/
+/store/node_modules/
+node_modules/
+
+# Environment and secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/public/**/*.key
+
+# Build and tooling caches
+/store/v8-compile-cache-0
+.cache/
+npm-debug.log*
+yarn-error.log*
+
+# Runtime artefacts
+*.log
+error_log
+/store/storage/*.key
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
