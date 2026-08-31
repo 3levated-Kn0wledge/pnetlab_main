@@ -910,7 +910,19 @@ function deleteWiresharkBySession($db, $lab_session)
 
 // ==========EVE_STORE workbook ===================//
 
-function array_find($array, $callback)
+/**
+ * Return the KEY of the first element matching $callback, or false.
+ *
+ * Prefixed because PHP 8.4 added four built-ins in this namespace —
+ * array_find(), array_find_key(), array_any() and array_all() — and redeclaring
+ * any of them is a fatal error, not a warning.
+ *
+ * It was previously named array_find(), whose 8.4 built-in has the same
+ * signature but returns the matching VALUE rather than its key. Guarding the old
+ * name with function_exists() instead of renaming would therefore have silently
+ * changed every call site from a key to a value on PHP >= 8.4.
+ */
+function unl_array_find_key($array, $callback)
 {
 	foreach ($array as $key => $item) {
 		if ($callback($item)) {

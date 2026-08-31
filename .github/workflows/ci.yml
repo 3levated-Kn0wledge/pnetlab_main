@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'phase-**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  php-lint:
+    name: PHP ${{ matrix.php }} syntax
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 8.4 is the pinned target; 8.5 is the next LTS default and is allowed
+        # to fail until we deliberately move to it.
+        php: ['8.4', '8.5']
+    continue-on-error: ${{ matrix.php == '8.5' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - run: tools/php-lint.sh
+
+  frontend-build:
+    name: Frontend production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Production build
+        # Must run from the repository root: webpack.mix.js paths and the
+        # hardcoded webpackChunkName in store/resources/react/app.js are both
+        # root-relative. webpack 4 also predates Node 17's OpenSSL 3 default, so
+        # the legacy provider is required until the laravel-mix 6 upgrade lands.
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
+        run: npm run production
+      - name: Verify chunks landed in the expected location
+        run: |
+          test -f store/public/react/js/app.js
+          test -d store/public/react/pages
+          # A doubled path means the build ran from the wrong directory.
+          test ! -d store/public/store
