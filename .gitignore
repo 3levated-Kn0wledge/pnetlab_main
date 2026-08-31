@@ -28,3 +28,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# laravel-mix manifest: build output, and mix() is not used anywhere
+mix-manifest.json

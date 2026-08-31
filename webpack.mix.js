@@ -29,6 +29,5 @@ mix.react('store/resources/react/app.js', 'store/public/react/js')
 .js('store/resources/react/main.js', 'store/public/react/js')
 .js('store/resources/react/lab.js', 'store/public/react/js');
 mix.copyDirectory('store/resources/assets/img', 'store/public/assets/img')
-.copyDirectory('store/resources/assets/fonts', 'store/public/assets/fonts')
-.copyDirectory('store/resources/assets/js', 'store/public/assets/js'); 
+.copyDirectory('store/resources/assets/js', 'store/public/assets/js');
 
