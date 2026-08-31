@@ -7,7 +7,22 @@ use Illuminate\Support\Facades\Auth;
 
 
 class Query {
-    
+
+    /** Seconds to wait for a TCP/TLS connection to an upstream service. */
+    const CONNECT_TIMEOUT = 5;
+
+    /** Seconds to wait for a complete response on a normal API call. */
+    const TIMEOUT = 30;
+
+    /**
+     * For transfers (downloads) a hard total timeout would abort large but
+     * healthy files, so those are bounded by throughput instead: abort if the
+     * transfer moves less than LOW_SPEED_LIMIT bytes/sec for LOW_SPEED_TIME
+     * seconds.
+     */
+    const LOW_SPEED_LIMIT = 512;
+    const LOW_SPEED_TIME  = 60;
+
     public static $ch = null;
     
     public static function make($url, $method = 'get', $post=array(), $options=[]){
@@ -20,7 +35,23 @@ class Query {
         curl_setopt(self::$ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt(self::$ch, CURLOPT_FOLLOWLOCATION, true);
         curl_setopt(self::$ch, CURLOPT_POST, false);
-        
+
+        // Bound every upstream call. libcurl defaults to a 300s connect timeout
+        // with no total cap, so an unreachable upstream pins the calling worker
+        // (Apache runs mpm_prefork) for five minutes and a handful of such calls
+        // exhausts the pool. An unreachable upstream must fail fast, not hang.
+        curl_setopt(self::$ch, CURLOPT_CONNECTTIMEOUT,
+            isset($options['connect_timeout']) ? (int) $options['connect_timeout'] : self::CONNECT_TIMEOUT);
+
+        if (isset($options['file']) || isset($options['process'])) {
+            // A transfer: bound by stall, not by total duration.
+            curl_setopt(self::$ch, CURLOPT_LOW_SPEED_LIMIT, self::LOW_SPEED_LIMIT);
+            curl_setopt(self::$ch, CURLOPT_LOW_SPEED_TIME, self::LOW_SPEED_TIME);
+        } else {
+            curl_setopt(self::$ch, CURLOPT_TIMEOUT,
+                isset($options['timeout']) ? (int) $options['timeout'] : self::TIMEOUT);
+        }
+
         if(isset($options['header'])){
             curl_setopt(self::$ch, CURLOPT_HTTPHEADER, $options['header']);
         }
