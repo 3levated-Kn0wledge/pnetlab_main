@@ -99,6 +99,11 @@ $app->get('/api/auth', function () use ($app) {
 
 	$user['lang'] = $langData;
 
+	// Never hand the client its own credential material. This endpoint returned
+	// the stored password hash and the session cookie on every call; with an
+	// unsalted hash that is close to disclosing the password itself.
+	unset($user['password'], $user['cookie']);
+
 	$output['code'] = 200;
 	$output['status'] = 'success';
 	$output['message'] = $GLOBALS['messages']['90002'];
