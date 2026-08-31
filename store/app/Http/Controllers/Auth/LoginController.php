@@ -162,10 +162,9 @@ class LoginController extends Controller
 		$statement = $html5_db->prepare($query);
         $statement->execute(['entity_id'=> $html5Pod, 'name'=>$username]);
 		
-        $query = "REPLACE INTO guacamole_user (user_id, entity_id, password_hash, password_date) VALUES (:user_id, :entity_id, UNHEX(SHA2('".$hashPass."',256) ), NOW())";
-        //echo $query; die;
+        $query = "REPLACE INTO guacamole_user (user_id, entity_id, password_hash, password_date) VALUES (:user_id, :entity_id, UNHEX(SHA2(:hash, 256)), NOW())";
 		$statement = $html5_db->prepare($query);
-        $statement->execute(['user_id'=> $html5Pod, 'entity_id'=> $html5Pod]);
+        $statement->execute(['user_id'=> $html5Pod, 'entity_id'=> $html5Pod, 'hash'=> $hashPass]);
 		
         $role = 'READ';
         if ($user->{USER_ROLE} == 0) $role = 'UPDATE';
@@ -179,7 +178,11 @@ class LoginController extends Controller
 
         updateUserToken($username, $hashPass, $pod);
         
-        Cookie::queue(Cookie::make('token', $cookie, 60, '/', $_SERVER['SERVER_NAME']));
+        Cookie::queue(Cookie::make('token', $cookie, 60, '/', $_SERVER['SERVER_NAME'],
+            request()->isSecure(),  // Secure only when actually served over TLS
+            true,                   // HttpOnly
+            false,                  // not raw
+            'Lax'));                // SameSite
 
         return true;
     }

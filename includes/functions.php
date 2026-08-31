@@ -264,55 +264,63 @@ function html5AddSession($db, $name, $type, $port, $userid, $hostname = null, $s
 {
 	if ($servicePort === null) $servicePort = $port;
 	if ($hostname === null) $hostname = '127.0.0.1';
-	
+
 	$connectionId = $port.$userid;
 
 	$query = "delete from guacamole_connection where connection_id=:connection_id";
 	$statement = $db->prepare($query);
 	$statement->execute(['connection_id'=>$connectionId]);
 
-	$query = "replace into guacamole_connection ( connection_id , connection_name , protocol ) values ( " . $connectionId . ",'" . $name . "','" . $type . "');";
+	// $name is derived from the node name, which is user-supplied. Bind it.
+	$query = "replace into guacamole_connection ( connection_id , connection_name , protocol ) values ( ?, ?, ? )";
 	$statement = $db->prepare($query);
-	$statement->execute();
+	$statement->execute([$connectionId, $name, $type]);
 
-	$query = "replace into guacamole_connection_permission ( entity_id, connection_id, permission ) values ( " . ($userid + 1000) . " , " . $connectionId . ", 'READ' );";
+	$query = "replace into guacamole_connection_permission ( entity_id, connection_id, permission ) values ( ?, ?, 'READ' )";
 	$statement = $db->prepare($query);
-	$statement->execute();
+	$statement->execute([$userid + 1000, $connectionId]);
 
+	// Parameter rows, as [name, value] pairs. Values reach the database only as
+	// bound parameters — several of them ($hostname, $username, $password) are
+	// caller-controlled.
 	$connectionData = [
-		
-		"( " . $connectionId . ",'ignore-cert','true' )",
-		"( " . $connectionId . ", 'hostname', '".$hostname."' )",
-		"( " . $connectionId . ", 'port', '".$servicePort."' )",
-		"( " . $connectionId . ",'create-drive-path','true' )",
-		"( " . $connectionId . ",'enable-drive','true' )",
-		"( " . $connectionId . ",'enable-printing','false' )",
-		"( " . $connectionId . ",'drive-path','/tmp/" . $connectionId . "' )",
-		
+		['ignore-cert', 'true'],
+		['hostname', $hostname],
+		['port', $servicePort],
+		['create-drive-path', 'true'],
+		['enable-drive', 'true'],
+		['enable-printing', 'false'],
+		['drive-path', '/tmp/' . $connectionId],
 	];
 
 	if ($password != null && $username != null) {
-		$connectionData[] = "( " . $connectionId . ",'disable-auth','false' )";
-		$connectionData[] = "( " . $connectionId . ",'username', '".$username."' )";
-		$connectionData[] = "( " . $connectionId . ",'password', '".$password."' )";
-		$connectionData[] = "( " . $connectionId . ",'security', 'any' )";
+		$connectionData[] = ['disable-auth', 'false'];
+		$connectionData[] = ['username', $username];
+		$connectionData[] = ['password', $password];
+		$connectionData[] = ['security', 'any'];
 
 		if ($onresize != null) {
-			$connectionData[] = "( " . $connectionId . ",'resize-method', '".$onresize."' )";
+			$connectionData[] = ['resize-method', $onresize];
 		}
-
-	}else{
-		$connectionData[] = "( " . $connectionId . ",'disable-auth','true' )";
+	} else {
+		$connectionData[] = ['disable-auth', 'true'];
 	}
 
-	if($type == 'rdp'){
-		$connectionData[] = "( " . $connectionId . ",'disable-glyph-caching', 'true' )";
+	if ($type == 'rdp') {
+		$connectionData[] = ['disable-glyph-caching', 'true'];
 	}
 
-	$query = "insert into guacamole_connection_parameter ( connection_id , parameter_name , parameter_value ) values ". implode(',', $connectionData);
+	$placeholders = implode(',', array_fill(0, count($connectionData), '( ?, ?, ? )'));
+	$params = [];
+	foreach ($connectionData as $row) {
+		$params[] = $connectionId;
+		$params[] = $row[0];
+		$params[] = $row[1];
+	}
+
+	$query = "insert into guacamole_connection_parameter ( connection_id , parameter_name , parameter_value ) values " . $placeholders;
 	$statement = $db->prepare($query);
-	$statement->execute();
-	
+	$statement->execute($params);
 }
 
 function updateUserToken($username, $password, $pod)
@@ -333,23 +341,24 @@ function updateUserToken($username, $password, $pod)
 	
 	$db = checkDatabase();
 	$token = $result['authToken'];
-	$query = "delete from html5 where username = '" . $username . "';";
+	// $username arrives from the login form.
+	$query = "delete from html5 where username = ?";
 	$statement = $db->prepare($query);
-	$statement->execute();
-	$query = "delete from html5 where pod = '" . $pod . "';";
+	$statement->execute([$username]);
+	$query = "delete from html5 where pod = ?";
 	$statement = $db->prepare($query);
-	$statement->execute();
-	$query = "replace into html5 ( username , pod, token ) values ( '" . $username . "','" . $pod . "','" . $token . "');";
+	$statement->execute([$pod]);
+	$query = "replace into html5 ( username , pod, token ) values ( ?, ?, ? )";
 	$statement = $db->prepare($query);
-	$statement->execute();
+	$statement->execute([$username, $pod, $token]);
 }
 
 function getHtml5Token($userid)
 {
 	$db = checkDatabase();
-	$query = "select token from html5 where pod = " . $userid . " ;";
+	$query = "select token from html5 where pod = ?";
 	$statement = $db->prepare($query);
-	$statement->execute();
+	$statement->execute([$userid]);
 	$result = $statement->fetch();
 	return $result['token'];
 }
