@@ -24,6 +24,7 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: none
       - run: tools/php-lint.sh
+      - run: tools/run-tests.sh
 
   frontend-build:
     name: Frontend production build
