@@ -40,7 +40,6 @@ class Kernel extends HttpKernel
 
         'api' => [
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
-            \App\Http\Middleware\CorsMidware::class, 
             'throttle:60,1',
             'bindings',
         ],
@@ -61,6 +60,5 @@ class Kernel extends HttpKernel
         'guest' => \App\Http\Middleware\RedirectIfAuthenticated::class,
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'multilang' => \App\Http\Middleware\Multilang::class,
-        'cors' => \App\Http\Middleware\CorsMidware::class,
     ];
 }

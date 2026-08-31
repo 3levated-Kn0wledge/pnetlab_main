@@ -75,7 +75,11 @@ class DefaultController extends Controller
     function refreshToken()
     {
         $cookie = Cookie::get('token', '');
-        Cookie::queue(Cookie::make('token', $cookie, 60, '/', $_SERVER['SERVER_NAME']));
+        Cookie::queue(Cookie::make('token', $cookie, 60, '/', $_SERVER['SERVER_NAME'],
+            request()->isSecure(),  // Secure only when actually served over TLS
+            true,                   // HttpOnly
+            false,                  // not raw
+            'Lax'));                // SameSite
         Models::get('Admin/Users')->edit([
             DATA_KEY => [[[USER_USERNAME, '=', Auth::user()->{USER_USERNAME}]]],
             DATA_EDITOR => [USER_ONLINE_TIME => time(), USER_SESSION => time() + SESSION],
