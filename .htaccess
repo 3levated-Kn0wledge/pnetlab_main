@@ -1,18 +1,41 @@
 # vim: syntax=apache tabstop=4 softtabstop=0 noexpandtab laststatus=1 ruler
 
-# supress php errors
-php_flag display_startup_errors off
-php_flag display_errors off
-php_flag html_errors off
+# PHP settings.
+#
+# php_flag / php_value are mod_php directives. Under PHP-FPM — the only option
+# on a current LTS, where mod_php no longer ships — an unguarded php_value in
+# .htaccess is a fatal configuration error and Apache returns 500 for every
+# request. The guards below keep this working under mod_php while staying inert
+# under FPM.
+#
+# The same settings for PHP-FPM live in .user.ini alongside this file. Keep the
+# two in sync.
+<IfModule mod_php.c>
+	php_flag display_startup_errors off
+	php_flag display_errors off
+	php_flag html_errors off
+	php_flag log_errors on
+	php_value error_log /opt/unetlab/data/Logs/php_errors.txt
+	php_value session.gc_maxlifetime 86400
+	php_value post_max_size 200M
+	php_value upload_max_filesize 180M
+</IfModule>
+<IfModule mod_php7.c>
+	php_flag display_startup_errors off
+	php_flag display_errors off
+	php_flag html_errors off
+	php_flag log_errors on
+	php_value error_log /opt/unetlab/data/Logs/php_errors.txt
+	php_value session.gc_maxlifetime 86400
+	php_value post_max_size 200M
+	php_value upload_max_filesize 180M
+</IfModule>
 
-# enable PHP error logging
-php_flag log_errors on
-php_value error_log /opt/unetlab/data/Logs/php_errors.txt
-
-# PHP settings
-php_value session.gc_maxlifetime 86400
-php_value post_max_size 200M
-php_value upload_max_filesize 180M
+# .user.ini is read by PHP-FPM, not by Apache, so it is served as plain text
+# unless denied. It is not secret, but there is no reason to publish it.
+<Files ".user.ini">
+	Require all denied
+</Files>
 
 # TODO
 # ErrorDocument 403 /error.php
