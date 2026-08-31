@@ -1789,7 +1789,7 @@ class Lab
     {
         if (isset($name) && $name != '') {
             if (!isset($this->workbooks)) throw new Exception('No workbook created');
-            $workbook = array_find($this->workbooks, function ($item) use ($name) {
+            $workbook = unl_array_find_key($this->workbooks, function ($item) use ($name) {
                 return $item->name == $name;
             });
 
@@ -1827,7 +1827,7 @@ class Lab
             $this->workbooks = [];
         }
 
-        $workbook = array_find($this->workbooks, function ($item) use ($name) {
+        $workbook = unl_array_find_key($this->workbooks, function ($item) use ($name) {
             return $item->name == $name;
         });
 
@@ -1853,7 +1853,7 @@ class Lab
             throw new Exception('No workbook found');
         }
 
-        $workbook = array_find($this->workbooks, function ($item) use ($name) {
+        $workbook = unl_array_find_key($this->workbooks, function ($item) use ($name) {
             return $item->name == $name;
         });
 
@@ -1874,7 +1874,7 @@ class Lab
             throw new Exception('No workbook found');
         }
 
-        $workbook = array_find($this->workbooks, function ($item) use ($new_name) {
+        $workbook = unl_array_find_key($this->workbooks, function ($item) use ($new_name) {
             return $item->name == $new_name;
         });
 
@@ -1882,7 +1882,7 @@ class Lab
             throw new Exception('This workbook is already existed. Please chose another name');
         }
 
-        $workbook = array_find($this->workbooks, function ($item) use ($name) {
+        $workbook = unl_array_find_key($this->workbooks, function ($item) use ($name) {
             return $item->name == $name;
         });
         if ($workbook === false) {
@@ -1902,7 +1902,7 @@ class Lab
             throw new Exception('No workbook found');
         }
 
-        $src_workbook = array_find($this->workbooks, function ($item) use ($src_name) {
+        $src_workbook = unl_array_find_key($this->workbooks, function ($item) use ($src_name) {
             return $item->name == $src_name;
         });
         if ($src_workbook === false) {
@@ -1911,7 +1911,7 @@ class Lab
             $src_workbook = $this->workbooks[$src_workbook];
         }
 
-        $dest_workbook = array_find($this->workbooks, function ($item) use ($dest_name) {
+        $dest_workbook = unl_array_find_key($this->workbooks, function ($item) use ($dest_name) {
             return $item->name == $dest_name;
         });
         if ($dest_workbook === false) {
@@ -1963,7 +1963,7 @@ class Lab
     {
         if (!isset($this->workbooks)) throw new Exception('No workbook found');
 
-        $workbook = array_find($this->workbooks, function ($item) use ($name) {
+        $workbook = unl_array_find_key($this->workbooks, function ($item) use ($name) {
             return $item->name == $name;
         });
         if ($workbook === false) throw new Exception('Workbook not found');
