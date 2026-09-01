@@ -23,9 +23,14 @@
 #     needs factory/destroy first, or it fails with error_lab_running — which
 #     looks like a bug and is not one.
 #
+# This script's exit status is a gate, not decoration. It used to end on a
+# printf, so `$?` was that printf's and the suite reported success whatever
+# happened -- 47 assertions could all fail and a caller would see 0. Anything
+# added below must feed PASS/FAIL, and the exit at the bottom must stay last.
 set -uo pipefail
 B=http://127.0.0.1
 PASS=0; FAIL=0
+DP_PASS=0; DP_FAIL=0
 ok()   { printf "  \033[32mok\033[0m   %s\n" "$1"; PASS=$((PASS+1)); }
 bad()  { printf "  \033[31mFAIL\033[0m %s\n" "$1"; [ -n "${2:-}" ] && printf "       %s\n" "$2"; FAIL=$((FAIL+1)); }
 chk()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$3', got '$2'"; fi; }
@@ -99,7 +104,11 @@ chk "all three nodes report running"   "$STATUS" "3"
 
 echo
 echo "=============== DATA PLANE ==============="
-python3 - <<'PY'
+# The Python block reports its own tally on a PYRESULT line. Nothing used to
+# parse it, so a data-plane failure never reached FAIL: all eight pings could
+# break and the suite still printed "0 failed". tee keeps the live output.
+DPOUT=$(mktemp)
+python3 - <<'PY' | tee "$DPOUT"
 import socket, time, sys
 def vpcs(port, cmds, wait=1.5):
     try:
@@ -139,6 +148,16 @@ chk("'show ip' reports the configured address", "10.0.0.1" in r, r[-200:])
 print("PYRESULT %d %d" % (ok, fail))
 PY
 
+DPLINE=$(grep -m1 '^PYRESULT ' "$DPOUT" || true)
+rm -f "$DPOUT"
+if [ -z "$DPLINE" ]; then
+  # No tally at all: python3 died, or the block was edited without updating this.
+  bad "the data-plane block reported a result" "no PYRESULT line; treating as a failure"
+else
+  DP_PASS=$(echo "$DPLINE" | awk '{print $2}')
+  DP_FAIL=$(echo "$DPLINE" | awk '{print $3}')
+fi
+
 echo
 echo "=============== STOP AND CLEANUP ==============="
 for n in 1 2 3; do has "stop PC$n" "$(A -X POST $S/nodes/stop -d "{\"id\":\"$n\"}")" "80051"; done
@@ -162,5 +181,13 @@ has "delete the lab" "$(A -X DELETE $B/api/labs -d '{"path":"/func.unl"}')" "suc
 
 echo
 echo "============================================"
-printf "  shell assertions: %d passed, %d failed\n" "$PASS" "$FAIL"
+printf "  shell assertions:  %d passed, %d failed\n" "$PASS" "$FAIL"
+printf "  data-plane checks: %d passed, %d failed\n" "$DP_PASS" "$DP_FAIL"
 echo "============================================"
+
+TOTAL_FAIL=$((FAIL + DP_FAIL))
+if [ "$TOTAL_FAIL" -ne 0 ]; then
+  printf "  \033[31m%d assertion(s) failed\033[0m\n" "$TOTAL_FAIL"
+  exit 1
+fi
+exit 0
