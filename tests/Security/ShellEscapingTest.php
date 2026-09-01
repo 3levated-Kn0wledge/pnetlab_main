@@ -21,6 +21,8 @@ $swept = [
     'includes/functions.php',
     'devices/interfc.php',
     'devices/qemu/device_qemu.php',
+    'devices/qemu/device_qemu_wp.php',
+    'devices/qemu/device_qemu_directly.php',
 ];
 
 $violations = [];
