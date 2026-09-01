@@ -8,7 +8,18 @@
  * 
  */
 
-class device_qemu extends device
+/*
+ * The class name must match this file's basename.
+ *
+ * includes/__node.php:75-78 loads devices/<type>/device_<template>.php and then
+ * instantiates `device_<template>`. A file whose class is named anything else
+ * is a fatal waiting for the first node that uses that template: either
+ * "Cannot redeclare class" against the one device_<type>.php already required
+ * on the line above, or "Class not found" on the instantiation.
+ *
+ * tests/Security/DeviceClassNamesTest.php asserts this for every device file.
+ */
+class device_qemu_directly extends device
 {
 
     function __construct($node)
