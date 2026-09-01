@@ -1,38 +1,113 @@
 # PNETLab — privilege policy for the web user.
 #
-# Replaces the upstream file, which granted www-data unconditional root:
+# Install as /etc/sudoers.d/pnetlab with mode 0440, owned root:root, and remove
+# the upstream /etc/sudoers.d/unetlab. Validate with `visudo -cf` before
+# deploying; a malformed file locks sudo out entirely.
+#
+# ---------------------------------------------------------------------------
+# What this replaces
+# ---------------------------------------------------------------------------
+# Upstream ships, across /etc/sudoers and /etc/sudoers.d/unetlab:
 #
 #     www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/unl_wrapper
-#     www-data ALL=(ALL) NOPASSWD:ALL     <-- negates the line above
-#     %unl     ALL=(ALL) NOPASSWD:ALL     <-- every lab tenant is root
+#     www-data ALL=(ALL)  NOPASSWD: ALL      <-- negates the line above
+#     %www-data ALL=(ALL:ALL) NOPASSWD: ALL
+#     %unl     ALL=(ALL)  NOPASSWD: ALL
 #
-# sudo takes the LAST match, so the correctly-scoped first line never applied.
-# On a stock install `sudo -l -U www-data` resolves to "(ALL) NOPASSWD: ALL".
+# sudo takes the last match, so `sudo -l -U www-data` resolves to
+# "(ALL : ALL) NOPASSWD: ALL". The correctly-scoped first line never applied.
 #
-# Because the web layer has an unescaped-shell-interpolation surface, that made
-# every injection bug an immediate, unauthenticated host compromise.
+# The %unl grant is the worse of the two. Node start runs
+#     useradd -c "Unified Networking Lab TID=N" -g unl -M -s /bin/bash unlN
+# so every node session manufactures a Unix account with a login shell in a group
+# holding unconditional root, and those accounts are never removed. Nothing runs
+# under those accounts via sudo — they exist to own tap interfaces — so the grant
+# has no legitimate use and is simply dropped.
 #
-# STATUS: NOT YET COMPLETE. See install/README.md before deploying.
-# The web layer sudo-invokes roughly two dozen binaries directly, not only
-# unl_wrapper, so a minimal policy needs the full inventory first. Shipping only
-# the unl_wrapper line breaks packet capture, Docker consoles and node cleanup.
+# ---------------------------------------------------------------------------
+# What this policy is, and is not
+# ---------------------------------------------------------------------------
+# It is an allowlist of the 42 binaries the web layer actually invokes, derived
+# from the tree and kept honest by tests/Security/SudoersPolicyTest.php, which
+# fails if the code and this file drift apart.
+#
+# It is NOT a privilege boundary, and it should not be described as one.
+# At least a dozen entries below are root-equivalent no matter how they are
+# scoped — php and perl execute arbitrary code; tee, cp, mv, rm, chmod and chown
+# write or take ownership of arbitrary paths; docker mounts the host filesystem;
+# nohup and service launch arbitrary processes; useradd can create a second uid 0
+# account. Anyone who can influence the arguments to those can still become root.
+#
+# What it does buy, today:
+#   - removes the %unl group grant entirely
+#   - removes everything not on this list, so sudo su, sudo bash, sudo visudo,
+#     sudo passwd and the rest stop working
+#   - makes the remaining escalation surface explicit and countable rather than
+#     unbounded, which is what lets it be reduced
+#
+# The end state is that every entry below except unl_wrapper is removed, with its
+# behaviour moved behind the wrapper. Entries marked ROOT-EQUIVALENT should go
+# first. Until then, treat a compromise of the web layer as a host compromise.
 
 Defaults:www-data    !requiretty, umask_override, umask=0002
 
-# The platform wrapper. This is the intended entry point and must stay.
+# --- The platform wrapper: the intended entry point ------------------------
 www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/unl_wrapper
+www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/docker_wrapper
+www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/nsenter
 
-# TODO(phase-02): enumerate and scope the remaining call sites. Inventory of
-# binaries the web layer currently sudo-invokes directly, by reference count:
-#
-#   rm(13) ip(11) chown(9) docker(7) service(6) qemu-img(6) brctl(5) tunctl(4)
-#   ovs-vsctl(4) kill(4) echo(4) pkill(3) mkdir(3) fuser(3) touch(2) tc(2)
-#   php(2) nsenter(2) nc(2) ifconfig(2) dos2unix(2) docker_wrapper(2) dmidecode(2)
-#
-# Several take fully attacker-influenced arguments, so a NOPASSWD entry per
-# binary is not in itself a boundary. The intended end state is that all of
-# these move behind unl_wrapper, and this file keeps exactly one rule.
+# --- Network plumbing: bridges, taps, namespaces, NAT ----------------------
+www-data ALL=(root) NOPASSWD: /usr/sbin/ip
+www-data ALL=(root) NOPASSWD: /usr/sbin/brctl
+www-data ALL=(root) NOPASSWD: /usr/bin/tunctl
+www-data ALL=(root) NOPASSWD: /usr/bin/ovs-vsctl
+www-data ALL=(root) NOPASSWD: /usr/sbin/tc
+www-data ALL=(root) NOPASSWD: /usr/sbin/iptables
+www-data ALL=(root) NOPASSWD: /usr/sbin/ifconfig
+www-data ALL=(root) NOPASSWD: /usr/sbin/sysctl
 
-# Deliberately ABSENT — do not reinstate:
+# --- Process and node lifecycle -------------------------------------------
+www-data ALL=(root) NOPASSWD: /usr/bin/fuser
+www-data ALL=(root) NOPASSWD: /usr/bin/pkill
+www-data ALL=(root) NOPASSWD: /usr/bin/kill
+www-data ALL=(root) NOPASSWD: /usr/bin/nc
+
+# --- Read-only host inspection --------------------------------------------
+www-data ALL=(root) NOPASSWD: /usr/sbin/dmidecode
+www-data ALL=(root) NOPASSWD: /usr/bin/nproc
+www-data ALL=(root) NOPASSWD: /usr/bin/top
+www-data ALL=(root) NOPASSWD: /usr/bin/ps
+www-data ALL=(root) NOPASSWD: /bin/echo
+
+# --- Appliance control (availability impact only) -------------------------
+www-data ALL=(root) NOPASSWD: /usr/sbin/shutdown
+www-data ALL=(root) NOPASSWD: /usr/sbin/reboot
+www-data ALL=(root) NOPASSWD: /usr/sbin/ntpdate
+
+# --- ROOT-EQUIVALENT. Remove these first; route behind unl_wrapper. --------
+# Each of these can be turned into a root shell by anyone who controls its
+# arguments. They are listed because the product does not currently work without
+# them, not because granting them is acceptable.
+www-data ALL=(root) NOPASSWD: /usr/bin/php               # arbitrary code
+www-data ALL=(root) NOPASSWD: /usr/bin/perl              # arbitrary code
+www-data ALL=(root) NOPASSWD: /usr/bin/nohup             # launches anything
+www-data ALL=(root) NOPASSWD: /usr/sbin/service          # launches anything
+www-data ALL=(root) NOPASSWD: /usr/bin/docker            # -v /:/host
+www-data ALL=(root) NOPASSWD: /opt/unetlab/html/store/app/Console/Commands/idlepc
+www-data ALL=(root) NOPASSWD: /usr/bin/tee               # arbitrary file write
+www-data ALL=(root) NOPASSWD: /usr/bin/cp                # arbitrary file write
+www-data ALL=(root) NOPASSWD: /usr/bin/mv                # arbitrary file write
+www-data ALL=(root) NOPASSWD: /usr/bin/rm                # arbitrary deletion
+www-data ALL=(root) NOPASSWD: /usr/bin/chmod             # arbitrary mode change
+www-data ALL=(root) NOPASSWD: /usr/bin/chown             # arbitrary ownership
+www-data ALL=(root) NOPASSWD: /usr/bin/mkdir
+www-data ALL=(root) NOPASSWD: /usr/bin/touch
+www-data ALL=(root) NOPASSWD: /usr/bin/link
+www-data ALL=(root) NOPASSWD: /usr/bin/dos2unix
+www-data ALL=(root) NOPASSWD: /usr/bin/qemu-img          # reads/writes any path
+www-data ALL=(root) NOPASSWD: /usr/sbin/useradd          # can create a uid 0 account
+
+# --- Deliberately ABSENT. Do not reinstate. --------------------------------
 #   www-data ALL=(ALL) NOPASSWD:ALL
+#   %www-data ALL=(ALL:ALL) NOPASSWD:ALL
 #   %unl     ALL=(ALL) NOPASSWD:ALL
