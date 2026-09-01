@@ -223,6 +223,13 @@ review and several had been shipping for years.
 | Repo | `github.com:3levated-Kn0wledge/pnetlab_main`, SSH key present |
 | Verification | run lint and tests **on the VM**, not the workstation — `mgmt-host` runs AWX and k3s, and container churn there caused `hung_task` stalls |
 
+**Ubuntu 24.04 is the supported platform**, and the installer now says so: it
+warns once on any other release, naming what will break, and derives the PHP
+version from what the host can install rather than assuming 8.4 — so the fpm
+socket, the unit name and its drop-in follow. `--php-version` still pins it, and
+a pin it cannot satisfy is fatal. `docs/PLATFORM-SUPPORT.md` has the evidence
+and the 26.04 bring-up checklist.
+
 `tools/php-lint.sh` and `tools/run-tests.sh` take `PHP=` to select an
 interpreter. Both PHP 8.4 and 7.4 are installed on the VM, so the lint matrix in
 the numbers above is real; CI covers 8.4 and 8.5.
@@ -244,6 +251,7 @@ in the repository.
 | `docs/FINDINGS-LIVE-BOX.md` | Q1–Q8 answered against a running appliance |
 | `docs/FINDINGS-KERNEL.md` | the kernel investigation |
 | `docs/REFERENCE-ENVIRONMENT.md` | how the test host is built |
+| `docs/PLATFORM-SUPPORT.md` | what is supported, what 26.04 risks, and the checklist |
 | `docs/OFFLINE-FIRST.md` | the accepted architectural direction |
 | `platform/wrappers/src/README.md` | the wrapper core API and its provenance |
 | `docs/audit.html` | single-page summary of the live-box findings |
