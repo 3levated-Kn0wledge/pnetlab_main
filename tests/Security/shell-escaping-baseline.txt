@@ -1,0 +1,204 @@
+# Known-unfixed shell-injection sites. THIS LIST MUST ONLY EVER SHRINK.
+#
+# Every entry is a value that reaches a shell without escapeshellarg(), an
+# intval()/floatval(), or an (int) cast, found by the tokenizer sweep in
+# ShellEscapingTest.php. They are NOT exemptions and they are NOT safe. They are
+# the sweep's honest starting position, recorded so that anything new fails the
+# test while the pre-existing set stays visible instead of being papered over.
+#
+# The line-regex version of that test could not see a single one of these. It
+# reported zero violations for its whole life because it inspected nothing.
+#
+# FORMAT
+#   <path> <symbol>        one per line; blank lines and # lines are ignored.
+#
+# Identity is file plus symbol, deliberately not file plus line: line numbers
+# churn under every unrelated edit. See sweep_report() in ShellEscapingTest.php.
+# Current line numbers are printed by the test itself when an entry goes stale.
+#
+# TO REMOVE AN ENTRY
+#   Escape the value at its source, run tools/run-tests.sh, and delete the line
+#   the test reports as fixed. Bring SWEEP_BASELINE_MAX down with it.
+#
+# TO ADD ONE
+#   Don't. A new entry is a new way for request data to reach a shell. If it is
+#   genuinely unavoidable it belongs behind a `// sweep-exempt: <reason>` marker
+#   at the call site, naming the value — not in here.
+
+
+# --- 1. The QEMU binary path is built from request-controlled template fields ---
+#
+# devices/qemu/device_qemu.php:195-198 builds
+#     $bin .= '/opt/qemu-' . $qversion . '/bin/qemu-system-' . $qarch;
+# $qarch/$qversion come from $this->qemu_arch / $this->qemu_version, or from the
+# template array $p when those are empty. Both properties are set in editParams()
+# straight off the JSON request body with a (string) cast and nothing else.
+# $bin flows into $cmd and is executed via devices/device.php. The only filter on
+# the path is secureCmd(), which does not block backticks or $( ) — see group 8
+# and tests/Security/SecureCmdTest.php. A qemu_arch of "x86_64 `id`" is stopped by
+# nothing. This is the highest-severity entry in this file.
+devices/qemu/device_qemu.php $this->qemu_arch
+devices/qemu/device_qemu.php $this->qemu_version
+devices/qemu/device_qemu.php $p['qemu_arch']
+devices/qemu/device_qemu.php $p['qemu_version']
+devices/qemu/device_qemu_directly.php $this->qemu_arch
+devices/qemu/device_qemu_directly.php $this->qemu_version
+devices/qemu/device_qemu_directly.php $p['qemu_arch']
+devices/qemu/device_qemu_directly.php $p['qemu_version']
+
+# --- 2. Template option strings: exempt by design, but the marker names the ---
+# --- wrong symbol, so the marker no longer applies ---
+#
+# qemu_options / dynamips_options ARE argument injection by design (handover
+# point 4) and would legitimately carry a sweep-exempt marker. The markers that
+# exist do not cover these sites: at device_qemu.php:380 the marker sits on
+# `$flags .= ' ' . $qoptions;` while the value is assigned on the line ABOVE it,
+# and device_dynamips.php:57 has no marker at all. Fixing that means editing
+# devices/, so they are listed here rather than silently absorbed.
+devices/qemu/device_qemu.php $this->qemu_options
+devices/qemu/device_qemu.php $p['qemu_options']
+devices/qemu/device_qemu_directly.php $this->qemu_options
+devices/qemu/device_qemu_directly.php $p['qemu_options']
+devices/qemu/device_qemu_wp.php $this->qemu_options
+devices/qemu/device_qemu_wp.php $p['qemu_options']
+devices/dynamips/device_dynamips.php $this->dynamips_options
+
+# --- 3. getFlag(): per-interface flags built by 54 unswept subclasses ---
+#
+# The markers on the `$flags .= ' ' . $this->getFlag();` lines say they cover
+# "the template's qemu_options string". They do not: getFlag() concatenates
+# per-interface flags built in devices/qemu/*.php and devices/dynamips/adapters/*,
+# where nothing is escaped at all. Because the marker's stated reason does not
+# name getFlag, the sweep now walks through it and reports what it finds. That is
+# the correct answer; the markers are the thing that is wrong.
+# $flag here is customFlag()'s parameter — a template hook with no filter.
+devices/device.php preg_replace()
+devices/qemu/device_qemu.php $flag
+devices/qemu/device_qemu_directly.php $flag
+devices/qemu/device_qemu_wp.php $flag
+devices/dynamips/adapters/adapter.php preg_replace()
+devices/dynamips/adapters/nm_4t.php $this->flag
+devices/dynamips/adapters/nm_4t.php $this->slot
+devices/dynamips/adapters/pa_4t.php $this->flag
+devices/dynamips/adapters/pa_4t.php $this->slot
+devices/dynamips/adapters/pa_8t.php $this->flag
+devices/dynamips/adapters/pa_8t.php $this->slot
+devices/dynamips/adapters/wic_1t.php $this->flag
+devices/dynamips/adapters/wic_1t.php $this->slot
+devices/dynamips/adapters/wic_1t.php $this->subSlot
+devices/dynamips/adapters/wic_2t.php $this->flag
+devices/dynamips/adapters/wic_2t.php $this->slot
+devices/dynamips/adapters/wic_2t.php $this->subSlot
+devices/interfc.php $this->flag
+devices/interfc.php $this->socket_file
+
+# --- 4. Disk-image names in the three QEMU backends ---
+#
+# $disk_id = preg_replace('/^hd([a-z]+).qcow2$/', '$1', $filename) and friends,
+# concatenated into -hd/-drive/-device flags. In practice each is reached only
+# after a preg_match() of the same shape, so the value is [a-z]+ — but that is an
+# argument from the surrounding code, not a property of the value, and the sweep
+# cannot see it. str_replace()/ord() on the same paths are the same shape.
+# Cheapest real fix in this file: escape the built flag, or (int) the lun.
+devices/qemu/device_qemu.php preg_replace()
+devices/qemu/device_qemu.php str_replace()
+devices/qemu/device_qemu.php ord()
+devices/qemu/device_qemu_directly.php preg_replace()
+devices/qemu/device_qemu_directly.php str_replace()
+devices/qemu/device_qemu_directly.php ord()
+devices/qemu/device_qemu_wp.php preg_replace()
+devices/qemu/device_qemu_wp.php str_replace()
+devices/qemu/device_qemu_wp.php ord()
+devices/docker/device_docker.php preg_replace()
+
+# --- 5. The TiMOS family: template fields straight into the command line ---
+#
+# timos_line, management_address and timos_license are set from the raw request
+# body in editParams() and interpolated into -device/-netdev strings. These files
+# are three of the 54 devices/qemu/ subclasses that contain no escaping at all.
+devices/qemu/device_timos.php $this->timos_line
+devices/qemu/device_timos.php $this->management_address
+devices/qemu/device_timos.php $this->timos_license
+devices/qemu/device_timos.php preg_replace()
+devices/qemu/device_timoscpm.php $this->timos_line
+devices/qemu/device_timoscpm.php $this->management_address
+devices/qemu/device_timoscpm.php $this->timos_license
+devices/qemu/device_timoscpm.php preg_replace()
+devices/qemu/device_timosiom.php $this->timos_line
+devices/qemu/device_timosiom.php $this->management_address
+devices/qemu/device_timosiom.php $this->timos_license
+
+# --- 6. Node and lab identity read back out of accessors ---
+#
+# getSession()/getPort()/getRunningPath() return properties loaded from the
+# database. Not attacker-controlled on any path found so far, but not escaped
+# either, and they are the values every emulator command is built around.
+includes/__lab.php $this->session
+includes/__node.php $this->session
+includes/__node.php $this->port
+includes/functions.php $lab_session
+includes/functions.php $node_session
+devices/qemu/device_qemu.php $tpid[0]
+devices/qemu/device_qemu_directly.php $tpid[0]
+devices/qemu/device_qemu_wp.php $tpid[0]
+devices/qemu/device_qemu_wp.php $this->delay
+
+# --- 7. Legacy API filesystem commands ---
+#
+# api_folders.php:102  exec('rm -rf "' . BASE_LAB . $path . '" 2>&1')  and :160
+# the mv of $s to $d — folder paths taken off the request. Double quotes do not
+# stop $( ) or a backtick. These are the folder create/rename/delete routes the
+# functional suite does not cover either.
+# The $pid / $o[0] entries are values read back from a previous exec's output and
+# fed to kill(1) without a cast.
+includes/api_folders.php $path
+includes/api_folders.php $s
+includes/api_folders.php $d
+includes/api_labs.php $user['pod']
+devices/interfc.php $pid
+devices/interfc.php $o[0]
+devices/iol/device_iol.php $pid
+
+# --- 8. secureCmd() returns its input unescaped ---
+#
+# includes/functions.php `return $cmd;`. Several call sites treat secureCmd() as
+# the escape step; it is a blocklist of [#;|&] and '..' and lets through
+# backticks, $( ), newline, > and spaces. tests/Security/SecureCmdTest.php pins
+# exactly what it does and does not stop. Any call site reached through it —
+# including Admin/DefaultController.php's `sudo chown` on a template name —
+# is represented by this one entry.
+includes/functions.php $cmd
+
+# --- 9. The Laravel half, which the original sweep never reached at all ---
+#
+# None of these files was on the old 16-file list. Node_sessionsController runs
+# sudo mkdir/cp/mv/rm/chown on paths built from request input; DevicesController
+# runs `sudo <file>` on a template name; Query.php interpolates Guacamole proxy
+# credentials into a command line.
+store/app/Http/Controllers/Admin/Node_sessionsController.php $request->input()
+store/app/Http/Controllers/Admin/Node_sessionsController.php $qcowFile
+store/app/Http/Controllers/Admin/Node_sessionsController.php $qcowTree[]
+store/app/Http/Controllers/Admin/Node_sessionsController.php $imageQemu[0]
+store/app/Http/Controllers/Admin/Node_sessionsController.php $imageDocker[0]
+store/app/Http/Controllers/Admin/Node_sessionsController.php $item
+store/app/Http/Controllers/Admin/Node_sessionsController.php $o[0]
+store/app/Http/Controllers/Admin/Node_sessionsController.php $nodeSession->{}
+store/app/Http/Controllers/Admin/Node_sessionsController.php basename()
+store/app/Http/Controllers/Admin/Node_sessionsController.php dirname()
+store/app/Http/Controllers/Admin/Node_sessionsController.php preg_replace()
+store/app/Http/Controllers/Admin/DevicesController.php $request->input()
+store/app/Http/Controllers/Admin/DevicesController.php htmlspecialchars_decode()
+store/app/Helpers/Request/Query.php $p['proxy_ip']
+store/app/Helpers/Request/Query.php $p['proxy_port']
+store/app/Helpers/Request/Query.php $p['proxy_username']
+store/app/Helpers/Request/Query.php $p['proxy_password']
+store/app/Helpers/Admin/SystemHelper.php $path
+store/app/Helpers/Admin/SystemHelper.php $nodeSession->{}
+
+# --- 10. Manual root-only probes, not shipped code ---
+#
+# tools/integration/*.php are investigation artefacts run by hand as root on a
+# disposable host. Swept anyway, because they live in the tree and nothing marks
+# them as different.
+tools/integration/qemu-boot.php $this->rp
+tools/integration/qemu-name-injection.php $this->runpath
