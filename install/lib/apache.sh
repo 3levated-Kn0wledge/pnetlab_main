@@ -20,8 +20,18 @@ step_apache() {
 	#                       Apache 2.2 'deny from all' spelling. Without
 	#                       access_compat that is an "Invalid command" 500 for
 	#                       any request that reaches those directories.
+	# proxy, proxy_http:    the /html5/ reverse proxy to Jetty. proxy_fcgi
+	#                       already pulls in mod_proxy, but naming it is what
+	#                       makes the dependency visible.
+	# proxy_wstunnel:       the Guacamole console data plane is a WebSocket.
+	#                       mod_proxy_http will not perform the Upgrade, so
+	#                       without this consoles open and immediately die.
+	#                       Enabled unconditionally, even when the guacamole
+	#                       step is skipped: the vhost template names ws:// and
+	#                       Apache refuses to start on an unknown ProxyPass
+	#                       scheme, so this and the vhost are one change.
 	local m
-	for m in proxy_fcgi setenvif rewrite headers access_compat; do
+	for m in proxy_fcgi proxy proxy_http proxy_wstunnel setenvif rewrite headers access_compat; do
 		if [[ -e "/etc/apache2/mods-enabled/${m}.load" || -e "/etc/apache2/mods-enabled/${m}.conf" ]]; then
 			dim "mod_${m} already enabled"
 		else

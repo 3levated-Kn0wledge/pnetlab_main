@@ -52,6 +52,51 @@
 		</FilesMatch>
 	</Directory>
 
+	# --- HTML5 consoles ---------------------------------------------------
+	#
+	# Jetty serves the Guacamole web application on 127.0.0.1:8080 and nowhere
+	# else (install/guacamole/jetty-http-loopback.ini). Apache is its only
+	# client, and this is the whole of the front-door configuration.
+	#
+	# The context path is /html5 on BOTH sides, deliberately.
+	# includes/functions.php posts to http://127.0.0.1/html5/api/tokens and
+	# devices/device.php returns /html5/#/client/<b64>?token=<t>, so the path
+	# the browser uses and the servlet context path have to agree. The PNETLab
+	# appliance proxies /html5/ to a context called /guacamole instead, which
+	# works but leaves absolute redirects, cookie paths and WebSocket upgrade
+	# URLs permanently disagreeing with each other. The installer deploys the
+	# war AS html5.war so that no renaming happens anywhere.
+	#
+	# ProxyPass inside <Location> sets r->proxyreq during translation, so these
+	# requests never reach the AllowOverride All .htaccess chain above, which
+	# would otherwise rewrite /html5/... into store/public and 404 it.
+	#
+	# NOTE: the guacamole install step is optional. If it was skipped, these
+	# blocks proxy to a port with nothing on it and /html5/ returns 503. That is
+	# the correct behaviour — updateUserToken() has a 5s timeout and treats an
+	# unreachable console service as a warning, not a login failure.
+	<Location /html5/>
+		Require all granted
+		ProxyPass        http://127.0.0.1:8080/html5/ flushpackets=on
+		ProxyPassReverse http://127.0.0.1:8080/html5/
+	</Location>
+
+	# The console data plane. It must be ws://, not http:// — mod_proxy_http
+	# will not perform the Upgrade, and the symptom is a console that opens,
+	# shows a black rectangle and then disconnects.
+	#
+	# This block comes AFTER the one above on purpose: Apache applies <Location>
+	# sections in the order they appear, so of the two that match a
+	# websocket-tunnel request, the last one wins. Moving it above /html5/ would
+	# silently disable WebSocket tunnelling and fall the client back to the HTTP
+	# tunnel, which works but is markedly slower and logs
+	# "Using HTTP tunnel (not WebSocket). Performance may be sub-optimal."
+	<Location /html5/websocket-tunnel>
+		Require all granted
+		ProxyPass        ws://127.0.0.1:8080/html5/websocket-tunnel
+		ProxyPassReverse ws://127.0.0.1:8080/html5/websocket-tunnel
+	</Location>
+
 	# Large lab and image uploads; matches post_max_size in .user.ini.
 	LimitRequestBody 209715200
 
