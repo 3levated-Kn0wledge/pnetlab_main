@@ -4,23 +4,16 @@
 #
 # Read this before assuming the step is broken. It is not: the application is.
 #
-#   store/ is Laravel 5.5 on a tree that this fork runs under PHP 8.4.
-#   composer install refuses outright (36 packages pinned below PHP 8, plus a
-#   composer-plugin-api ^1.0 requirement Composer 2 cannot satisfy). Forcing it
-#   with --ignore-platform-reqs --no-plugins --no-scripts does produce a
-#   vendor/autoload.php, and the application then fatals at RUNTIME:
+#   store/ is Laravel 10 running on PHP 8.4. It used to be Laravel 5.5, which
+#   could not run on 8.x at all — Illuminate's container called
+#   ReflectionParameter::getClass() (removed behaviour in 8.0) and
+#   Collection::offsetExists() violated ArrayAccess's 8.1 return type. That was
+#   fixed by the Laravel 10 upgrade, so composer install is now part of a normal
+#   install rather than an opt-in that buys you nothing.
 #
-#     - Illuminate's container calls ReflectionParameter::getClass(), removed
-#       in PHP 8.0
-#     - Illuminate\Support\Collection::offsetExists() has no return type, which
-#       violates ArrayAccess from PHP 8.1
-#
-#   So a forced vendor/ buys a different error message, not a working admin UI.
-#   docs/REFERENCE-ENVIRONMENT.md records the same conclusion from the other
-#   direction. Rebuilding store/ on a supported framework is Phase 03 work.
-#
-# This step therefore does the parts that are real — the environment file and
-# its APP_KEY — and reports the rest instead of pretending.
+#   It is still the only step that reaches Packagist. --skip store leaves the
+#   admin UI unavailable but the legacy API fully working, which is a reasonable
+#   choice for an air-gapped build where vendor/ is delivered another way.
 
 step_store() {
 	step "Laravel application (store/)"
@@ -31,15 +24,12 @@ step_store() {
 
 	if [[ -f "$autoload" ]]; then
 		ok "store/vendor is present"
-		warn "store/vendor exists, but Laravel 5.5 still fatals at runtime on
-             PHP ${PHP_VERSION} (ReflectionParameter::getClass(),
-             Collection::offsetExists()). Expect the admin UI to return 500.
-             The legacy API at /api is unaffected."
+		ok "store/vendor is present"
 		return 0
 	fi
 
-	if [[ "${WITH_STORE_VENDOR:-0}" != 1 ]]; then
-		skip "composer install (not attempted)"
+	if [[ "${WITHOUT_STORE_VENDOR:-0}" == 1 ]]; then
+		skip "composer install (--without-store-vendor)"
 		note "The Laravel admin UI at / will NOT work on this install.
              store/vendor is absent, so store/public/index.php fatals on its
              require of vendor/autoload.php. This is expected and known:
@@ -127,10 +117,8 @@ attempt_composer_install() {
 		return 0
 	fi
 
-	warn "running composer install. This reaches Packagist — the only step in
-             this installer that talks to anything outside the distro archives
-             and the PHP PPA. It will produce a vendor/ directory and the admin
-             UI will still not work."
+	note "running composer install. This is the only step that reaches Packagist,
+             rather than the distribution archives and the PHP PPA."
 
 	local rc=0
 	( cd "${WEB_ROOT}/store" && \
@@ -144,7 +132,5 @@ attempt_composer_install() {
 	fi
 
 	run chown -R root:root "${WEB_ROOT}/store/vendor"
-	warn "composer install completed. store/vendor now exists and Laravel will
-             get further before it fatals — it does not make the admin UI work.
-             Rebuilding store/ is Phase 03."
+	ok "composer install completed; store/vendor is in place"
 }

@@ -170,7 +170,7 @@ verify_http() {
 	if [[ "$code" == 200 ]]; then
 		printf '    %s[ ok ]%s GET / -> 200 (the Laravel UI is answering)\n' "$C_GREEN" "$C_RESET"
 	else
-		printf '    %s[info]%s GET / -> %s — expected while store/vendor is absent; see the store step\n' \
+		printf '    %s[info]%s GET / -> %s — the admin UI is served here\n' \
 			"$C_YELLOW" "$C_RESET" "${code:-no response}"
 	fi
 }

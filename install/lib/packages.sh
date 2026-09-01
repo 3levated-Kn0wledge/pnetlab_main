@@ -23,7 +23,8 @@ php_packages() {
 base_packages() {
 	# curl is here for the loopback verification step, not for the
 	# application: nothing in this installer fetches anything with it.
-	printf '%s\n' apache2 mariadb-server mariadb-client rsync ca-certificates curl
+	# composer and unzip are needed by the store step, which is no longer optional
+	printf '%s\n' apache2 mariadb-server mariadb-client rsync ca-certificates curl composer unzip
 }
 
 # Host tooling the web layer shells out to when it drives real nodes. Not

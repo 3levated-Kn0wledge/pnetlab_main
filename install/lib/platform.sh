@@ -58,6 +58,17 @@ step_platform() {
 		fi
 	fi
 
+	# --- image directories ----------------------------------------------
+	# includes/api_nodes.php scandir()s /opt/unetlab/addons/<type>/ when listing
+	# templates. A missing directory is not treated as "no images available" —
+	# it raises, and the whole template list endpoint returns 400, which makes
+	# the node-add dialog empty. Create them whether or not images are present.
+	for _dir in qemu iol dynamips docker; do
+		run install -d -m 0755 -o root -g root "/opt/unetlab/addons/${_dir}"
+	done
+	run install -d -m 0755 -o root -g root /opt/unetlab/addons/iol/bin /opt/unetlab/addons/iol/lib
+	ok "addons directories created (qemu, iol, dynamips, docker)"
+
 	# --- the tenant group node start needs ------------------------------
 	# unl_wrapper runs useradd -g unl for every node session. Without the group
 	# that fails and no node starts.

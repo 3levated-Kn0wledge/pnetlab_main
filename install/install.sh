@@ -35,7 +35,7 @@ SCHEMA_DIR="${SRC_DIR}/install/sql/schema"
 PRUNE=0
 RESET_ADMIN=0
 WITH_NODE_TOOLS=0
-WITH_STORE_VENDOR=0
+WITHOUT_STORE_VENDOR=0
 STRIP_SUDOERS_GRANTS=0
 ONLY=''
 SKIP=''
@@ -72,8 +72,10 @@ Options:
                            RESETS the administrator password to 'pnet'.
   --with-node-tools        also install the host binaries the sudo policy
                            allowlists (iproute2, bridge-utils, qemu-utils, ...)
-  --with-store-vendor      attempt composer install for store/. Reaches
-                           Packagist, and does NOT make the admin UI work.
+  --without-store-vendor   skip composer install for store/. The admin UI will
+                           not work, but the legacy API will. Use this for an
+                           air-gapped build where vendor/ arrives another way;
+                           it is the only step that reaches Packagist.
   --strip-sudoers-grants   comment out any surviving blanket NOPASSWD:ALL for
                            www-data or %unl, validating before and after
   -h, --help               this text
@@ -94,7 +96,7 @@ while [[ $# -gt 0 ]]; do
 		--prune)                PRUNE=1; shift ;;
 		--reset-admin)          RESET_ADMIN=1; shift ;;
 		--with-node-tools)      WITH_NODE_TOOLS=1; shift ;;
-		--with-store-vendor)    WITH_STORE_VENDOR=1; shift ;;
+		--without-store-vendor) WITHOUT_STORE_VENDOR=1; shift ;;
 		--strip-sudoers-grants) STRIP_SUDOERS_GRANTS=1; shift ;;
 		-h|--help)              usage; exit 0 ;;
 		*) printf 'unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -154,6 +156,17 @@ validate_step_names() {
 
 # --- preflight -------------------------------------------------------------
 step_preflight() {
+	# A half-finished dpkg transaction makes every apt call fail with exit 100 and
+	# a message about running `dpkg --configure -a`. It is common after a VM
+	# snapshot rollback or a killed apt run. Catch it here rather than three
+	# minutes into the package step.
+	if compgen -G '/var/lib/dpkg/updates/*' >/dev/null 2>&1; then
+		die "dpkg has an interrupted transaction; run: sudo dpkg --configure -a"
+	fi
+	if have fuser && fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+		die "another package manager holds the dpkg lock; wait for it to finish"
+	fi
+
 	step "Preflight"
 
 	if [[ -r /etc/os-release ]]; then
