@@ -59,14 +59,15 @@ time, including against a host somebody else built.
   `install/sql/schema/` or tells you the tables are missing and that the
   application will fail on every query. It does not invent a schema and it does
   not report success over an empty database.
-- **It does not make the Laravel admin UI work.** It cannot. `store/` is
-  Laravel 5.5; `composer install` fails outright on PHP 8.4, and forcing it with
-  `--ignore-platform-reqs --no-plugins --no-scripts` produces a `vendor/` that
-  then fatals at runtime (`ReflectionParameter::getClass()`,
-  `Collection::offsetExists()`). `--with-store-vendor` will run that forced
-  install if you ask, and says plainly that it buys a different error rather
-  than a working UI. What does work after an install is the legacy API, the
-  themes, and the platform layer.
+- **It reaches Packagist for the Laravel admin UI, and only for that.** `store/`
+  is Laravel 12 on PHP 8.4, so `composer install` is part of a normal install
+  rather than an opt-in that buys a different error. This paragraph used to say
+  the UI could not be made to work at all, because `store/` was Laravel 5.5 and
+  fatalled at runtime on `ReflectionParameter::getClass()` and
+  `Collection::offsetExists()`; that stopped being true with the 5.5 -> 10
+  upgrade and is recorded here because the claim outlived the fact.
+  `--without-store-vendor` skips the step for an air-gapped build, and leaves
+  the legacy API, the themes and the platform layer working.
 - **It does not build the frontend.** `npm run production` must run from the
   repository root before deploying (`docs/BUILD.md`); the installer warns if the
   bundle is absent rather than running npm itself.
