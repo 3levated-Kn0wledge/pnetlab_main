@@ -18,7 +18,7 @@ readonly PHP_PPA='ppa:ondrej/php'
 # resolution below picks the newest FPM the host can actually install and says
 # so, rather than adding a repository that 404s and dying in the middle of apt.
 #
-# The floor is 8.2 because store/ is Laravel 10, whose own floor is 8.1, and the
+# The floor is 8.2 because store/ is Laravel 11, whose own floor is 8.2, and the
 # legacy tree was moved to 8.x idioms wholesale (see the php8.4 commits). Below
 # 8.2 nothing here has ever been linted, so refuse rather than half-work.
 readonly PHP_MIN_VERSION='8.2'
@@ -119,7 +119,7 @@ php_newest_available() {
 php_version_floor_check() {
 	version_ge "$1" "$PHP_MIN_VERSION" ||
 		die "PHP ${1} is below the ${PHP_MIN_VERSION} floor this tree requires.
-    store/ is Laravel 10 and the legacy tree was moved to 8.x idioms wholesale;
+    store/ is Laravel 11 and the legacy tree was moved to 8.x idioms wholesale;
     nothing here has been linted below ${PHP_MIN_VERSION}. Pass --php-version
     with a version the host can install, or install a newer PHP first."
 }

@@ -31,7 +31,17 @@ $removed = [
 $root = dirname(__DIR__, 1) . '/..';
 $root = realpath(__DIR__ . '/../..');
 
-$skip = ['/.git/', '/store/vendor/', '/store/node_modules/', '/node_modules/', '/tests/'];
+// Generated code is not this project's source, which is why vendor/ and
+// node_modules/ are here. store/storage/framework/views/ belongs in the same
+// category and was missing: Blade compiles into it at runtime, so a checkout
+// that has ever booted the application in place carries compiled views, and one
+// of them is Laravel 11's own debug exception page -- which inlines a minified
+// highlight.js containing `e.split(a)`. The lookbehind below excludes
+// `[\w$>:]` but not `.`, so a JS method call reads as a call to PHP's removed
+// split(), and the suite fails pointing at a file no one wrote. Found during
+// the Laravel 11 upgrade; the residue was a boot test run, not a code change.
+$skip = ['/.git/', '/store/vendor/', '/store/node_modules/', '/node_modules/', '/tests/',
+         '/store/storage/framework/views/'];
 
 $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
 $found = [];

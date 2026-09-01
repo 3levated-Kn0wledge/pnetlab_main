@@ -1,6 +1,6 @@
 <?php
 /**
- * Evidence that the Laravel 10 application boots. There was none.
+ * Evidence that the Laravel application boots. There was none.
  *
  * Laravel 5.5 -> 10.50.3 is the largest change on this branch, and until this
  * file nothing automated exercised it beyond `php -l`. CI never runs
@@ -15,7 +15,7 @@
  *
  * WHY IT IS HERE AND NOT IN store/tests/Feature/ UNDER PHPUnit.
  *
- * PHPUnit 10.5 is already a dev dependency, store/phpunit.xml exists and runs,
+ * PHPUnit is already a dev dependency, store/phpunit.xml exists and runs,
  * and a Feature test would be the natural home. It is not the right home here,
  * for one decisive reason:
  *
@@ -53,8 +53,16 @@ foreach ((isset($lock['packages']) ? $lock['packages'] : []) as $p) {
     if ($p['name'] === 'laravel/framework') { $framework = $p['version']; break; }
 }
 assert_true($framework !== null, 'store/composer.lock pins laravel/framework');
-assert_true($framework !== null && strpos(ltrim($framework, 'v'), '10.') === 0,
-    "laravel/framework is still on 10.x (locked: " . var_export($framework, true) . ")");
+
+// The pinned major line. This is asserted, rather than merely read, because the
+// lockfile is the only place the framework version is written down that is
+// under version control -- store/vendor is gitignored -- so a lockfile that has
+// drifted off the line composer.json asks for is the one upgrade failure no
+// other assertion in this file can see. Bump it deliberately, as part of an
+// upgrade, and never to make a red run green.
+$LARAVEL_LINE = '11.';
+assert_true($framework !== null && strpos(ltrim($framework, 'v'), $LARAVEL_LINE) === 0,
+    "laravel/framework is on {$LARAVEL_LINE}x (locked: " . var_export($framework, true) . ")");
 
 // The absolute require above is the reason this test lives here. If it is ever
 // removed, this assertion fails and the comment at the top needs rewriting —
@@ -97,14 +105,33 @@ if ($store === null || !is_file('/opt/unetlab/html/includes/init.php')) {
 // So the request assertions are skipped, loudly, rather than reported as
 // failures. Run the suite as www-data or root — php-fpm serves as www-data, so
 // that is the view of the application worth asserting — and they execute.
+//
+// A .env that is *absent* has to be treated the same way, and for a reason that
+// cost this session an hour during the Laravel 11 hop. The candidate loop above
+// prefers this checkout whenever it has a store/vendor, and building one there
+// is exactly what a `composer update` during an upgrade does. The checkout has
+// no .env -- it is gitignored, and only the deployed tree ever gets one -- so
+// the loop then boots a tree with a framework but no APP_KEY, and the four
+// request assertions fail with 500s that read precisely like a framework
+// upgrade having broken the application. They had not. Skip loudly instead, and
+// say which of the two cases it is, so the message names the cause.
 $envPath = $store . '/.env';
-$skipRequests = is_file($envPath) && !is_readable($envPath);
-if ($skipRequests) {
+$envMissing    = !is_file($envPath);
+$envUnreadable = !$envMissing && !is_readable($envPath);
+$skipRequests  = $envMissing || $envUnreadable;
+if ($envUnreadable) {
     $who = function_exists('posix_getpwuid')
         ? posix_getpwuid(posix_geteuid())['name'] : 'this user';
     echo "  note  request assertions skipped: $envPath is not readable\n";
     echo "        by $who, so APP_KEY is absent and every request below would return\n";
     echo "        500 on that alone. Run the suite as www-data or root to exercise them.\n";
+} elseif ($envMissing) {
+    echo "  note  request assertions skipped: $envPath does not exist, so APP_KEY is\n";
+    echo "        absent and every request below would return 500 on that alone. This is\n";
+    echo "        the tree the boot half chose ($store); a checkout that has\n";
+    echo "        acquired a store/vendor is preferred over the deployment, and a checkout\n";
+    echo "        never has a .env. Remove that vendor directory, or run against the\n";
+    echo "        deployed tree, to exercise them.\n";
 }
 
 require_once $store . '/vendor/autoload.php';

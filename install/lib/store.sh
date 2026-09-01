@@ -4,7 +4,7 @@
 #
 # Read this before assuming the step is broken. It is not: the application is.
 #
-#   store/ is Laravel 10 running on PHP 8.4. It used to be Laravel 5.5, which
+#   store/ is Laravel 11 running on PHP 8.4. It used to be Laravel 5.5, which
 #   could not run on 8.x at all — Illuminate's container called
 #   ReflectionParameter::getClass() (removed behaviour in 8.0) and
 #   Collection::offsetExists() violated ArrayAccess's 8.1 return type. That was
