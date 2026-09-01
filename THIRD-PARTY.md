@@ -14,9 +14,10 @@ unlike `README.md` and `SECURITY.md`, which are excluded and are meant to be,
 this one is the thing BSD-3 clause 2 asks to accompany a binary distribution.
 If you package this project by any other means, include it.
 
-> This is an attribution inventory, not the project's own licence. For the
-> project's licence position — including which parts of this tree carry no
-> licence grant at all — see [`docs/LICENSING.md`](docs/LICENSING.md).
+> This is an attribution inventory, not the project's own licence. The fork's
+> own work is licensed BSD-3-Clause — see [`LICENSE`](LICENSE), whose scope
+> section names what that grant does *not* cover. The evidence and the full
+> position are in [`docs/LICENSING.md`](docs/LICENSING.md).
 
 ---
 
@@ -73,20 +74,25 @@ original authors.
 or EVE-NG Ltd.** The BSD-3-Clause non-endorsement condition is taken seriously:
 neither name is used to promote this fork.
 
-### Files whose notice was removed before this fork existed
+### Files whose notice was removed before this fork existed — restored
 
 Nine files in this tree are recognisably the same works as BSD-3-licensed files
-in `dainok/unetlab` but reached this repository with their notice removed or
-replaced. They are listed in `docs/LICENSING.md` §2.2. Restoring those notices
-is an open item on this project's pre-publication checklist. Until it is done,
-this section is where the attribution lives:
+in `dainok/unetlab` but reached this repository with their notice removed or, in
+one case, replaced by a different attribution. **The notices have been restored**,
+transcribed from the corresponding upstream file, and
+`tests/Licensing/LicenceTest.php` fails if any of them loses one again:
 
 `api.php`, `includes/functions.php`, `includes/init.php`, `includes/__lab.php`,
 `includes/__node.php`, `themes/default/js/functions.js`,
 `themes/default/js/javascript.js`, `platform/wrappers/unl_wrapper`, and
 `devices/interfc.php` (upstream `html/includes/__interfc.php`) are derived from
 UNetLab, copyright 2014-2016 Andrea Dainese, licensed BSD-3-Clause as above, and
-have been substantially modified since.
+have been substantially modified since by PNETLab and by this fork.
+
+`devices/interfc.php` carries **both** attributions — Dainese's, then the
+`@author LIN / @copyright pnetlab.com` block that had replaced it. Replacing one
+with the other in either direction would repeat the original mistake. See
+`docs/LICENSING.md` section 2.2.
 
 ---
 
@@ -178,15 +184,22 @@ npm dependencies used at build time are resolved from `package-lock.json`
 
 | Font | Licence | Location |
 |---|---|---|
-| Ubuntu font family | Ubuntu Font Licence 1.0 | `themes/default/fonts/`, licence at `themes/default/fonts/LICENCE.txt` |
+| Ubuntu font family | Ubuntu Font Licence 1.0 | `themes/default/fonts/`, licence at `themes/default/fonts/LICENCE.txt`. **Ubuntu Bold is also the offline captcha font** — see below. |
 | Font Awesome 4.5.0 | Fonts: SIL OFL 1.1 · Code: MIT | `themes/default/fonts/`, `store/public/extensions/icons/fonts/`, `store/public/main/css/fonts/` |
 | Glyphicons Halflings | Distributed with Bootstrap under Bootstrap's terms | `themes/default/bootstrap/fonts/` |
 | Open Sans | Apache-2.0 | `fonts/vendor/primereact/resources/themes/nova-light/` |
 
-`store/app/Helpers/Captcha/ARIALBD.TTF` is **not** listed above because it has no
-licence permitting its redistribution. It is Arial Bold, © 2014 The Monotype
-Corporation, all rights reserved, and its removal is an open item on this
-project's pre-publication checklist (`docs/LICENSING.md` §3).
+`store/app/Helpers/Captcha/ARIALBD.TTF` — Arial Bold, © 2014 The Monotype
+Corporation, all rights reserved — **has been removed.** It had no licence
+permitting its redistribution and it arrived with the upstream import.
+
+The captcha now takes the first font it finds from an ordered list
+(`App\Helpers\Captcha\Captcha::$FONTS`): DejaVu Sans Bold from
+`fonts-dejavu-core` (Bitstream Vera licence plus the DejaVu public-domain
+amendment), then Liberation Sans Bold (SIL OFL 1.1), then
+`themes/default/fonts/Ubuntu-B.ttf` from this repository under the Ubuntu Font
+Licence 1.0. The last is the guaranteed one: it ships with the appliance, so the
+captcha renders with no font package installed and no network.
 
 ---
 

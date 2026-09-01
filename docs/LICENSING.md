@@ -1,70 +1,116 @@
 # The licence position
 
-**Status: assessment, 2026-09-01. Written for Phase 02.5. No decision taken.**
+**Status: decided and adopted, 2026-09-01. The fork's own work is licensed
+BSD-3-Clause; `LICENSE` is at the repository root.**
 
-The roadmap says the licence position "gates going public as hard as any
-security item and deserves a decision, not a deferral". This document is the
-evidence for that decision. It does not take it: adopting a licence is the
-owner's call, and no `LICENSE` file is added here.
+**The repository is not yet publishable.** Those two sentences are not in
+tension, and the distinction between them is the most important thing in this
+document — see "Adopted is not published", below.
+
+The roadmap said the licence position "gates going public as hard as any
+security item and deserves a decision, not a deferral". The decision is taken.
+What remains is a set of *tracked gaps*: named components the adopted licence
+does not and cannot cover, each with an owner-visible cost, listed in section 6
+and gating publication in section 10.
 
 **This is an engineering assessment, not legal advice.** Neither the author nor
 the reader is a lawyer. Everything below is either a fact measured from the tree
 (counts, paths, headers, upstream comparisons — all reproducible with the
-commands shown) or an inference about what a licence *appears* to oblige. The
-inferences are marked. Three points where a real opinion is warranted before
-publishing are listed at the end, in their own section, so they are not lost in
-the detail.
+commands in the appendix) or an inference about what a licence *appears* to
+oblige. The inferences are marked. Three points where a real opinion is
+warranted before publishing are in section 9, so they are not lost in the
+detail.
 
 ---
 
-## The position in five sentences
+## Adopted is not published
 
-The fork declares no licence, and neither does the thing it was forked from:
-`pnetlab/pnetlab_main` has `"license": null` in the GitHub API and no `LICENSE`
-file, which means PNETLab's own code is **all rights reserved by default** —
-readable and forkable on GitHub, but with no grant to redistribute it anywhere
-else. Layered under that is a substantial UNetLab/EVE-NG inheritance: **130
-files carry an intact BSD-3-Clause notice**, which is a real and usable grant,
-but **at least nine further files are provably the same lineage with the notice
-removed or replaced**, which is the one condition BSD-3 actually imposes. On top
-of both sit third-party components with their own terms, one of which —
-CKEditor 5, **GPL-2.0-or-later** — is compiled into JavaScript bundles that are
-committed to this repository. Two smaller items are unambiguous and cheap to
-fix: a proprietary Monotype **Arial Bold** font file, and a 9.4 MB opaque
-prebuilt binary of unknown provenance. The Cisco IOL keygen, which the brief
-flagged as a likely blocker, **is not in this repository** — only a call site
-that would run it if an operator put it there — and that is a defensible place
-to be, though it should be made deliberate rather than incidental.
+Adopting BSD-3-Clause in the repository and publishing the repository under it
+are two different acts, and only the first has happened.
 
----
+Adding `LICENSE` sets a standard. It says what the project intends, it makes
+every future contribution inbound-equals-outbound under GitHub's terms, and it
+gives every subsequent decision something to be measured against. It costs
+nothing to be wrong about today, because the repository is private.
 
-## 1 · What the repository declares today
+Publishing is a **statement to a recipient about what they may redistribute**.
+While a component remains in the tree that the adopted licence cannot cover, a
+public repository carrying a bare BSD-3 `LICENSE` would be telling every
+recipient something untrue. That is materially worse than the position the
+project is in today. Declaring nothing, as the repository did until now, leaves
+a reader to work it out and be cautious. Declaring BSD-3 over a tree containing
+GPL-linked bundles and an unlicensed upstream body invites a reader to rely on
+a grant nobody has the standing to make, and it is the fork — not upstream —
+that would have made it.
 
-Measured, not remembered.
+So the shape of the position is:
 
-| Question | Answer |
+| | |
 |---|---|
-| Root `LICENSE` / `COPYING` / `NOTICE`? | **None.** `find` over the tree returns no root licence file of any name. |
-| Licence files anywhere in the tree? | **Two**, both belonging to bundled third parties: `includes/Slim/LICENSE` (MIT, Josh Lockhart 2012) and `themes/default/fonts/LICENCE.txt` (Ubuntu Font Licence 1.0). |
-| `composer.json` license field | `store/composer.json` line 8: `"license": "MIT"`. |
-| `package.json` license field | **Absent.** Root `package.json` declares `"private": true` and no `license`. |
-| `README.md` | Developer notes on templates and device files. No licence statement, no copyright line, no attribution to UNetLab or EVE-NG. |
-| `SECURITY.md` | Disclosure policy only. |
+| **Now** | `LICENSE` adopted. Its scope section names exactly what it does not cover. `THIRD-PARTY.md` carries the attribution. Non-compliant components are tracked gaps, not blockers on the decision. |
+| **Before publishing** | Every tracked gap in section 6 is closed or consciously accepted by the owner, and the "no known-incompatible component remains" gate in section 10 is signed off. |
 
-### The `"license": "MIT"` in `store/composer.json` is not a licence grant
+This is why `LICENSE` is not a bare licence text. Its second half states, in the
+file a recipient reads first, that the grant covers the fork's own work; that
+130 files are inherited under BSD-3 from UNetLab/EVE-NG; that a substantial body
+inherited from PNETLab carries **no grant at all**; and that the committed
+frontend bundles carry GPL-2.0-or-later terms. A recipient who reads only
+`LICENSE` still gets the truth.
 
-It is the stock field from the Laravel skeleton, and it survived the Laravel
-5.5 → 10 rebuild. Read literally it asserts that the package named
+---
+
+## The position, in short
+
+The fork now declares BSD-3-Clause over its own work. It was forked from
+`pnetlab/pnetlab_main`, which declares nothing — `"license": null` in the GitHub
+API, no `LICENSE` file — so PNETLab's own code is **all rights reserved by
+default**: readable and forkable on GitHub, with no grant to redistribute it
+anywhere else. Under that sits a substantial UNetLab/EVE-NG inheritance where
+**130 files carry an intact BSD-3-Clause notice**, a real and usable grant, and
+where **nine further files were provably the same lineage with the notice
+removed or replaced** — the one condition BSD-3 imposes, now restored by this
+fork. Three items remain that BSD-3 cannot reach: the unlicensed PNETLab body
+(the largest, and the only one that cannot be fixed by us — section 8 sketches
+how to code it out), CKEditor 5's GPL-2.0-or-later code inside committed build
+output, and a 9.4 MB unlicensed binary that turns out to install a passwordless
+root SSH key. Two items are now closed: the proprietary Monotype **Arial Bold**
+has been replaced with fonts that can be redistributed, and the nine stripped
+notices are back. The Cisco IOL keygen **is not in this repository** and never
+was — only a call site that would run an operator-supplied copy.
+
+---
+
+## 1 · What the repository declares
+
+Measured, not remembered. The "before" column is what this assessment found;
+the "now" column is what this commit leaves behind.
+
+| Question | Before | Now |
+|---|---|---|
+| Root `LICENSE` | **None.** `find` returned no root licence file of any name. | **BSD-3-Clause**, with a scope section naming what it does not cover. |
+| Licence files elsewhere | Two, both third-party: `includes/Slim/LICENSE` (MIT, Josh Lockhart 2012), `themes/default/fonts/LICENCE.txt` (Ubuntu Font Licence 1.0). | Unchanged, plus `THIRD-PARTY.md` at the root. |
+| `store/composer.json` | `"license": "MIT"` — the Laravel skeleton default. | `"license": "BSD-3-Clause"`. |
+| `package.json` | **Absent.** Root `package.json` declares `"private": true` and no `license`. | Unchanged. Deliberately: the root package is a build harness, not a distributed package, and a `license` field there would describe the built bundles — which are not BSD-3. See section 2.4. |
+| `README.md` | No licence statement, no copyright line, no attribution to UNetLab or EVE-NG. | Unchanged here; a "Licensing" section is on the section 10 checklist. |
+| `SECURITY.md` | Disclosure policy only. | Unchanged. |
+
+### What `"license": "MIT"` was, and why it had to go
+
+It was the stock field from the Laravel skeleton, and it survived the Laravel
+5.5 → 10 rebuild. Read literally it asserted that the package named
 `pnetlab/pnetlab` — the whole `store/` application, 150 PHP files under
-`store/app` plus 295 React source files — is MIT. Nothing supports that: the
+`store/app` plus 295 React source files — was MIT. Nothing supported that: the
 files it covers carry no copyright notice at all, the upstream repository they
 came from carries no licence, and nobody in this fork's history had the standing
 to relicense them.
 
-That single line is the only licence declaration in the repository and it is
-almost certainly wrong. It should be removed or corrected as part of whatever
-decision is taken, and it should not be quoted to anyone as evidence of the
-project's position in the meantime.
+It is now `BSD-3-Clause`, matching the root `LICENSE`. That is not a claim that
+every file under `store/` is BSD-3 — it plainly is not, and section 2.3 says so
+at length. It is the declared licence of the *package* as this fork publishes
+it, which is the question the field asks, with the exceptions carried where a
+reader will actually find them: `LICENSE` and `THIRD-PARTY.md`. A composer
+`license` field has no syntax for "except for these 445 files"; the honest move
+is to make it agree with the root licence and put the truth one link away.
 
 ### The fork's own provenance
 
@@ -146,24 +192,26 @@ and should be watched: the fork must not describe itself as endorsed by,
 affiliated with, or a product of UNetLab or EVE-NG. `README.md` currently makes
 no such claim.
 
-### 2.2 The removed notices — provable, and the sharpest BSD-3 problem
+### 2.2 The removed notices — found, and now restored
 
-Nine files in this tree are recognisably the same works as BSD-3-licensed files
-in `dainok/unetlab`, with the attribution gone. Eight were confirmed by fetching
-the upstream file and reading its header; the ninth had its header **replaced**
-rather than deleted.
+**Status: fixed in this commit.** Nine files in this tree were recognisably the
+same works as BSD-3-licensed files in `dainok/unetlab`, with the attribution
+gone. Eight were confirmed by fetching the upstream file and reading its header;
+the ninth had its header **replaced** rather than deleted. All nine now carry
+the notice again, transcribed from the upstream file, and
+`tests/Licensing/LicenceTest.php` fails if any of them loses it.
 
-| This repository | Upstream file | Upstream header | Here |
-|---|---|---|---|
-| `api.php` | `html/api.php` | Dainese, BSD-3 | no header |
-| `includes/functions.php` | `html/includes/functions.php` | Dainese, BSD-3 | no header |
-| `includes/init.php` | `html/includes/init.php` | Dainese, BSD-3 | no header |
-| `includes/__lab.php` | `html/includes/__lab.php` | Dainese, BSD-3 | no header |
-| `includes/__node.php` | `html/includes/__node.php` | Dainese, BSD-3 | no header |
-| `themes/default/js/functions.js` | `html/themes/default/js/functions.js` | Dainese, BSD-3 | no header |
-| `themes/default/js/javascript.js` | `html/themes/default/js/javascript.js` | Dainese, BSD-3 | no header |
-| `platform/wrappers/unl_wrapper` | `wrappers/unl_wrapper.php` | Dainese, BSD-3 | no header |
-| `devices/interfc.php` | `html/includes/__interfc.php` | Dainese, BSD-3 | **`@copyright pnetlab.com`** |
+| This repository | Upstream file | Upstream header | Was | Now |
+|---|---|---|---|---|
+| `api.php` | `html/api.php` | Dainese, BSD-3 | no header | restored |
+| `includes/functions.php` | `html/includes/functions.php` | Dainese, BSD-3 | no header | restored |
+| `includes/init.php` | `html/includes/init.php` | Dainese, BSD-3 | no header | restored |
+| `includes/__lab.php` | `html/includes/__lab.php` | Dainese, BSD-3 | no header | restored |
+| `includes/__node.php` | `html/includes/__node.php` | Dainese, BSD-3 | no header | restored |
+| `themes/default/js/functions.js` | `html/themes/default/js/functions.js` | Dainese, BSD-3 | no header | restored |
+| `themes/default/js/javascript.js` | `html/themes/default/js/javascript.js` | Dainese, BSD-3 | no header | restored |
+| `platform/wrappers/unl_wrapper` | `wrappers/unl_wrapper.php` | Dainese, BSD-3 | no header | restored |
+| `devices/interfc.php` | `html/includes/__interfc.php` | Dainese, BSD-3 | **`@copyright pnetlab.com`** | both, in order |
 
 The internal evidence agrees with the external: sixteen sibling files in
 `includes/` *do* still carry the header — including three of the five
@@ -177,14 +225,26 @@ editing went.
 `Interfc`, and the header reads `@author LIN / @copyright pnetlab.com`. That is
 an attribution replaced by a different one.
 
-**What this obliges.** These files were modified substantially, and a modified
-BSD-3 work is still a BSD-3 work — the licence permits modification and says
-nothing about how much. What it does not permit is dropping the notice.
-*Appearance, not settled law:* PNETLab appears to have breached clause 1 when it
-published these, and this fork inherits and continues that breach every time it
-redistributes them. **This is fixable by us unilaterally and cheaply** — restore
-the notice, add a "modified by" line. It does not need anyone's permission and
-it should be done regardless of which licence the fork adopts.
+**What this obliged, and what was done.** These files were modified
+substantially, and a modified BSD-3 work is still a BSD-3 work — the licence
+permits modification and says nothing about how much. What it does not permit is
+dropping the notice. *Appearance, not settled law:* PNETLab appears to have
+breached clause 1 when it published these, and this fork inherited and continued
+that breach every time it redistributed them.
+
+Each file now carries a restored header: the upstream summary line, a
+`Derived from UNetLab <path>` line naming where it came from, Dainese's
+`@author`/`@copyright`/`@license`/`@link` block transcribed from the upstream
+file, and a closing line recording that PNETLab and this fork modified it and
+that the notice must be retained regardless. `@version 20160719` was
+deliberately **not** carried over: it stopped being true for these files a long
+time ago, and re-adding it would be a fresh inaccuracy in the name of fixing an
+old one.
+
+`devices/interfc.php` keeps both attributions, in the order they arose —
+Dainese's first, then the `@author LIN / @copyright pnetlab.com` block that had
+replaced it. Replacing one attribution with the other in either direction would
+repeat the original mistake.
 
 *Uncertainty worth stating:* the comparison was made against `dainok/unetlab`
 `master`, which is the 2016-era code. PNETLab's copies came via EVE-NG, and I did
@@ -264,14 +324,14 @@ what each one costs us:
 | **Ace** editor | 1.2.6 | BSD-3 (Ajax.org) | Retain notice | 213 files under `themes/default/js/src`; only 2 carry the notice (`ace.js`, `cisco_ios_highlight_rules.js`) and only 5 carry any copyright line at all. Thin — cover it in `THIRD-PARTY.md`. |
 | jQuery / jQuery UI / validate / cookie / hotkey / panzoom | 3.2.1, 3.3.1, 1.12.1, 1.14.0, … | MIT | Retain notice | Met. |
 | Bootstrap | 3.3.5 and 4.1.3 | MIT | Retain notice | Met. |
-| AngularJS + ui-router, ui-utils, ui-select, ocLazyLoad, block-ui | 1.5.6 | MIT | Retain notice | Met. Dead weight; see §6. |
+| AngularJS + ui-router, ui-utils, ui-select, ocLazyLoad, block-ui | 1.5.6 | MIT | Retain notice | Met. Dead weight; see section 6. |
 | jsPlumb Community / jsBezier | 2.4 | MIT | Retain notice | Met. |
 | Font Awesome | 4.5.0 | OFL-1.1 (fonts) + MIT (code) | Retain notice | Notice inline in CSS. |
 | Ubuntu font family | — | Ubuntu Font Licence 1.0 | Ship the licence; do not relicense | `themes/default/fonts/LICENCE.txt` present. Met. |
 | Glyphicons Halflings | — | via Bootstrap | Retain Bootstrap notice | Met. |
 | PrimeReact / PrimeIcons + Open Sans | 3.3.2 | MIT (Open Sans: Apache-2.0) | Retain notice | npm metadata records no licence for primereact 3.3.2; upstream is MIT. |
-| **`ARIALBD.TTF`** | — | **Proprietary (Monotype)** | Cannot be redistributed | **In the tree.** See §3. |
-| **`idlepc`** (prebuilt ELF) | — | **Unknown; embeds LGPL and Apache code** | Unknown | **In the tree.** See §3. |
+| ~~`ARIALBD.TTF`~~ | — | Proprietary (Monotype) | Cannot be redistributed | **Removed.** Replaced by a free-font candidate list; see section 3. |
+| **`idlepc`** (prebuilt ELF) | — | **Unknown; embeds LGPL-2.1 `paramiko`** | Cannot be satisfied without source | **In the tree — gap G3.** Also installs a root SSH key; see section 3. |
 | SheetJS `xlsx`, `chart.js`, `jszip`, React 16, react-router, redux, laravel-mix… | see `package-lock.json` | Apache-2.0 / MIT / dual | Build-time; retain notice where bundled | 1273 lockfile entries. |
 | Composer tree | see `store/composer.lock` | 61 MIT, 32 BSD-3, 1 Apache-2.0, 2 tri-licensed (`nette/utils`, `nette/schema`: BSD-3 **or** GPL-2 **or** GPL-3) | Retain notices | `store/vendor/` is not committed. Both nette packages can be taken under BSD-3. |
 
@@ -300,15 +360,57 @@ not tenable is offering the compiled bundle itself under MIT or BSD-3 terms,
 which is what a bare `LICENSE` file at the repository root would appear to do
 while `lab.js` is committed.
 
-Three ways out, in ascending cost: **(a)** stop committing built bundles and let
-the installer build them, which moves the combined work out of the repository
-but not out of the shipped appliance; **(b)** replace CKEditor with a
-permissively-licensed editor — the roadmap's Phase 06 already contemplates
-shedding frontend weight, and the editor is used for lab text objects and
-workbook HTML, not for anything structural; **(c)** keep CKEditor, note it
-explicitly, and accept that the distributed frontend bundle carries GPL-2.0+
-terms. (c) is coherent and is what many projects do; it just has to be a
-decision rather than an accident.
+**Why the bundles could not simply be dropped, and what happens instead.** The
+first instinct — stop committing 5.4 MB of generated output that has no business
+in git — was checked against the installer and does not survive it.
+`install/lib/deploy.sh` rsyncs the tree and then does this:
+
+```
+if [[ ! -f "${WEB_ROOT}/store/public/react/js/app.js" ]]; then
+        warn "store/public/react/js/app.js is absent: the React bundle was never built.
+             Run 'npm install && NODE_OPTIONS=--openssl-legacy-provider npm run production' ..."
+```
+
+It warns. It does not build. Nothing in `install/` runs `npm` at all — that is
+stated outright in `install/README.md`: "**It does not build the frontend.**"
+So the committed bundles *are* the delivery mechanism for the admin UI. Removing
+them means every `git clone` plus `install.sh` produces an appliance with a
+blank admin interface until someone runs a 1273-package `npm install` on it.
+
+For this project that is worse than it sounds. `docs/OFFLINE-FIRST.md` commits
+the fork to installing with no external communication of any kind, on air-gapped
+networks. Requiring `npm install` on the target — or a connected build host and
+a transfer step — reintroduces exactly the dependency the fork exists to shed.
+**Trading a working offline install for a licensing tidy is not a trade this
+project should make**, so the bundles stay.
+
+That leaves option (c) from the analysis, taken deliberately rather than by
+omission: **CKEditor stays, the bundles stay committed, and the GPL position is
+stated where a recipient will see it.** The root `LICENSE` says in its scope
+section that the built output under `store/public/react/` and `vendors~.`
+carries GPL-2.0-or-later terms and is not covered by the BSD-3 grant.
+`THIRD-PARTY.md` lists CKEditor 5 first, with its licence and the files it is
+compiled into.
+
+This is a **tracked gap**, not a resolved item, and it gates publication
+(section 6). Two things close it, and they are not exclusive:
+
+- **Build the bundles during install or in CI.** The real fix. CI already has a
+  green `frontend-build` job on Node 22, so the artefacts can be produced and
+  attached to a release; the installer would consume a release artefact rather
+  than a git-tracked one, and the offline property survives because the artefact
+  ships with the release. This is the recommended path and it is a self-contained
+  piece of work: it does not require touching the frontend itself.
+- **Replace CKEditor.** The roadmap's Phase 06 already contemplates shedding
+  frontend weight. CKEditor is used for lab text objects and workbook HTML —
+  presentation, not structure — so a permissively-licensed editor would remove
+  the copyleft question entirely. Larger, and not urgent if the first path lands.
+
+Until one of them lands, the honest statement is the one now in `LICENSE`: the
+fork's source is BSD-3; the built frontend is a combined work under
+GPL-2.0-or-later. Both can be true at once, and MIT and BSD-3 combine into a GPL
+work without difficulty — what is not tenable is *offering the bundle* under
+BSD-3, which is precisely what the scope section prevents.
 
 #### The Guacamole attribution is good, and contains one wrong sentence
 
@@ -356,62 +458,177 @@ exists publicly, citing `dainok/unetlab` *and* `pnetlab/pnetlab_wrapper`. The
 first is true — `dainok/unetlab` is BSD-3 and carries the four wrapper `.c`
 files. The second is not: `pnetlab/pnetlab_wrapper` has **no licence file and
 `"license": null`**, so vendoring from it would have imported exactly the
-problem described in §2.3. Corrected in both files in this commit.
+problem described in section 2.3. Corrected in both files in this commit.
 
 This is also the one part of the tree the project unambiguously owns and can
 licence however it likes.
 
 ---
 
-## 3 · Two small items that are not arguable
+## 3 · The two binary blobs: one closed, one open
 
-### `store/app/Helpers/Captcha/ARIALBD.TTF`
+### `store/app/Helpers/Captcha/ARIALBD.TTF` — **closed, replaced**
 
-750 KB. `file` reports the embedded name string: *"© 2014 The Monotype
+750 KB. `file` reported the embedded name string: *"© 2014 The Monotype
 Corporation. All Rights Reserved. Arial is a trademark of The Monotype
-Corporation"*. It is used by one function, `Captcha::createCaptcha()`, as the
-`imagettftext()` font.
+Corporation"*. It was used by one function, `Captcha::createCaptcha()`, as the
+`imagettftext()` font — and that function is on the **offline login path**, so
+this was a live feature, not dead weight.
 
-Arial is proprietary. There is no licence file, no purchase record, and no plausible
-grant permitting redistribution in a public source repository. It arrived with
-the upstream import and nobody chose it.
+Arial is proprietary. There was no licence file, no purchase record, and no
+plausible grant permitting redistribution in a public source repository. It
+arrived with the upstream import and nobody chose it.
 
-**Fix:** swap it for a metrically similar, freely-licensed face — DejaVu Sans
-Bold or Liberation Sans Bold, both already present on any Ubuntu host — and
-delete the file. It is a one-line constant change plus a path. This should not
-survive to a public repository, and unlike everything else in this document it
-requires no decision from anyone.
+**What was done — a substitution, not a deletion.** `Captcha::$FONTS` is now an
+ordered candidate list, and `Captcha::fontPath()` returns the first entry that
+exists:
 
-*Note:* deleting the file from `HEAD` does not remove it from git history. If
-the repository's history is published as-is, the font is still there in
-`07ef833`. Whether that matters is a judgement call about risk appetite; the
-options are to leave it, or to rewrite history before the first public push,
-which is far cheaper now than later.
+| Candidate | Licence | Where it comes from |
+|---|---|---|
+| `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf` | Bitstream Vera + DejaVu public-domain amendment | `fonts-dejavu-core`, present on every Ubuntu image this project targets |
+| `/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf` | SIL OFL 1.1 | `fonts-liberation`, for hosts carrying that set instead |
+| `../../../../themes/default/fonts/Ubuntu-B.ttf` | Ubuntu Font Licence 1.0 | **this repository**, with its licence text at `themes/default/fonts/LICENCE.txt` |
 
-### `store/app/Console/Commands/idlepc`
+The third entry is the one that matters. It is already in the tree, already
+licensed for redistribution, already carries its licence text beside it, and the
+installer rsyncs the repository root — so the captcha renders on an appliance
+with no font package installed and no network. That is the offline-first
+property from `docs/OFFLINE-FIRST.md`, preserved rather than traded away for a
+package dependency. `tests/Licensing/LicenceTest.php` asserts the fallback path
+resolves to a real file, and that every tracked font sits under a prefix
+`THIRD-PARTY.md` accounts for.
 
-9.4 MB. A stripped x86-64 ELF, PyInstaller-packed (`_MEIPASS`, `PYZ-00.pyz`),
-built against Python 3.5, embedding `paramiko`, `bcrypt`, `cryptography 3.1.1`,
-PyNaCl (`_sodium.abi3.so`) and OpenSSL (`_openssl.abi3.so`). No source is in the
-repository. It is invoked from `store/app/Http/Controllers/Admin/DefaultController.php:230`,
-**under `sudo`**, to compute a dynamips idle-PC value.
+If every candidate is missing, `createCaptcha()` logs which paths it tried and
+returns an empty image rather than emitting a broken one silently. That is a
+deployment fault, not a licensing one, and it now says so in the log.
 
-Two problems in one file:
+*Note on history:* deleting the file from `HEAD` does not remove it from git
+history. If the history is published as-is, the font is still in `07ef833`.
+That is a judgement call about risk appetite — leave it, or rewrite history
+before the first public push, which is far cheaper now than later. It is on the
+section 10 checklist as an owner decision.
 
-- **Licensing.** `paramiko` is LGPL-2.1. LGPL §6 attaches conditions to
-  distributing a work that statically incorporates an LGPL library — broadly,
-  the recipient must be able to relink against a modified version, which
-  normally means shipping the object files or the source. A frozen PyInstaller
-  binary with no accompanying source does not obviously satisfy that. The other
-  embedded libraries are Apache-2.0 or BSD and want notices we do not carry.
-- **Provenance.** Nobody in this project built it, nobody can rebuild it, and it
-  runs as root. That is a supply-chain question as much as a licence one, and it
-  is the reason to act rather than to argue about the LGPL.
+### `store/app/Console/Commands/idlepc` — **open, and worse than it looked**
 
-**Fix:** either reimplement idle-PC calculation (it is a well-understood
-operation over dynamips' own console interface, and dynamips is on the box) or
-drop the feature. Either way the blob goes. The same history note as the font
-applies.
+9.4 MB. A stripped x86-64 ELF, PyInstaller-packed, built against Python 3.5,
+embedding `paramiko`, `bcrypt`, `cryptography 3.1.1`, PyNaCl and OpenSSL. No
+source in the repository. Invoked from
+`store/app/Http/Controllers/Admin/DefaultController.php`, **under `sudo`**, to
+compute a dynamips idle-PC value for the calculator button on the node form.
+
+**The archive was unpacked and the entry script read**, because "remove the
+unlicensed blob" is not a decision anyone should take without knowing what it
+does. The PyInstaller `CArchive` TOC has 52 entries; the `PYSOURCE` entry named
+`idlepc` unmarshals to `idlepc.py`, and its string constants give the whole
+program:
+
+```
+'/opt/unetlab/html/store/public/index.php'   'Please download PNETLab from pnetlab.com'
+"/root/.ssh/id_rsa_dy.pub"
+"ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa_dy 2>&1 > /dev/null"
+"cat /root/.ssh/id_rsa_dy.pub >> /root/.ssh/authorized_keys 2>&1 > /dev/null"
+'127.0.0.1'  'root'  '/root/.ssh/id_rsa_dy'
+'dynamips'   '--idle-pc='   '\x1d'   '[yes/no]'
+'\\"--idle-pc=([^\\"]+)\\"'   'idle-pc='
+'pkill -9 -f "'   'can not get idle value'
+```
+
+with `paramiko` imports (`connect`, `expect`, `disconnect`) around them. In
+order, the program:
+
+1. checks `store/public/index.php` exists, or prints "Please download PNETLab
+   from pnetlab.com" — a vendor check of the kind this fork has removed
+   everywhere else;
+2. **generates a passphrase-less RSA key at `/root/.ssh/id_rsa_dy` and appends
+   its public half to `/root/.ssh/authorized_keys`**;
+3. SSHes to `root@127.0.0.1` with that key;
+4. runs `dynamips` in that session and sends `\x1d` — Ctrl-] — to trigger
+   **dynamips' own** idle-PC computation, then scrapes `"--idle-pc=([^"]+)"`
+   out of the console output;
+5. `pkill -9 -f "dynamips ..."`.
+
+Three conclusions follow, and they change how this item should be ranked.
+
+**It contains no algorithm worth keeping.** The computation is dynamips'. The
+blob is a wrapper whose only real function is to obtain a TTY, because
+`exec()` from PHP has none and dynamips' idle-PC trigger is a console escape.
+
+**It is a root backdoor installer, not just a licensing problem.** Pressing
+"calculate Idle-PC" in the admin UI permanently installs a passwordless root SSH
+key on the appliance. This fork already deleted exactly this pattern once:
+`docs/HANDOVER.md` records that `docker_wrapper` was reimplemented to allocate
+its own PTY "instead of shelling out over SSH to `root@localhost`, which deletes
+a standing passwordless root SSH key from every appliance". That key is
+reintroduced here by an admin button. **This should be treated as a security
+finding and handed to whoever owns that queue**; its licence status is now the
+less urgent half.
+
+**The licensing problem stands regardless.** `paramiko` is LGPL-2.1, and LGPL §6
+attaches conditions to distributing a work that statically incorporates an LGPL
+library — broadly, the recipient must be able to relink against a modified
+version, which normally means shipping the object files or the source. A frozen
+PyInstaller bundle with no accompanying source does not obviously satisfy that.
+The other embedded libraries are Apache-2.0 or BSD and want notices we do not
+carry. And nobody here built it, nobody can rebuild it, and it runs as root.
+
+#### Why it is still in the tree
+
+Because deleting it removes a working capability and leaves a hole, and because
+the replacement **cannot be verified here**. A replacement has to drive a real
+dynamips against a real Cisco IOS image, and this project carries neither — by
+design. Landing an unverifiable emulator driver and calling it a replacement
+would be the same hole with a better name.
+
+So it stays, annotated in three places — the sudo policy, the controller call
+site, and here — and it is a **tracked gap that gates publication** (section 6,
+section 10). The sudo grant stays with it; `tests/Security/SudoersPolicyTest.php`
+enforces drift in both directions, so the binary, its call site and the grant
+must land or leave together, which is the forcing function.
+
+#### What the replacement is
+
+`unl_wrapper -a idlepc`, an action beside `fixperms`, `set-proxy`,
+`iol-keepalive` and `image-commit` in `platform/wrappers/actions/`. The shape,
+so it can be built without re-doing this investigation:
+
+- **Inputs: `--template <name>` and `--image <name>`, nothing else.** Not the
+  option string. The current call site passes `dynamips_options` through
+  `secureCmd()` and `escapeshellarg()` across the sudo boundary, and template
+  option strings are the known argument-injection surface item 4 of
+  `docs/HANDOVER.md` calls out. The wrapper should read the option string from
+  `templates/<name>.yml` itself, exactly as `UnlIolKeepalive` computes the uid
+  rather than accepting one. Both names validate as `[A-Za-z0-9_.-]+` with no
+  separators, and the image must resolve under `/opt/unetlab/addons/dynamips`.
+- **Start dynamips directly, exec'd from an argv array**, with the template's
+  options tokenised in the wrapper, `--idle-pc 0x0`, and the image path.
+- **Obtain a console.** This is the one open question and it should be settled
+  first, because it decides the shape of everything else:
+  - `devices/dynamips/device_dynamips.php` already starts dynamips with
+    `-T <port>`, a TCP console listener. If dynamips honours the Ctrl-] escape
+    on that listener, the action needs no PTY at all — connect, wait for boot,
+    send `\x1d` then `i`, read. That is the cheap outcome and it should be
+    tested before anything is written.
+  - If the escape is only honoured on a real terminal, use the PTY machinery
+    this project already owns: `platform/wrappers/src/child.c` and `console.c`
+    exist precisely because `docker_wrapper` needed a PTY without SSH.
+  - Under no circumstances reintroduce an SSH loopback.
+- **Parse** `"--idle-pc=(0x[0-9a-fA-F]+)"` from the console stream.
+- **Terminate by pid**, held from the spawn — never `pkill -f` on a pattern,
+  which matches any process whose command line happens to contain the string.
+- **The template write stays in the controller**, behind
+  `Wrapper::fixperms('templates')`, exactly as it is today. Only the privileged
+  emulator run moves.
+
+The unit-testable parts — name validation, option tokenising, the output
+parser, the timeout — can be covered without dynamips, in the style of
+`platform/wrappers/src/wrapper_test.c`. The part that needs an image is whether
+the escape works on the `-T` listener, and that is one afternoon for anyone who
+has a c3725 image.
+
+When it lands: delete the binary, delete the sudo grant, delete the controller
+method's `exec()`, and remove the React calculator button in
+`store/resources/react/components/lab/node/NodeForm.js` at the same frontend
+rebuild. `SudoersPolicyTest` and `LicenceTest` will both hold that together.
 
 ---
 
@@ -475,7 +692,7 @@ things would make it deliberate, and none is expensive:
    project ships no Cisco software, no Cisco licence keys, and no tool for
    generating them; IOL support requires the operator to supply their own images
    and their own `iourc`, and the project takes no position on how.
-3. **Guard it in CI**, next to the vendor-image guard proposed in §5. A grep for
+3. **Guard it in CI**, next to the vendor-image guard in `tests/Licensing/LicenceTest.php`. A grep for
    `keygen`, `iourc`-as-content, `*.bin` under `addons`, and known IOL image
    names, failing the build. Cheap, and it means the boundary cannot be crossed
    by an enthusiastic contributor.
@@ -506,12 +723,20 @@ image, no IOL binary, no appliance ISO. `docs/HANDOVER.md` records that even the
 CirrOS image the QEMU integration test needs lives on the reference VM and not in
 the tree.
 
-**Where the boundary is enforced: nowhere, mechanically.** `.gitignore` has no
-rule for image formats. `.github/workflows/ci.yml` runs PHP lint, PHP tests, the
-C wrapper build and the frontend build; nothing checks what is committed. The
-boundary currently holds because the people working on the project have been
-careful, which is a fine reason for it to have held so far and a poor reason to
-expect it to keep holding.
+**Where the boundary is enforced: now, in a test.** It used to be nowhere.
+`.gitignore` has no rule for image formats, and CI runs PHP lint, PHP tests, the
+C wrapper build and the frontend build without ever asking what is committed.
+The boundary held because the people working on the project were careful, which
+is a fine reason for it to have held so far and a poor reason to expect it to
+keep holding.
+
+`tests/Licensing/LicenceTest.php` now asks git's index directly and fails on any
+tracked `*.qcow2 *.vmdk *.vdi *.vhd *.vhdx *.iso *.ova *.ovf *.img *.bin`, on
+any path whose basename contains `keygen`, and on any font outside the prefixes
+`THIRD-PARTY.md` accounts for. It runs in `tools/run-tests.sh`, which CI runs on
+both PHP 8.4 and 8.5. It is a test, not a pre-receive hook — someone determined
+can still push past it — but it turns "we have been careful" into "the build
+goes red", which is the difference that matters.
 
 Two other things touch this boundary and should be said out loud:
 
@@ -535,221 +760,203 @@ Two other things touch this boundary and should be said out loud:
 
 ---
 
-## 6 · The problems, ranked
+## 6 · Tracked gaps
 
-### Blocks publishing
+The licence is adopted. These are the things it does not cover. The first three
+**gate publication**: while any of them is open, a public repository carrying a
+BSD-3 `LICENSE` would tell recipients something untrue about what they may
+redistribute. The rest is housekeeping — real work, but it does not make the
+declaration false.
 
-1. **The unlicensed PNETLab body.** The device layer, the Laravel application
-   and the React frontend have no grant. This is not a documentation gap; it is
-   the absence of permission for the thing the project intends to do. Every
-   other item on this list can be fixed by us. This one cannot.
-2. **`ARIALBD.TTF`.** Proprietary Monotype font, redistributed. Unarguable,
-   trivially fixable, and there is no version of "publish anyway" that is
-   defensible.
-3. **CKEditor 5 GPL-2.0+ inside committed bundles.** Not a licence *violation*
-   today — nothing here contradicts the GPL. It becomes one the moment a
-   permissive `LICENSE` file is added at the root while `store/public/react/js/lab.js`
-   is committed, because that file would then be offered under terms its
-   contents do not permit. It therefore blocks the licence decision, not the
-   repository.
-4. **The nine stripped BSD-3 notices.** A continuing failure of the one
-   condition BSD-3 imposes, on files we knowingly redistribute. Fixable by us,
-   this week, without asking anyone.
+### Gates publication
 
-### Should be fixed before publishing, but does not block it
+**G1 · The unlicensed PNETLab body.** ~10,400 lines of PHP under `devices/`,
+~12,300 under `store/app`, ~41,300 lines of JavaScript under
+`store/resources/react`. No grant from its author. A root `LICENSE` does not
+reach it and cannot be made to. **The only thing that closes this is replacing
+the code** — section 8 is the programme. Asking upstream is worth one email and
+is unlikely to be answered; accepting and documenting is a real option but it is
+the owner's to take knowingly, not a default to drift into.
 
-5. **`idlepc`.** Opaque root-executed binary embedding LGPL code with no source.
-   The security argument for removing it is stronger than the licence one, and
-   they point the same way.
-6. **No accompanying attribution for the BSD-3 material.** Clause 2 of BSD-3
-   asks for the notice to travel with a binary distribution, and until now
-   nothing in this tree or on an installed appliance carried it.
-   `THIRD-PARTY.md` addresses it, and the installer already ships it — the root
-   is rsynced to `/opt/unetlab/html` and `deploy_excludes()` does not name it.
-   What is missing is a test keeping it that way.
-7. **The `"license": "MIT"` line in `store/composer.json`.** A false statement
-   about the project, sitting in a machine-readable field that dependency tools
-   and licence scanners read. Remove it or correct it.
-8. **Parsedown's missing `LICENSE`.** Its header defers to a file that is not
-   in the tree. One file.
-9. **The Guacamole README's "no derivative work" sentence** and the
-   unattributed `guacdb.sql`. Both corrected in this commit.
-10. **The `pnetlab/pnetlab_wrapper` is BSD-3 claim** in `docs/HANDOVER.md` and
-    `platform/wrappers/src/README.md`. Corrected in this commit.
+**G2 · CKEditor 5 GPL-2.0-or-later inside committed build output.**
+`store/public/react/js/lab.js` and the `vendors~.` chunk. Closed by building the
+bundles in CI or at install time and consuming a release artefact instead of a
+tracked one — see section 2.4 for why simply deleting them is not available.
+Self-contained; does not require touching the frontend.
+
+**G3 · `store/app/Console/Commands/idlepc`.** Unlicensed, unbuildable, embeds
+LGPL-2.1 `paramiko` with no source — and installs a passwordless root SSH key
+when the admin presses a button. Closed by `unl_wrapper -a idlepc`, designed in
+section 3. **Also a security finding in its own right**, and the security queue
+should not wait for the licensing one.
 
 ### Housekeeping
 
-11. **No mechanical guard** on vendor images, keygens, or licensed binaries in
-    CI. Add one.
-12. **The Cisco icon set.** Establish terms, or replace, or state the position.
-13. **Unattributed dead vendored code.** AngularJS 1.5.6 and its plugin tree
-    (1.8 MB) are dead weight the roadmap already wants gone; deleting them
-    deletes their obligations too. Same for the vendored upload demo at
-    `.../angularJS/plugins/angular-file-upload/upload.php`, whose first
-    statement is `exit;`.
-14. **Fork-authored files carry no headers.** Once a licence is chosen, add
-    `SPDX-License-Identifier` lines to the 114 files the fork wrote. Cheap, and
-    it makes the boundary between "ours" and "inherited" machine-readable.
+4. **Parsedown's missing `LICENSE`.** Its header defers to a file that is not in
+   the tree. One file.
+5. **`includes/Slim` 2.6.1** is patched in place, which MIT permits, but the
+   patches are not marked. A `MODIFICATIONS` note beside `includes/Slim/LICENSE`
+   would make the divergence legible.
+6. **Ace's notice coverage is thin** — 213 files under `themes/default/js/src`,
+   2 carrying the BSD-3 notice. Covered in `THIRD-PARTY.md`, which is enough,
+   but worth knowing.
+7. **The Cisco icon set.** 164 PNGs plus `icons.rar`, named for vendor products.
+   Establish the terms, replace, or state the position. A trademark question
+   more than a copyright one, and the same position every comparable project is
+   in.
+8. **No mechanical guard on the boundary** beyond `tests/Licensing/LicenceTest.php`
+   — that test now asserts no tracked vendor image, no keygen, no unaccounted
+   font and no `idlepc`, but it runs in `tools/run-tests.sh`, not as a
+   pre-receive hook. Good enough; noted so nobody assumes more.
+9. **Dead vendored code carries live obligations.** AngularJS 1.5.6 and its
+   plugin tree (1.8 MB) are weight the roadmap already wants gone; deleting them
+   deletes their attribution requirements too. Same for the vendored upload demo
+   at `.../angularJS/plugins/angular-file-upload/upload.php`, whose first
+   statement is `exit;`.
+10. **Fork-authored files carry no headers.** Add `SPDX-License-Identifier:
+    BSD-3-Clause` to the 114 files the fork wrote. Cheap, and it makes the
+    boundary between "ours" and "inherited" machine-readable.
 
 ### Adjacent, and not a licensing item
 
-`store/.env` is tracked, with an `APP_KEY` in it. That is a security matter, not
-a licensing one, but it is in the same pre-public gate and it should not be lost
-because it turned up in a licensing audit.
+`store/.env` was tracked with a live `APP_KEY`; `tests/Security/EnvNotTrackedTest.php`
+now holds that line. Recorded here only because this audit is where it surfaced.
 
 ---
 
-## 7 · Options
+## 7 · The decision, and why
 
-### 7.1 For the fork as a whole
+**BSD-3-Clause, for the fork's own work, with the scope stated in the licence
+file itself.**
 
-The constraint is that a project cannot grant rights it does not hold. Whatever
-is chosen applies cleanly to the fork's own 114 files and to nothing else until
-§7.2 is resolved.
+The alternatives were MIT, Apache-2.0, a copyleft licence, or continuing to
+declare nothing. BSD-3 wins on a single argument: it is the licence the largest
+inherited body in this tree already uses — 130 files from UNetLab and EVE-NG —
+so matching it means one set of conditions to satisfy rather than two. Retain
+the notices, reproduce them in the material accompanying a binary distribution,
+and do not claim endorsement. All three are things the project must do anyway
+for the inherited files; adopting the same licence adds no new obligation.
 
-**Option A — BSD-3-Clause.**
-Matches the largest permissively-licensed body in the tree, so there is exactly
-one set of conditions to satisfy rather than two. Requires: keep every BSD-3
-notice; restore the nine stripped ones; ship `THIRD-PARTY.md` with the appliance
-to satisfy clause 2; never claim UNetLab or EVE-NG endorsement. Does not resolve
-§2.3.
+MIT is marginally more familiar and equally compatible, but it would add a
+second permissive licence to a BSD-3 tree for no gain. Apache-2.0 was the real
+contender — its express patent grant is worth something in a project that
+touches virtualisation and networking, and its `NOTICE` mechanism is a natural
+home for the attribution work — but it is one-way incompatible with GPL-2, and
+gap **G2** puts GPL-2 code in the shipped frontend. Choosing Apache-2.0 would
+have meant resolving a frontend question to settle a licence question, which is
+the wrong order. A copyleft licence would suit a project that wants derivative
+appliances kept open, and it is the only family that makes G2 disappear — but
+the fork's users deploy appliances into corporate labs, and the roadmap's whole
+direction is toward being deployable there. Declaring nothing, finally, is what
+the repository did until now: it leaves contributors and deployers unable to act
+with confidence, and it reads as carelessness rather than as a position.
 
-**Option B — MIT.**
-Marginally simpler and more familiar; compatible with everything inherited.
-Slightly worse fit: it adds a second permissive licence to a tree whose
-inheritance is BSD-3, for no gain. Same obligations otherwise. Does not resolve
-§2.3.
+**What the decision does not do.** It does not relicense the PNETLab body (G1),
+it does not make the built bundles BSD-3 (G2), and it does not launder the
+`idlepc` blob (G3). The scope section of `LICENSE` says all three in the file a
+recipient reads first. That is the difference between adopting a licence and
+misrepresenting one.
 
-**Option C — Apache-2.0.**
-Adds an express patent grant, which is worth something in a project that touches
-virtualisation and networking, and a `NOTICE` mechanism that is a natural home
-for the attribution work. Compatible with BSD-3 and MIT inbound. Costs: a
-longer licence, per-file modification marking under §4(b), and one-way GPL-2
-incompatibility — which matters if CKEditor stays and the bundles stay
-committed. Does not resolve §2.3.
-
-**Option D — GPL-3.0 or AGPL-3.0.**
-Would suit a project that wants derivative appliances kept open. It is the only
-family that changes the CKEditor calculus in our favour (GPL-2-or-later can be
-taken as GPL-3). It is also the least compatible with the fork's likely
-downstream users, who deploy appliances into corporate labs. And it still does
-not resolve §2.3 — you cannot copyleft code you have no licence to.
-
-**Option E — decide nothing; publish with `LICENSE` absent and a
-`docs/LICENSING.md` that explains why.**
-Honest, and it is what the repository already does implicitly. Its cost is that
-nobody can contribute or deploy with confidence, and "no licence" reads to most
-readers as carelessness rather than as a considered position — which is exactly
-why this document exists.
-
-Every option is downstream of §7.2. There is no licence choice that makes the
-unlicensed body licensed.
-
-### 7.2 For the unlicensed PNETLab code
-
-**Path 1 — Ask.** `pnetlab/pnetlab_main` was published deliberately, publicly,
-with a README addressed to developers explaining how to extend it. That is the
-behaviour of someone who intended the code to be used and did not think about
-the paperwork. A short, specific request — "would you add an MIT or BSD-3
-`LICENSE` file to `pnetlab_main`, or grant this fork those terms in writing?" —
-costs one email and, if it lands, resolves the entire problem at a stroke.
-Contact: `pnetlabs@gmail.com`, the address on all five upstream commits. Repo
-last pushed 2023-07-24; the roadmap records that `secure.pnet-lab.com` no longer
-resolves. So: **cheap, high-value, and probably unanswered.** Send it anyway,
-and keep the sent copy — a documented good-faith attempt is worth having.
-
-While asking, ask for two more things: the licence status of
-`pnetlab/pnetlab_wrapper` (relevant if the clean-room decision is ever revisited)
-and whether upstream will restore the UNetLab attribution headers themselves.
-
-**Path 2 — Reimplement.** The project has already proved it can do this: the
-console wrappers are ~2,500 lines of clean-room C, written from a specification
-by a party who had not read the originals, and they work. That is the model.
-But the scale is different by an order of magnitude — the device layer is 89
-files, the Laravel application 150, the React frontend 295. Reimplementing the
-whole PNETLab half is a rewrite of the product, not a licensing fix.
-
-Where it *is* proportionate: the device layer. 89 files that translate template
-fields into command lines, over an API this project already documents. Much of
-it is mechanical. If a subset must be owned outright, that is the subset with
-the best ratio of effort to coverage — and the roadmap's Phase 02.5 rebase
-decision is the moment to do it, because rebasing onto 5.3.13 means touching
-those files anyway.
-
-**Path 3 — Remove.** Not viable for the device layer or the application; they
-are the product. Viable, and worth doing on its own merits, for the marketplace
-and licence-keepalive code that the offline-first direction already condemns
-(`License::keepalive()`, `Relicense.php`, `Query::boxCenter()`). Deleting code
-that phones a third party's licensing server is a licensing improvement as well
-as an architectural one: it is hard to argue a fork is independent while it
-still relicenses against `pnetlab.com`.
-
-**Path 4 — Accept and document.** Publish, state the position plainly, and
-carry the risk. The honest form of this is not silence; it is a `LICENSING.md`
-that says: *the fork's own contributions are licensed under X; substantial
-inherited portions carry no licence grant from their author; we have asked and
-not heard back; here is exactly which files those are; use accordingly.* That is
-a real position that a downstream user can evaluate. It is also, in practice,
-the position of a great many forks of abandoned source-available projects.
-
-Its risk profile is asymmetric in a specific way: the likely bad outcome is not
-litigation but a takedown notice, which costs the project its GitHub presence
-and its credibility at the same time. The likelihood is low — an upstream that
-has not pushed since 2023 and whose infrastructure is decaying is not
-positioning for enforcement — but "low" is doing load-bearing work in that
-sentence and the owner should decide whether they are comfortable with it, not
-be told they should be.
+**What would change it.** If the owner intends to sell or offer commercial
+support, G1 stops being a background risk and becomes a diligence item, and the
+programme in section 8 moves from "worth doing" to "necessary". If upstream
+answers the request in section 8, everything simplifies and BSD-3 becomes
+straightforwardly correct rather than the best available.
 
 ---
 
-## 8 · Recommendation
+## 8 · Coding out the unlicensed body
 
-**Publish, under BSD-3-Clause for the fork's own work, with the inherited
-position documented rather than papered over — after clearing the four items
-that are ours to clear.**
+This is the gap that no licence file reaches and the one the owner will work
+from. It is a programme, not a task, and it is worth being precise that it is
+also **not urgent in the way G2 and G3 are**: those are two self-contained
+pieces of work; this is a direction of travel measured in months.
 
-The reasoning, so it can be disagreed with on the reasoning: the four things
-that are unambiguously wrong today are all things this project can fix
-unilaterally and inexpensively — the Monotype font, the `idlepc` blob, the nine
-stripped BSD-3 notices, and the false `"license": "MIT"` line. None needs a
-decision from anyone else, and leaving any of them in place while publishing
-would be a choice rather than an inheritance. The one problem that is genuinely
-outside our control — that PNETLab published its own code without a licence —
-does not get better by waiting, because the upstream has been silent for three
-years and its infrastructure is visibly decaying; deferring is not caution, it
-is just deferral with the same risk. BSD-3 rather than MIT because it is the
-licence the largest inherited body already uses, and matching it means one set
-of conditions to satisfy instead of two; not Apache-2.0, despite the patent
-grant being genuinely attractive, because its GPL-2 incompatibility collides
-with CKEditor and this is not the moment to take on a frontend migration to
-resolve a licence choice; not a copyleft licence, because the fork's users
-deploy appliances into corporate labs and the roadmap's whole direction is
-toward being deployable there. On CKEditor specifically, I recommend **stopping
-the commit of built bundles** rather than replacing the editor — the build is
-already green in CI on Node 22, the bundles are 5.4 MB of generated output that
-has no business in git anyway, and it removes the contradiction between a
-permissive root `LICENSE` and a GPL-carrying tracked artefact without
-committing to a frontend rewrite. On the keygen, I recommend **keeping the call
-site and making the boundary explicit** rather than deleting it: calling an
-operator-supplied file is a materially different act from shipping one, the code
-already degrades correctly when the file is absent, and deleting it would remove
-a working feature for a class of user who has legitimately licensed images —
-but I hold this one loosely, and it is the item most likely to change under a
-real legal opinion.
+### The shape of the problem
 
-Concretely, that means: fix the four; keep `THIRD-PARTY.md` shipping with the
-appliance and test that it does; send the upstream request and keep the copy;
-add the CI guard;
-then add `LICENSE` (BSD-3) plus a prominent `README.md` section that states the
-inherited position in three sentences and points here.
+| Area | Size | Replaceability | Notes |
+|---|---|---|---|
+| `store/resources/react` | 265 files, ~41,300 lines JS | **Low** | The largest single body and the least mechanical. This is the product's UI. |
+| `store/app` (Laravel) | 133 files, ~12,300 lines PHP | **Medium** | 27 controllers (~4,100 lines), 21 models (~2,900), 28 helpers (~2,400). |
+| `devices/` | 90 files, ~10,400 lines PHP | **High** | 59 QEMU drivers, 25 dynamips files, 3 base classes. Largely mechanical. |
+| `templates/` | 20 of 133 unattributed | **Trivial** | Data, not code; and 111 of them are already BSD-3. |
 
-**What would change my mind.** If the owner intends to sell or offer commercial
-support around this, the §7.2 exposure stops being a background risk and becomes
-a diligence item, and Path 2 — reimplementing the device layer, at minimum —
-moves from "proportionate for a subset" to "necessary". If upstream answers,
-everything above simplifies and BSD-3 becomes straightforwardly correct rather
-than the best available. If a lawyer takes a dim view of §4, delete
-`refreshIolLicense()` and lose one manual step for IOL users.
+Two observations that should shape the order.
+
+**The unlicensed body is smaller than it first appears.** The headline "445
+files" counts every file; the actual source is ~64,000 lines, of which
+two-thirds is the React frontend. The PHP side — the part that carries the
+product's behaviour — is about 22,700 lines across `devices/` and `store/app`.
+That is large but it is not a decade of work.
+
+**The fork has already proved it can do this.** `platform/wrappers/src` is ~2,500
+lines of C reimplementing three console wrappers, written clean-room from a
+behavioural specification by someone who had not read the originals, and it
+works. The method exists, it is documented in
+`platform/wrappers/src/README.md`, and it produced better code than the
+originals — the SSH-to-localhost root key went away because someone rewrote the
+thing rather than vendoring it. That is the template.
+
+### A sensible order
+
+**Phase A — `devices/`, the highest ratio of coverage to effort.**
+90 files, ~10,400 lines, and the most mechanical code in the tree: each driver
+translates template fields into a command line. The interface is already
+documented in `README.md`, the behaviour is observable, and there is a test
+harness (`tools/integration/node-types.sh`) that exercises it. Start with the
+five base classes (`device.php`, `interfc.php`, and the qemu/dynamips/docker
+bases) since every driver inherits from them, then the QEMU family, which is 59
+near-identical files that mostly differ in flag construction. `devices/interfc.php`
+is BSD-3-inherited rather than PNETLab-authored, so it does not need replacing
+at all — only its notice, now restored.
+
+**This phase also has a forcing event already on the roadmap.** Phase 02.5 is
+the rebase-or-forward-port decision, and the box ships 8 QEMU drivers the repo
+does not have. Whichever way that goes, these files are being touched. Rewriting
+rather than importing costs the difference between the two, not the whole cost.
+
+**Phase B — `store/app`, following the Laravel migration.**
+~12,300 lines, and Phase 03 already plans to "start from a fresh skeleton and
+port `app/` onto it". Porting file-by-file and rewriting file-by-file are much
+closer in cost than they look, because the port already requires reading and
+understanding every file. The order within it: controllers first (they are the
+thinnest and most replaceable), then helpers, then models — the models encode
+the database schema, which is the part with the least design freedom and the
+least value in rewriting.
+
+**Phase C — the React frontend, and only if it must be done.**
+~41,300 lines, low replaceability, and the least likely to be worth a clean-room
+rewrite for licensing reasons alone. If the fork ever does a genuine frontend
+modernisation — the roadmap's Phase 06 contemplates React 16 → 18 and shedding
+primereact and redux — that is the moment this becomes affordable, because a
+rewrite that was going to happen anyway costs nothing extra in licensing terms.
+Until then this is the residual risk and it should be named as such rather than
+pretended away.
+
+**Phase 0, in parallel with all of it — ask.**
+One email to `pnetlabs@gmail.com`, the address on all five upstream commits:
+would they add an MIT or BSD-3 `LICENSE` to `pnetlab_main`, or grant this fork
+those terms in writing? While asking, ask the same of `pnetlab/pnetlab_wrapper`.
+The repository was published deliberately and publicly with a README addressed
+to developers explaining how to extend it — that is the behaviour of someone who
+intended the code to be used and did not think about the paperwork. Last push
+2023-07-24, and `secure.pnet-lab.com` no longer resolves, so expect no reply.
+Send it anyway and keep the sent copy: a documented good-faith attempt is worth
+having, and if it lands it deletes this entire section.
+
+### What "done" looks like
+
+Not "every file rewritten". Done is: **no file in the tree carries a copyright
+line without a licence grant, and no file lacking a notice is materially
+PNETLab's work.** That is reachable through Phases A and B alone if the owner
+accepts the frontend as documented residual risk — which is a legitimate
+position, and a much smaller one than today's.
+
+Track it the way the sudo policy is tracked. `tests/Licensing/LicenceTest.php`
+already counts inherited notices with a floor assertion; the same shape can
+count files marked `@copyright pnetlab.com` with a **ceiling** that only ever
+falls. That turns a programme into a ratchet, and it is what stopped the sudo
+grants creeping back.
 
 ---
 
@@ -757,7 +964,7 @@ than the best available. If a lawyer takes a dim view of §4, delete
 
 Three, in order of how much rides on them.
 
-1. **§2.3 — the unlicensed PNETLab body.** Specifically: does GitHub's ToS
+1. **Section 2.3 / gap G1 — the unlicensed PNETLab body.** Specifically: does GitHub's ToS
    §D.5 fork grant permit this repository to exist and be modified publicly, and
    does it permit anything beyond that — an installer that deploys the code onto
    a user's machine, a release tarball, an ISO? This is the question that
@@ -765,7 +972,7 @@ Three, in order of how much rides on them.
    engineering reading is least reliable, because the answer turns on what
    "through the Service" means and on jurisdiction.
 
-2. **§4 — the keygen call site.** Does calling an operator-supplied
+2. **Section 4 — the keygen call site.** Does calling an operator-supplied
    `CiscoIOUKeygen.py`, and writing the `iourc` it produces, amount to
    trafficking in a circumvention device or to contributory infringement, in the
    jurisdictions the project cares about? My assessment is that it does not and
@@ -773,13 +980,16 @@ Three, in order of how much rides on them.
    anti-circumvention law, the penalties are the most severe in this document,
    and I would not publish on my own reading of it.
 
-3. **§2.4 — CKEditor and the committed bundles.** Whether a webpack bundle
-   containing GPL-2.0-or-later code is a "work based on the Program" for GPL-2
-   purposes, and therefore whether a permissive root `LICENSE` over a repository
-   containing `lab.js` is a misstatement. My recommendation routes around this
-   by not committing the bundles, which is worth doing regardless — but if the
-   owner prefers to keep committing them, the question needs answering rather
-   than avoiding.
+3. **Section 2.4 / gap G2 — CKEditor and the committed bundles.** Whether a
+   webpack bundle containing GPL-2.0-or-later code is a "work based on the
+   Program" for GPL-2 purposes, and therefore whether the root `LICENSE` over a
+   repository containing `lab.js` is a misstatement. This one got sharper rather
+   than softer during the work: the first instinct was to route around it by not
+   committing the bundles, and that turned out to break offline installs
+   (section 2.4), so the bundles stay and the question is live. The scope
+   section of `LICENSE` is written to be true either way — it excludes the built
+   output explicitly — but whether that exclusion is *sufficient*, as opposed to
+   merely honest, is a lawyer's question.
 
 A fourth, lower-stakes and worth raising in the same conversation since it costs
 nothing extra: whether the nine stripped BSD-3 notices create any residual
@@ -789,61 +999,84 @@ that restoring them is both necessary and sufficient.
 
 ---
 
-## 10 · Checklist before the repository is made public
+## 10 · Checklist
 
-Ours to do, no decision required:
+### THE GATE — nothing below this line makes the repository publishable on its own
 
-- [ ] Delete `store/app/Helpers/Captcha/ARIALBD.TTF`; point
-      `Captcha::$CONFIG['CAPTCHA_FONT']` at DejaVu Sans Bold or Liberation Sans
-      Bold from the system font path.
-- [ ] Remove `store/app/Console/Commands/idlepc`; reimplement idle-PC
-      calculation against dynamips' console, or drop the feature and say so.
-- [ ] Restore the BSD-3 header on the nine files in §2.2, each with an added
-      "Modified in this fork" line. Do not silently re-add a `@version` that is
-      no longer accurate.
-- [ ] Remove or correct `"license": "MIT"` in `store/composer.json`.
-- [ ] Add `includes/Parsedown.LICENSE` (MIT, Emanuil Rusev) so Parsedown's
-      header stops pointing at a file that is not there.
+> **No known-incompatible component remains in the tree, or each remaining one
+> has been explicitly accepted by the owner and named in `LICENSE`.**
+>
+> This is the single condition on making the repository public. It exists
+> because publishing with a BSD-3 `LICENSE` over a tree containing components
+> that licence cannot cover is a false statement to every recipient about what
+> they may redistribute — worse than declaring nothing, which is where the
+> project was before this commit. See "Adopted is not published".
+>
+> - [ ] **G1** · the unlicensed PNETLab body — replaced (section 8), or
+>       accepted in writing by the owner and named in `LICENSE`
+> - [ ] **G2** · CKEditor GPL-2.0+ in committed bundles — bundles built in CI
+>       or at install time, or accepted and named (currently: **named**, in
+>       `LICENSE`, pending a decision to close it properly)
+> - [ ] **G3** · `idlepc` — replaced by `unl_wrapper -a idlepc`, or accepted
+>       and named
+> - [ ] Owner has read section 9 and decided whether to take legal advice first
+
+### Done in this commit
+
+- [x] Adopt BSD-3-Clause: `LICENSE` at the root, with a scope section naming
+      what it does not cover.
+- [x] Correct `store/composer.json` from the skeleton's `"license": "MIT"` to
+      `"license": "BSD-3-Clause"`.
+- [x] Restore the BSD-3 notice on the nine files in section 2.2, transcribed
+      from the upstream file, each with a "derived from" line and a
+      modification note. `@version 20160719` deliberately not carried over.
+      `devices/interfc.php` keeps both attributions.
+- [x] Replace `ARIALBD.TTF` with a candidate list ending in the in-tree Ubuntu
+      Bold, so the captcha renders offline with no font package. Delete the
+      proprietary file.
+- [x] Unpack and read the `idlepc` archive; record what it does — including the
+      passwordless root SSH key — in the sudo policy, the controller call site
+      and section 3. Keep the capability and the grant; design the replacement.
 - [x] Correct the "no source-level derivative work" sentence in
       `install/vendor/guacamole/README.md`, and attribute
       `install/sql/schema/guacdb.sql` to Apache-2.0.
 - [x] Correct the claim that `pnetlab/pnetlab_wrapper` is BSD-3-Clause, in
       `docs/HANDOVER.md` and `platform/wrappers/src/README.md`.
-- [x] Write `THIRD-PARTY.md`.
-- [x] Ship `THIRD-PARTY.md` with the appliance — already true, because
-      `deploy_excludes()` in `install/lib/deploy.sh` does not list it and the
-      root is rsynced to `/opt/unetlab/html`. **Add a test asserting it stays
-      out of that exclude list**, so a later tidy-up cannot silently drop the
-      one file that satisfies BSD-3 clause 2 for a binary distribution.
-- [ ] Add a CI job that fails on: any tracked `*.qcow2 *.vmdk *.bin *.iso *.ova
-      *.img *.vhd`; any path matching `*keygen*`; any file whose content matches
-      the `iourc` `[license]` format; any tracked `*.ttf`/`*.otf` not covered by
-      a licence file in the same tree.
-- [ ] Delete the dead AngularJS tree and
-      `angular-file-upload/upload.php`, removing their obligations with them.
+- [x] Write `THIRD-PARTY.md`, and confirm it reaches the appliance:
+      `deploy_excludes()` does not list it and the root is rsynced to
+      `/opt/unetlab/html`.
+- [x] `tests/Licensing/LicenceTest.php`: asserts the licence declarations agree,
+      the nine notices are present, the inherited-notice count has a floor of
+      130, no tracked font is unaccounted for, no vendor image or keygen or
+      `idlepc` is tracked, `THIRD-PARTY.md` and `LICENSE` are not excluded from
+      the deploy, and the captcha's fallback font resolves.
 
-Needs the owner's decision:
+### Ours to do, no decision required
 
-- [ ] Choose a licence (§7.1). Recommendation: BSD-3-Clause.
-- [ ] Choose a path for §2.3. Recommendation: send the upstream request
-      (Path 1), and publish under Path 4 with the position documented.
-- [ ] Decide CKEditor (§2.4). Recommendation: stop committing built bundles;
-      keep the editor for now.
-- [ ] Decide the keygen call site (§4). Recommendation: keep it, name the
-      boundary in `README.md`, guard it in CI.
-- [ ] Decide whether to rewrite history before the first public push, to remove
-      the font and the blob from `07ef833` onward.
-- [ ] Establish or replace the Cisco icon set (§5).
-
-After the decision:
-
-- [ ] Add the root `LICENSE`.
-- [ ] Add `SPDX-License-Identifier` headers to the 114 fork-authored files.
+- [ ] Add `includes/Parsedown.LICENSE` (MIT, Emanuil Rusev) so Parsedown's
+      header stops pointing at a file that is not there.
+- [ ] Add `SPDX-License-Identifier: BSD-3-Clause` to the 114 fork-authored files.
 - [ ] Add a "Licensing" section to `README.md`: what the fork licenses, what it
       inherited, what it does not ship (no vendor images, no Cisco software, no
       licence keys, no keygen), and a link here.
-- [ ] Adjacent, and not ours in this document, but in the same gate:
-      `store/.env` is tracked and contains an `APP_KEY`.
+- [ ] Name the IOL boundary in `README.md` and rename `refreshIolLicense()` so
+      it does not read as though the fork participates in licensing IOL
+      (section 4).
+- [ ] Delete the dead AngularJS tree and `angular-file-upload/upload.php`,
+      removing their attribution obligations with them.
+- [ ] Add a `MODIFICATIONS` note beside `includes/Slim/LICENSE`.
+- [ ] Send the upstream request (section 8, Phase 0) and keep the sent copy.
+
+### Needs the owner's decision
+
+- [ ] **The gate above.** Which of G1/G2/G3 get closed, and which get accepted
+      and named.
+- [ ] Whether to rewrite history before the first public push, to remove the
+      Monotype font and the `idlepc` blob from `07ef833` onward. Deleting them
+      from `HEAD` does not remove them from history.
+- [ ] Establish or replace the Cisco icon set (section 5).
+- [ ] Whether to take legal advice on the three points in section 9 before
+      publishing, or to publish on this document's reading of them.
 
 ---
 

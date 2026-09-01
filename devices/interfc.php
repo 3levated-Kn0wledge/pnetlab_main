@@ -1,11 +1,28 @@
 <?php
 
 /**
- * 
- * @author LIN 
+ * devices/interfc.php
+ *
+ * Class for node interfaces.
+ *
+ * Derived from UNetLab html/includes/__interfc.php. This file is the one case
+ * in the tree where the upstream BSD-3-Clause notice was not merely dropped
+ * but REPLACED by a different attribution: the pnetlab.com block below stood
+ * alone here, over Andrea Dainese's code. Both are recorded now, in the order
+ * they arose. See docs/LICENSING.md section 2.2.
+ *
+ * @author Andrea Dainese <andrea.dainese@gmail.com>
+ * @copyright 2014-2016 Andrea Dainese
+ * @license BSD-3-Clause https://github.com/dainok/unetlab/blob/master/LICENSE
+ * @link http://www.unetlab.com/
+ *
+ * @author LIN
  * @copyright pnetlab.com
  * @link https://www.pnetlab.com/
- * 
+ *
+ * Substantially modified by PNETLab and by the pnetlab_main fork. Those
+ * modifications are licensed under the terms in this repository's LICENSE;
+ * the notice above must be retained regardless.
  */
 
 class Interfc

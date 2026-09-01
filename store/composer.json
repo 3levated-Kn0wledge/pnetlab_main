@@ -5,7 +5,7 @@
         "framework",
         "laravel"
     ],
-    "license": "MIT",
+    "license": "BSD-3-Clause",
     "type": "project",
     "require": {
         "firebase/php-jwt": "^6.10",
