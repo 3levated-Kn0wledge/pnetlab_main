@@ -180,6 +180,22 @@ step_platform() {
 		die "platform/wrappers is missing from the source tree"
 	fi
 
+	# unl_wrapper's enumerated actions. It requires these as
+	# __DIR__/actions/<Class>.php, so they have to sit beside the wrapper and be
+	# root-owned and not group-writable: they run as root, and www-data can
+	# invoke the wrapper. 0644 root:root, in a 0755 root:root directory.
+	if [[ -d "${wsrc}/actions" ]]; then
+		run install -d -m 0755 -o root -g root /opt/unetlab/wrappers/actions
+		local action
+		for action in "${wsrc}/actions"/*.php; do
+			[[ -f "$action" ]] || continue
+			run install -m 0644 -o root -g root "$action" /opt/unetlab/wrappers/actions/
+		done
+		ok "wrapper actions installed"
+	else
+		die "platform/wrappers/actions is missing from the source tree"
+	fi
+
 	if have nsenter; then
 		run ln -sfn "$(command -v nsenter)" /opt/unetlab/wrappers/nsenter
 		ok "nsenter wired to util-linux"

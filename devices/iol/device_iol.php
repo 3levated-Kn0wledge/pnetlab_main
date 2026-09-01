@@ -279,14 +279,20 @@ class device_iol extends device
 
     public function stop(){
 
-        $cmd = 'ps -aux | grep keepalive | grep ' . escapeshellarg('vunl' . $this->getSession() . '_')
-            . ' | grep -v "ps -aux" | tr -s " "| cut -d " " -f 2';
-        $o = [];
+        // Reap every keepalive helper this node session started.
+        //
+        // The pids are resolved inside unl_wrapper, from /proc, by the tenant
+        // uid that owns them. What was here before ran `ps -aux | grep
+        // keepalive | grep vunl<session>_ | cut -d " " -f 2` and handed each
+        // field to `sudo kill -9`: the pattern matched process TITLES, so any
+        // process whose command line happened to contain those substrings was
+        // killed as root, and a non-numeric field would have been passed to
+        // kill(1) unquoted. It also never matched the helper it was aiming at,
+        // because the helper is started with -n <session>_<iface> and no
+        // 'vunl' prefix.
+        $cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a iol-keepalive'
+            . ' -S ' . (int) $this->getSession() . ' --state down';
         exec($cmd, $o, $rc);
-        foreach($o as $pid){
-            exec('sudo kill -9 '. $pid);
-            error_log('sudo kill -9 '. $pid);
-        }
         return parent::stop();
     }
 

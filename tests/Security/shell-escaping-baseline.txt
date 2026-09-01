@@ -149,15 +149,16 @@ devices/qemu/device_qemu_wp.php $this->delay
 # the mv of $s to $d — folder paths taken off the request. Double quotes do not
 # stop $( ) or a backtick. These are the folder create/rename/delete routes the
 # functional suite does not cover either.
-# The $pid / $o[0] entries are values read back from a previous exec's output and
-# fed to kill(1) without a cast.
+# The $pid / $o[0] entries were values read back from a previous exec's output
+# and fed to kill(1) without a cast. All three are GONE: they were the IOL
+# keepalive teardown, which ran `ps -aux | grep keepalive | ... | cut -d " " -f 2`
+# and passed each field to `sudo kill -9`. unl_wrapper -a iol-keepalive --state
+# down resolves those pids itself, from /proc, by the tenant uid that owns them,
+# so there is no shell left to escape into.
 includes/api_folders.php $path
 includes/api_folders.php $s
 includes/api_folders.php $d
 includes/api_labs.php $user['pod']
-devices/interfc.php $pid
-devices/interfc.php $o[0]
-devices/iol/device_iol.php $pid
 
 # --- 8. secureCmd() returns its input unescaped ---
 #

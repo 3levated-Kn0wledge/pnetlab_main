@@ -23,7 +23,26 @@ umask(0002);
 // on installing a package nobody has signed (the other half is a root-owned
 // marker file, checked below — one switch that the web layer could ever reach
 // is not a gate).
-$options = getopt('oT:D:S:F:P:I:a:', array('allow-unsigned'));
+$options = getopt('oT:D:S:F:P:I:a:', array('allow-unsigned', 'state:', 'type:', 'name:'));
+
+/**
+ * One value for an option, or null.
+ *
+ * getopt() returns an ARRAY the moment an option is repeated: `-S 1 -S 2` gives
+ * array('1','2'), and (int) on that array is 1 rather than an error. Every
+ * check further down this script that casts an option to int has that shape,
+ * which is how a value gets past a numeric-looking test without ever being the
+ * value the validator inspected. The actions added below take their arguments
+ * through here instead, so a repeated option is refused rather than quietly
+ * resolved to something else.
+ */
+function unl_single_option($options, $name)
+{
+	if (!isset($options[$name])) return null;
+	$value = $options[$name];
+	if (is_array($value)) return null;
+	return $value;
+}
 
 // Checking -a (action)
 if (!isset($options['a'])) {
@@ -203,6 +222,67 @@ switch ($action) {
 		if (!$packageResult['ok']) {
 			error_log(date('M d H:i:s ') . 'ERROR: package removal failed: ' . $packageResult['error']);
 			exit(35);
+		}
+		break;
+	case 'iol-keepalive':
+		// Start or stop the IOL L1 keepalive helper for a link.
+		//
+		// This action exists to delete a gadget, not to add a feature. What it
+		// replaces is written out in full at the top of
+		// actions/UnlIolKeepalive.php: devices/interfc.php used to build a shell
+		// string and hand it to `sudo php .../Console/Commands/wrapper <gid>
+		// <uid> '<string>'`, a thirteen-line script whose whole content was
+		// setgid, setuid and shell_exec of its third argument. Any caller who
+		// could reach a link-state change could choose that string, and could
+		// choose uid 0 by passing 0.
+		//
+		// Here the caller says only which node session, which interface, and up
+		// or down. The uid, the script, the working directory and every argument
+		// are decided inside the class, and it execs an argv array — there is no
+		// shell on this path at all.
+		require_once(__DIR__ . '/actions/UnlIolKeepalive.php');
+
+		$state = unl_single_option($options, 'state');
+		if ($state !== 'up' && $state !== 'down') {
+			error_log(date('M d H:i:s ') . 'ERROR: -a iol-keepalive needs --state up|down');
+			exit(40);
+		}
+
+		$keepalive = new UnlIolKeepalive(array(
+			// The lookup is a prepared statement on the session id and nothing
+			// else. The class treats what comes back as untrusted and revalidates
+			// every field, because the row is written by the web layer.
+			'lookup' => function ($session) {
+				$db = checkDatabase();
+				$statement = $db->prepare('SELECT ' . NODE_SESSION_LAB . ', ' . NODE_SESSION_TYPE
+					. ', ' . NODE_SESSION_IOL . ' FROM ' . NODE_SESSIONS_TABLE
+					. ' WHERE ' . NODE_SESSION_ID . ' = :id');
+				$statement->execute(array('id' => $session));
+				$row = $statement->fetch(PDO::FETCH_ASSOC);
+				if (!is_array($row)) return null;
+				return array(
+					'lab'    => $row[NODE_SESSION_LAB],
+					'type'   => $row[NODE_SESSION_TYPE],
+					'iol_id' => $row[NODE_SESSION_IOL],
+				);
+			},
+		));
+
+		$rawSession = unl_single_option($options, 'S');
+		$rawIface   = unl_single_option($options, 'I');
+
+		if ($state === 'up') {
+			$keepaliveResult = $keepalive->up($rawSession, $rawIface);
+		} else {
+			// No -I means every interface of the session, which is what node stop
+			// wants. The pids are found by tenant uid and script path, so this
+			// works even when the database row has already gone.
+			$keepaliveResult = $keepalive->down($rawSession, $rawIface);
+		}
+		echo 'IOL-KEEPALIVE-RESULT ' . json_encode($keepaliveResult) . "\n";
+		if (!$keepaliveResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: iol-keepalive: ' . $keepaliveResult['error']);
+			exit(41);
 		}
 		break;
 	case 'delete':

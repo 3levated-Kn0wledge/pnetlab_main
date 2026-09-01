@@ -627,30 +627,38 @@ class Interfc
 
 			// if ($ifIndex === null) return;
 
-			$cmd = 'id -u ' . escapeshellarg('unl' . $this->device->getSession()) . ' 2>&1';
-			exec($cmd, $o, $rc);
-			$uid = $o[0];
-
-			$cmd = 'sudo perl ' . escapeshellarg($this->device->getRunningPath() . '/keepalive.pl')
-					. ' -i ' . escapeshellarg($this->device->getIolId())
-					. ' -p ' . escapeshellarg($this->getId())
-					. ' -n ' . escapeshellarg($this->device->getSession() . '_' . $this->getId())
-					. ' > ' . escapeshellarg($this->device->getRunningPath() . '/keepalive.log') . ' 2>&1 &';
+			// One enumerated wrapper action, two integers and a two-value enum.
+			//
+			// What used to be here was the worst gadget in the tree. It read the
+			// tenant uid out of `id -u`, built a shell string containing
+			// `sudo perl <runningPath>/keepalive.pl ...`, and passed that string
+			// as the third argument of
+			//     sudo php .../store/app/Console/Commands/wrapper 32768 <uid> '<string>'
+			// whose entire body was posix_setgid, posix_setuid and shell_exec of
+			// that argument. Any request that could change a link state could
+			// choose the string, and could choose to keep root by passing 0 as
+			// the uid. That script is deleted; nothing constructs a command line
+			// here any more.
+			//
+			// The down path is the same action. It used to be
+			// `ps -aux | grep keepalive | ... | cut -d " " -f 2` fed straight to
+			// `sudo kill -9 $pid`, which killed whatever the grep matched; the
+			// wrapper now resolves pids from /proc by the tenant uid and the
+			// script path instead.
+			$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a iol-keepalive'
+				. ' -S ' . (int) $this->device->getSession()
+				. ' -I ' . (int) $this->getId();
+			// Two literal branches rather than a ternary on $status. The
+			// tokenizer sweep judges each interpolation on its own and cannot
+			// see that a ternary yields one of two literals, so writing it the
+			// short way puts a new entry in the baseline for no reason.
 			if ($status == 'up') {
-				$wrapper = "sudo php /opt/unetlab/html/store/app/Console/Commands/wrapper 32768 " . $uid . " '" . $cmd . "'";
-				error_log(date('M d H:i:s ') . $wrapper);
-				exec($wrapper, $netIndex, $rc);
+				$cmd .= ' --state up';
 			} else {
-
-				$cmd = 'ps -aux | grep keepalive | grep ' . escapeshellarg($this->device->getSession() . '_' . $this->getId())
-					. ' | grep -v "ps -aux" | tr -s " "| cut -d " " -f 2';
-				$o = [];
-				exec($cmd, $o, $rc);
-				foreach ($o as $pid) {
-					exec('sudo kill -9 ' . $pid);
-					error_log('sudo kill -9 ' . $pid);
-				}
+				$cmd .= ' --state down';
 			}
+			error_log(date('M d H:i:s ') . $cmd);
+			exec($cmd, $o, $rc);
 
 			return;
 		}

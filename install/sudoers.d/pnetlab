@@ -69,8 +69,12 @@ www-data ALL=(root) NOPASSWD: /usr/sbin/sysctl
 # --- Process and node lifecycle -------------------------------------------
 www-data ALL=(root) NOPASSWD: /usr/bin/fuser
 www-data ALL=(root) NOPASSWD: /usr/bin/pkill
-www-data ALL=(root) NOPASSWD: /usr/bin/kill
 www-data ALL=(root) NOPASSWD: /usr/bin/nc
+# kill was removed with perl, below. Its only two call sites were the IOL
+# keepalive teardown in devices/interfc.php and devices/iol/device_iol.php, both
+# of which took a pid out of `ps -aux | grep`. unl_wrapper -a iol-keepalive
+# --state down resolves the pids itself, from /proc, by the tenant uid that owns
+# them, so no pid crosses the boundary any more.
 
 # --- Read-only host inspection --------------------------------------------
 # nproc and top were removed: counting cores and listing processes in batch
@@ -92,7 +96,19 @@ www-data ALL=(root) NOPASSWD: /usr/sbin/ntpdate
 # arguments. They are listed because the product does not currently work without
 # them, not because granting them is acceptable.
 www-data ALL=(root) NOPASSWD: /usr/bin/php               # arbitrary code
-www-data ALL=(root) NOPASSWD: /usr/bin/perl              # arbitrary code
+# There is deliberately no /usr/bin/perl line. It existed for exactly one thing:
+# the IOL L1 keepalive helper, which devices/interfc.php launched as
+#     sudo php .../Console/Commands/wrapper 32768 <uid> 'sudo perl .../keepalive.pl ...'
+# — a script whose whole body was setgid, setuid and shell_exec of its third
+# argument, i.e. "run this string as root, or first drop to any uid you name".
+# It is now `unl_wrapper -a iol-keepalive -S <session> -I <iface> --state up|down`,
+# which computes the uid, confirms it against the passwd entry, and execs a FIXED
+# script path with an argv array. Nothing on that path builds a command line.
+#
+# The php line above is NOT still here for that. Its last caller is
+# Admin/DefaultController::upgrade(), which runs `sudo php .../artisan upgrade
+# now`; that file belongs to the CSRF work in flight and has not been moved yet.
+# When it goes, this line goes with it, and SudoersPolicyTest will say so.
 www-data ALL=(root) NOPASSWD: /usr/bin/nohup             # launches anything
 www-data ALL=(root) NOPASSWD: /usr/sbin/service          # launches anything
 # There is deliberately no /usr/bin/docker line. All thirty-one docker
