@@ -60,13 +60,20 @@ class ScandProcess extends Command
     public function handle()
     {
         set_time_limit(0);
-        exec('sudo rm -f /root/.toprc');
+        // The `sudo rm -f /root/.toprc` that stood here was a workaround for
+        // running top as root: a stale root-owned config would make it fail.
+        // Nothing here runs as root any more, so there is nothing to clear —
+        // and the removal itself was the only reason this command needed to
+        // write outside its own home.
 
-        $cores = exec('sudo nproc --all');
+        // No sudo: counting cores is unprivileged.
+        $cores = exec('nproc --all');
         $cores = (int)$cores;
 
         $out = [];
-        $data = exec('sudo top -n2 -c -b -w 512 | egrep "%CPU|qemu|unetlab\/tmp|dynamip|vpcs" | grep -v "grep" | grep -v "wrapper"', $out, $rc);
+        // No sudo: top in batch mode reports every process to any user. It was
+        // never the privilege that made this work.
+        $data = exec('top -n2 -c -b -w 512 | egrep "%CPU|qemu|unetlab\/tmp|dynamip|vpcs" | grep -v "grep" | grep -v "wrapper"', $out, $rc);
         $start = 0;
 
         $nodeData = [];

@@ -598,7 +598,9 @@ function isBridge($s)
 function isInterface($s)
 {
 	$s = secureCmd($s);
-	$cmd = 'sudo ip link show ' . escapeshellarg($s) . ' 2>&1';
+	// No sudo: reading link state is unprivileged. `ip link show` needs root to
+	// CHANGE a link, never to look at one.
+	$cmd = 'ip link show ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
 		return True;
@@ -610,7 +612,8 @@ function isInterface($s)
 function isInterfaceUp($s)
 {
 	$s = secureCmd($s);
-	$cmd = 'sudo ip link show ' . escapeshellarg($s) . ' | grep UP';
+	// No sudo, for the same reason as isInterface() above.
+	$cmd = 'ip link show ' . escapeshellarg($s) . ' | grep UP';
 	exec($cmd, $o, $rc);
 	if(count($o) > 0) return true;
 	return false;

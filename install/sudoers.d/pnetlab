@@ -73,9 +73,12 @@ www-data ALL=(root) NOPASSWD: /usr/bin/kill
 www-data ALL=(root) NOPASSWD: /usr/bin/nc
 
 # --- Read-only host inspection --------------------------------------------
+# nproc and top were removed: counting cores and listing processes in batch
+# mode are unprivileged, and the only caller (the scand_process command) was
+# granted root for neither. Reading link state is unprivileged too, so
+# isInterface()/isInterfaceUp() no longer sudo `ip link show` — but the ip
+# grant stays, because changing links genuinely needs it.
 www-data ALL=(root) NOPASSWD: /usr/sbin/dmidecode
-www-data ALL=(root) NOPASSWD: /usr/bin/nproc
-www-data ALL=(root) NOPASSWD: /usr/bin/top
 www-data ALL=(root) NOPASSWD: /usr/bin/ps
 www-data ALL=(root) NOPASSWD: /bin/echo
 
