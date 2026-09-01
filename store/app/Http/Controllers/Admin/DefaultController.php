@@ -11,6 +11,7 @@ use App\Helpers\Request\Reply;
 use Illuminate\Support\Facades\Auth;
 use App\Helpers\View\JS;
 use Illuminate\Support\Facades\Cookie;
+use App\Helpers\Auth\AuthCookie;
 use App\Helpers\Control\Ctrl;
 use App\Helpers\DB\Models;
 use Illuminate\Support\Facades\Response;
@@ -75,11 +76,7 @@ class DefaultController extends Controller
     function refreshToken()
     {
         $cookie = Cookie::get('token', '');
-        Cookie::queue(Cookie::make('token', $cookie, 60, '/', $_SERVER['SERVER_NAME'],
-            request()->isSecure(),  // Secure only when actually served over TLS
-            true,                   // HttpOnly
-            false,                  // not raw
-            'Lax'));                // SameSite
+        AuthCookie::issue($cookie, 60);
         Models::get('Admin/Users')->edit([
             DATA_KEY => [[[USER_USERNAME, '=', Auth::user()->{USER_USERNAME}]]],
             DATA_EDITOR => [USER_ONLINE_TIME => time(), USER_SESSION => time() + SESSION],

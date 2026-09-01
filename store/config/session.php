@@ -185,13 +185,26 @@ return [
     |--------------------------------------------------------------------------
     |
     | This option determines how your cookies behave when cross-site requests
-    | take place, and can be used to mitigate CSRF attacks. By default, we
-    | do not enable this as other CSRF protection services are in place.
+    | take place, and can be used to mitigate CSRF attacks.
     |
-    | Supported: "lax", "strict"
+    | It was null, which emits no attribute at all. That mattered more here
+    | than it does in a stock Laravel app: VerifyCsrfToken is still out of the
+    | 'web' group (see store/app/Http/Kernel.php), so nothing else was checking
+    | anything. This key also decides the attribute on the XSRF-TOKEN cookie
+    | that VerifyCsrfToken::addCookieToResponse() issues, so setting it now
+    | means that cookie is born correct whenever the middleware is switched on.
+    |
+    | Lax rather than Strict: the online login flow returns from APP_AUTHEN by
+    | a top-level navigation into /auth/login/license, and Strict would withhold
+    | the session cookie on it. license() reads only request input and needs no
+    | prior session, so Lax is sufficient and Strict would buy nothing.
+    |
+    | Left as an env() so a deployment can raise it without editing config.
+    |
+    | Supported: "lax", "strict", "none"
     |
     */
 
-    'same_site' => null,
+    'same_site' => env('SESSION_SAME_SITE', 'lax'),
 
 ];

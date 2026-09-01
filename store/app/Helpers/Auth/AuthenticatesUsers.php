@@ -105,7 +105,7 @@ trait AuthenticatesUsers
         
         $request->session()->invalidate();
         
-        Cookie::queue(Cookie::make('token', null, -3600, '/', APP_DOMAIN));
+        AuthCookie::forget();
 
         Reply::finish(true,'Success', '');
     }

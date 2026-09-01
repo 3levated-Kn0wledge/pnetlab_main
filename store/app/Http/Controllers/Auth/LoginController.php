@@ -15,6 +15,7 @@ use App\Helpers\DB\Models;
 use Exception;
 use Illuminate\Queue\RedisQueue;
 use Illuminate\Support\Facades\Cookie;
+use App\Helpers\Auth\AuthCookie;
 use Illuminate\Support\Facades\Hash;
 
 class LoginController extends Controller
@@ -193,11 +194,7 @@ class LoginController extends Controller
 
         updateUserToken($username, $hashPass, $pod);
         
-        Cookie::queue(Cookie::make('token', $cookie, 60, '/', $_SERVER['SERVER_NAME'],
-            request()->isSecure(),  // Secure only when actually served over TLS
-            true,                   // HttpOnly
-            false,                  // not raw
-            'Lax'));                // SameSite
+        AuthCookie::issue($cookie, 60);
 
         return true;
     }

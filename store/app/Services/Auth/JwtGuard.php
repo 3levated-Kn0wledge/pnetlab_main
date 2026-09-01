@@ -10,6 +10,7 @@ use App\Helpers\Token\JWToken;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Auth\AuthenticationException;
 use App\Helpers\Request\Reply;
+use App\Helpers\Auth\AuthCookie;
 
 class JwtGuard implements Guard
 {
@@ -193,7 +194,9 @@ class JwtGuard implements Guard
     
     private function refreshToken(){
         $newToken = JWToken::refresh($this->getTokenForRequest());
-        Cookie::queue(Cookie::make('token', $newToken, config('jwt.ttl')*60, '/', APP_DOMAIN));
+        // APP_DOMAIN, as before -- see AuthCookie::scopes() for why that scope
+        // is kept rather than corrected here.
+        AuthCookie::issue($newToken, config('jwt.ttl')*60, APP_DOMAIN);
         return;
     }
     
@@ -224,12 +227,12 @@ class JwtGuard implements Guard
     public function logout()
     {
         $this->user = null;
-        Cookie::queue(Cookie::make('token', null, 0, '/', APP_DOMAIN));
+        AuthCookie::forget();
     }
     
     public function login($token)
     {
-        Cookie::queue(Cookie::make('token', $token, config('jwt.ttl')*60, '/', APP_DOMAIN));
+        AuthCookie::issue($token, config('jwt.ttl')*60, APP_DOMAIN);
     }
     
     protected function hasValidCredentials($user, $credentials)
