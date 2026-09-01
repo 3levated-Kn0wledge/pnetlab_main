@@ -34,44 +34,63 @@ class Kernel extends HttpKernel
             \Illuminate\Session\Middleware\StartSession::class,
             // \Illuminate\Session\Middleware\AuthenticateSession::class,
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
-            // VerifyCsrfToken is disabled, and this sweep deliberately left it
-            // that way. Turning it on is a one-line change with an app-wide
-            // blast radius -- every POST to a web route -- and it could not be
-            // shown to be safe from the source alone. What was checked:
+            // VerifyCsrfToken was disabled here, with a written record of why.
+            // It is on now. What the record said, and what each claim turned
+            // out to be worth once it could be checked against a running app:
             //
-            //  - The React frontend posts through axios, which does attach
+            //  - "The React frontend posts through axios, which attaches
             //    X-XSRF-TOKEN from the XSRF-TOKEN cookie on same-origin
-            //    requests, so the ordinary SPA POSTs would most likely
-            //    survive. resources/react/bootstrap.js has its explicit
-            //    X-CSRF-TOKEN wiring commented out, and views/reactjs/
-            //    document.blade.php has its $.ajaxSetup header commented out,
-            //    so nothing sets the token by hand -- it would rest entirely
-            //    on axios's implicit behaviour.
-            //  - The legacy theme's jQuery POSTs (themes/default/js/*.js and
-            //    the bundles in store/public/react/js) all target /api/...,
-            //    which the root .htaccess routes to api.php, outside Laravel
-            //    entirely. Those are unaffected either way.
-            //  - But the shipped bundle store/public/react/js/lab.js also
-            //    contains CKEditor's raw-XMLHttpRequest upload adapter, which
-            //    sets no CSRF header, and the editor upload targets are
-            //    Laravel web routes (/store/public/admin/*/uploader). That
-            //    path would break.
-            //  - There is no vendor/ in this tree and no way to run the app
-            //    here, so none of the above could be confirmed against a live
-            //    request. The built bundles may also lag the sources.
+            //    requests." Correct, and it is the whole front-end story.
+            //    axios reads xsrfCookieName 'XSRF-TOKEN' and writes
+            //    xsrfHeaderName 'X-XSRF-TOKEN'; this middleware issues that
+            //    cookie on every response; EncryptCookies encrypts it on the
+            //    way out and getTokenFromRequest() decrypts the header on the
+            //    way back. Nothing has to be wired by hand, and the commented
+            //    -out blocks in resources/react/bootstrap.js and
+            //    views/reactjs/document.blade.php must STAY commented out --
+            //    both depend on a <meta name="csrf-token"> tag that no Blade
+            //    view in this application emits.
             //
-            // The exclusion list in App\Http\Middleware\VerifyCsrfToken
-            // ('admin/box/*', 'auth/login/license') suggests this was live at
-            // some point and was switched off rather than fixed, which is a
-            // reason to be careful about switching it straight back on.
+            //  - "The legacy theme's jQuery POSTs all target /api/..., outside
+            //    Laravel entirely." Correct. Rechecked: themes/ contains no URL
+            //    under /store/public at all except the <script src> for
+            //    /admin/default/initial, which is a GET. The legacy layer has
+            //    its own defence now, in includes/api_origin_guard.php.
             //
-            // To re-enable safely: uncomment the line below, then exercise (1)
-            // offline login, (2) the online/license return leg, (3) a file
-            // upload through each *_uploader route, and (4) a CKEditor image
-            // upload; anything that 419s needs its token wired up (or, for a
-            // genuinely cross-site callback, an entry in $except).
+            //  - "store/public/react/js/lab.js contains CKEditor's raw-XHR
+            //    upload adapter and the editor uploads target Laravel routes,
+            //    so that path would break." WRONG, and it was the whole
+            //    blocker. The adapter in the bundle is CKEditor 5's stock
+            //    CKFinderUploadAdapter, whose init() is
+            //    `const e = config.get('ckfinder.uploadUrl'); e && (...)` --
+            //    nothing in this application sets ckfinder.uploadUrl, so
+            //    createUploadAdapter is never replaced and the raw XHR never
+            //    runs. All three editor call sites (Step_03.js:204,
+            //    TextEditor.js:221, HTMLEditor.js:559) have their
+            //    createUploadAdapter line commented out, and the only file that
+            //    registers one for real, components/policy/Uploader.js, is
+            //    imported by nothing. There is NO $except entry for CKEditor
+            //    and there must not be one; tests/Security/CsrfTest.php fails
+            //    if any of those facts changes.
             //
-            // \App\Http\Middleware\VerifyCsrfToken::class,
+            //  - "There is no vendor/ in this tree and no way to run the app
+            //    here." No longer true: tests/Laravel/LaravelBootTest.php boots
+            //    the real application and dispatches real requests.
+            //
+            // The thing the record did not say, and the reason enabling this
+            // alone would have been a partial fix that read as a complete one:
+            // this middleware never sees a GET, and the three dynamic
+            // dispatchers in routes/web.php accepted GET for all 157 controller
+            // methods, of which 118 had no verb guard. SameSite=Lax does send
+            // the cookie on top-level GET navigation. So the verb split in
+            // config/readonly_actions.php + Checker::action() had to land with
+            // this line, not after it.
+            //
+            // 'admin/box/*' has been removed from VerifyCsrfToken::$except --
+            // there is no Admin\BoxController and there never was one in this
+            // tree, so it was a wildcard reserving an exemption for a class
+            // that does not exist.
+            \App\Http\Middleware\VerifyCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],
 

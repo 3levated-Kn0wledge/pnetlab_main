@@ -142,6 +142,19 @@ class LabsController extends Controller
         if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
         $action = $request->input('action', '');
         if($action == '') Reply::finish(false, ERROR_UNDEFINE, ['data' => 'Action']);
+
+        // This is the one action on config/readonly_actions.php that is not
+        // read-only end to end, and the reason it is listed there at all is
+        // 'Read': the lab-image previews render
+        //     <img src="/store/public/admin/labs/uploader?action=Read&file=...">
+        // (components/input/InputImg.js:37, components/func/FuncUploadModal.js:207),
+        // and an <img> is a GET. Upload, Delete and History all change state on
+        // the store, so they are closed here with the same guard the rest of the
+        // application uses. Deleting these two lines reopens a GET-reachable
+        // mutation with the config file still looking correct, which is why
+        // tests/Security/CsrfTest.php asserts they are present.
+        if($action !== 'Read') Checker::method('post');
+
         switch ($action) {
     
             case 'Upload':{

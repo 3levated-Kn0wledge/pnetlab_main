@@ -36,12 +36,28 @@ bad()  { printf "  \033[31mFAIL\033[0m %s\n" "$1"; [ -n "${2:-}" ] && printf "  
 chk()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$3', got '$2'"; fi; }
 has()  { case "$2" in *"$3"*) ok "$1";; *) bad "$1" "'$3' not in: $(echo "$2" | head -c 110)";; esac; }
 
+# shellcheck source=tools/integration/lib/http-login.sh
+. "$(dirname "$0")/lib/http-login.sh"
+
 echo "=============== AUTHENTICATION ==============="
-WRONG=$(curl -s -m 25 -X POST $B/auth/login/login -H 'X-Requested-With: XMLHttpRequest' \
+csrf_session_start "$B"
+[ -n "${CSRF_TOKEN:-}" ] && ok "the login page issues an XSRF-TOKEN cookie" \
+                         || bad "the login page issues an XSRF-TOKEN cookie"
+
+# VerifyCsrfToken is enabled, so a tokenless POST is refused before the
+# controller sees it. Assert that directly: it is the whole point of the
+# middleware, and it is the assertion that fails if someone comments it out
+# again.
+chk "a tokenless login POST is refused with 419" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -m 25 -b "$CSRF_JAR" -X POST $B/auth/login/login \
+     --data-urlencode 'username=admin' --data-urlencode 'password=pnet' --data-urlencode 'html=0')" "419"
+
+WRONG=$(csrf_post $B/auth/login/login -H 'X-Requested-With: XMLHttpRequest' \
   --data-urlencode 'username=admin' --data-urlencode 'password=definitely-wrong' --data-urlencode 'html=0')
 has "wrong password is rejected" "$WRONG" "Password is Wrong"
 
-HDRS=$(curl -s -i -m 25 -X POST $B/auth/login/login -H 'X-Requested-With: XMLHttpRequest' \
+csrf_refresh
+HDRS=$(csrf_post $B/auth/login/login -i -H 'X-Requested-With: XMLHttpRequest' \
   --data-urlencode 'username=admin' --data-urlencode 'password=pnet' --data-urlencode 'html=0')
 TOK=$(echo "$HDRS" | grep -oP 'Set-Cookie: token=\K[0-9a-f-]+' | head -1)
 [ -n "$TOK" ] && ok "login succeeds and issues a token" || bad "login issues a token"

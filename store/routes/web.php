@@ -14,6 +14,7 @@
 /*Admin*/
 
 use App\Helpers\Encrypt\Encrypt;
+use App\Helpers\Request\Checker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
 
@@ -129,15 +130,49 @@ Route::match(['post', 'get'], '/auth/login/license', function () {
     return App::call('\App\Http\Controllers\Auth\LoginController@license');
 });
 
+/*
+|--------------------------------------------------------------------------
+| The dynamic dispatchers
+|--------------------------------------------------------------------------
+|
+| These three take the controller AND the method out of the URL, and they used
+| to accept both verbs for all of it: 157 dispatchable controller methods, each
+| reachable by GET as well as POST, of which 39 called Checker::method('post')
+| and 118 did not.
+|
+| That combination survives everything else in the stack. SameSite=Lax on the
+| token cookie (Helpers/Auth/AuthCookie) withholds it from a cross-site form
+| POST, fetch, XHR, <img> and <iframe> -- but it is sent on a top-level GET
+| navigation, which is what a link, a window.open, a `location =` and a 302 all
+| are. And VerifyCsrfToken, now enabled in Http/Kernel.php, only verifies
+| POST/PUT/PATCH/DELETE; a GET never reaches its check. So
+| `location = 'http://box/store/public/admin/status/apiSetKsm?state=0'` from any
+| page on the internet ran, in full, as the logged-in admin.
+|
+| Checker::action() closes that at the router: POST passes through to
+| VerifyCsrfToken, and GET is refused unless the action is listed in
+| config/readonly_actions.php. Default-deny, so a controller method added later
+| is POST-only without anyone having to remember. It reuses
+| Checker::method('post') for the refusal, so the response body is the
+| 'Not Support' shape the SPA's error_handle() has always understood.
+|
+| The dispatch shape below is otherwise untouched -- still App::call from a
+| closure, so controller middleware still does not run, which is what these
+| controllers expect.
+*/
+
 Route::match(['post', 'get'], '/admin/{controller}/{method}', function ($controller, $method) {
+    Checker::action('admin', $controller, $method);
     return App::call('\App\Http\Controllers\Admin\\'.ucfirst($controller).'Controller@' . $method);
 })->middleware('auth');
 
 Route::match(['post', 'get'], '/user/{controller}/{method}', function ($controller, $method) {
+    Checker::action('user', $controller, $method);
     return App::call('\App\Http\Controllers\User\\'.ucfirst($controller).'Controller@' . $method);
 })->middleware('auth');
 
 Route::match(['post', 'get'], '/notice/{controller}/{method}', function ($controller, $method) {
+    Checker::action('notice', $controller, $method);
     return App::call('\App\Http\Controllers\Notice\\'.ucfirst($controller).'Controller@' . $method);
 })->middleware('auth');
 

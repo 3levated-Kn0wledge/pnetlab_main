@@ -206,41 +206,30 @@ foreach (['logout', 'showLoginForm', 'getMapData', 'callAction', 'getMiddleware'
 
 /*
 |--------------------------------------------------------------------------
-| 4. CSRF verification is either on, or its absence is explained
+| 4. CSRF verification is on
 |--------------------------------------------------------------------------
 |
-| VerifyCsrfToken is commented out of the 'web' group. Re-enabling it could
-| not be shown to be safe from the source alone, so it was left alone -- but
-| a middleware silently missing from the stack is exactly the kind of thing
-| that should never sit there unexplained.
+| This block used to assert only that a *disabled* VerifyCsrfToken carried at
+| least five lines of written justification -- the right assertion while the
+| middleware was off, and a vacuous one the moment it was switched on. It is
+| now the plain fact: the middleware is in the 'web' group as live code.
+|
+| It stays here as well as in tests/Security/CsrfTest.php because this file is
+| the one that reads the routing table, and the two are a pair: the middleware
+| never sees a GET, so enabling it is only half a defence without the verb split
+| on the dynamic dispatchers. CsrfTest.php asserts the other half, and the
+| reasoning is recorded in store/app/Http/Kernel.php.
 */
 
 $kernelLines = file($kernelPath);
-$csrfLine = null;
 $csrfEnabled = false;
-foreach ($kernelLines as $n => $line) {
-    if (strpos($line, 'VerifyCsrfToken::class') === false) {
-        continue;
-    }
+foreach ($kernelLines as $line) {
     if (preg_match('/^\s*\\\\App\\\\Http\\\\Middleware\\\\VerifyCsrfToken::class,/', $line)) {
         $csrfEnabled = true;
-    } else {
-        $csrfLine = $n;
     }
 }
 
-assert_true($csrfEnabled || $csrfLine !== null, 'the Kernel still mentions VerifyCsrfToken');
-
-if (!$csrfEnabled && $csrfLine !== null) {
-    $explanation = 0;
-    for ($k = $csrfLine - 1; $k >= 0; $k--) {
-        if (strpos(ltrim($kernelLines[$k]), '//') !== 0) {
-            break;
-        }
-        $explanation++;
-    }
-    assert_true($explanation >= 5,
-        'the disabled CSRF middleware carries a written justification');
-}
+assert_true($csrfEnabled,
+    "VerifyCsrfToken is enabled in the 'web' middleware group");
 
 test_summary();

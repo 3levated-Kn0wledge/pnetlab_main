@@ -56,7 +56,10 @@ done
 
 echo
 echo "=============== AUTHENTICATION ==============="
-HDRS=$(curl -s -i -m 25 -X POST $B/auth/login/login -H 'X-Requested-With: XMLHttpRequest' \
+# shellcheck source=tools/integration/lib/http-login.sh
+. "$(dirname "$0")/lib/http-login.sh"
+csrf_session_start "$B"
+HDRS=$(csrf_post $B/auth/login/login -i -H 'X-Requested-With: XMLHttpRequest' \
   --data-urlencode 'username=admin' --data-urlencode 'password=pnet' --data-urlencode 'html=0')
 TOK=$(echo "$HDRS" | grep -oP 'Set-Cookie: token=\K[0-9a-f-]+' | head -1)
 if [ -n "$TOK" ]; then ok "login issues a token"; else
