@@ -14,6 +14,28 @@
  */
 
 /**
+ * Validate a Linux network-interface name.
+ *
+ * The kernel allows 1-15 characters (IFNAMSIZ is 16 including the terminator)
+ * and forbids '/' and whitespace. The class below is stricter still, and every
+ * name this application generates satisfies it: vnet{tenant}_{id} for bridges,
+ * vunl{session}_{interface} for taps, plus pnet0-9, nat0 and docker0.
+ *
+ * This is an allowlist, and it is the control. secureCmd() is a blocklist with
+ * verified bypasses — backtick, $( ), newline and redirect all pass it — so it
+ * cannot be relied on. Call sites additionally pass every value through
+ * escapeshellarg(), so a name reaches the shell as one literal argument even if
+ * this check is ever bypassed.
+ *
+ * @param   string  $name               Candidate interface name
+ * @return  bool                        True if the name is safe to use
+ */
+function unl_valid_ifname($name)
+{
+	return is_string($name) && preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$/', $name) === 1;
+}
+
+/**
  * Function to create a bridge
  *
  * @param   string  $s                  Bridge name
@@ -22,12 +44,16 @@
 function addBridge($s)
 {
 
-	$s['name'] = secureCmd($s['name']);
+	if (!unl_valid_ifname($s['name'])) {
+		error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80099] . ' ' . $s['name']);
+		return 80099;
+	}
+	$esc = escapeshellarg($s['name']);
 
 	if (!isBridge($s['name']) || !isInterface($s['name'])) {
 		// Bridge already present
 		error_log(date('M d H:i:s ') . 'INFO: Add network bridge - bridge present ' . $s['name']);
-		$cmd = 'brctl addbr ' . $s['name'] . ' 2>&1';
+		$cmd = 'brctl addbr ' . $esc . ' 2>&1';
 		error_log(date('M d H:i:s ') . 'INFO: create bridge  ' . $cmd);
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
@@ -37,7 +63,7 @@ function addBridge($s)
 			return 80026;
 		}
 
-		$cmd = 'sysctl -w net.ipv6.conf.' . $s['name'] . '.disable_ipv6=1';
+		$cmd = 'sysctl -w ' . escapeshellarg('net.ipv6.conf.' . $s['name'] . '.disable_ipv6=1');
 		error_log(date('M d H:i:s ') . 'INFO: ' . $cmd);
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
@@ -48,7 +74,7 @@ function addBridge($s)
 		}
 	}
 
-	$cmd = 'ip link set dev ' . $s['name'] . ' up 2>&1';
+	$cmd = 'ip link set dev ' . $esc . ' up 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
 		// Failed to activate it
@@ -59,7 +85,13 @@ function addBridge($s)
 
 	if (!preg_match('/^pnet[\d\w]+$/', $s['name'])) {
 		// Forward all frames on non-cloud bridges
-		$cmd = 'sudo echo 65535 > /sys/class/net/' . $s['name'] . '/bridge/group_fwd_mask 2>&1';
+		// 0xFFF8, not 0xFFFF. The kernel refuses to forward the three reserved
+		// group addresses (STP, MAC pause, LACP — BR_GROUPFWD_RESTRICTED = 0x0007)
+		// and returns EINVAL for any value that includes them, so writing 65535
+		// fails outright. Measured on kernel 6.8: 65535 -> EINVAL, 65528 -> ok.
+		// The shipped 4.15 appliance shows 0x8 on its bridges, so the 65535 write
+		// never took effect there either.
+		$cmd = 'sudo echo 65528 > ' . escapeshellarg('/sys/class/net/' . $s['name'] . '/bridge/group_fwd_mask') . ' 2>&1';
 		
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
@@ -70,7 +102,7 @@ function addBridge($s)
 		}
 
 		// Disable multicast_snooping
-		$cmd = 'sudo echo 0 > /sys/devices/virtual/net/' . $s['name'] . '/bridge/multicast_snooping 2>&1';
+		$cmd = 'sudo echo 0 > ' . escapeshellarg('/sys/devices/virtual/net/' . $s['name'] . '/bridge/multicast_snooping') . ' 2>&1';
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
 			// Failed to configure multicast_snooping
@@ -82,7 +114,7 @@ function addBridge($s)
 
 	if ($s['count'] == 2) {
 
-		$cmd = 'brctl setageing ' . $s['name'] . ' 0 2>&1';
+		$cmd = 'brctl setageing ' . $esc . ' 0 2>&1';
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
 			error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80055]);
@@ -90,7 +122,7 @@ function addBridge($s)
 			return 80055;
 		}
 		
-		$cmd = 'sudo echo 2 > /sys/class/net/' . $s['name'] . '/bridge/multicast_router  2>&1';
+		$cmd = 'sudo echo 2 > ' . escapeshellarg('/sys/class/net/' . $s['name'] . '/bridge/multicast_router') . '  2>&1';
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
 			error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80055]);
@@ -178,7 +210,7 @@ function addNetwork($p)
 function addOvs($s)
 {
 	$s = secureCmd($s);
-	$cmd = 'ovs-vsctl add-br ' . $s . ' 2>&1';
+	$cmd = 'ovs-vsctl add-br ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
 		// Failed to add the OVS
@@ -187,7 +219,7 @@ function addOvs($s)
 		return 80023;
 	}
 	// ADD BPDU CDP option
-	$cmd = "ovs-vsctl set bridge " . $s . " other-config:forward-bpdu=true";
+	$cmd = "ovs-vsctl set bridge " . escapeshellarg($s) . " other-config:forward-bpdu=true";
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
 		return 0;
@@ -210,7 +242,7 @@ function addTap($s, $u)
 	$s = secureCmd($s);
 	$u = secureCmd($u);
 	// TODO if already exist should fail?
-	$cmd = 'sudo tunctl -u ' . $u . ' -g root -t ' . $s . ' 2>&1';
+	$cmd = 'sudo tunctl -u ' . escapeshellarg($u) . ' -g root -t ' . escapeshellarg($s) . ' 2>&1';
 	error_log(date('M d H:i:s ') . 'INFO: ' . $cmd);
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
@@ -220,7 +252,7 @@ function addTap($s, $u)
 		return 80032;
 	}
 
-	$cmd = 'sudo sysctl -w net.ipv6.conf.' . $s . '.disable_ipv6=1';
+	$cmd = 'sudo sysctl -w ' . escapeshellarg('net.ipv6.conf.' . $s . '.disable_ipv6=1');
 	error_log(date('M d H:i:s ') . 'INFO: ' . $cmd);
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
@@ -230,7 +262,7 @@ function addTap($s, $u)
 		return 80089;
 	}
 
-	$cmd = 'sudo ip link set dev ' . $s . ' up 2>&1';
+	$cmd = 'sudo ip link set dev ' . escapeshellarg($s) . ' up 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
 		// Failed to activate the TAP interface
@@ -239,7 +271,7 @@ function addTap($s, $u)
 		return 80033;
 	}
 
-	$cmd = 'sudo ip link set dev ' . $s . ' mtu 9000';
+	$cmd = 'sudo ip link set dev ' . escapeshellarg($s) . ' mtu 9000';
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
 		// Failed to activate the TAP interface
@@ -280,11 +312,13 @@ function checkUsername($i)
 	$path = '/opt/unetlab/users/' . $i;
 	$uid = 32768 + $i;
 
-	$cmd = 'id unl' . $i . ' 2>&1';
+	$cmd = 'id ' . escapeshellarg('unl' . $i) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
 		// Need to add the user
-		$cmd = 'sudo /usr/sbin/useradd -c "Unified Networking Lab TID=' . $i . '" -d ' . $path . ' -g unl -M -s /bin/bash -u ' . $uid . ' unl' . $i . ' 2>&1';
+		$cmd = 'sudo /usr/sbin/useradd -c ' . escapeshellarg('Unified Networking Lab TID=' . $i)
+			. ' -d ' . escapeshellarg($path) . ' -g unl -M -s /bin/bash -u ' . escapeshellarg($uid)
+			. ' ' . escapeshellarg('unl' . $i) . ' 2>&1';
 		error_log(date('M d H:i:s ') . 'ERROR: ' . $cmd);
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
@@ -339,7 +373,7 @@ function connectInterface($n, $p)
 	$n = secureCmd($n);
 	$p = secureCmd($p);
 	if (isBridge($n)) {
-		$cmd = 'sudo brctl addif ' . $n . ' ' . $p . ' 2>&1';
+		$cmd = 'sudo brctl addif ' . escapeshellarg($n) . ' ' . escapeshellarg($p) . ' 2>&1';
 		error_log(date('M d H:i:s ') . $cmd);
 		exec($cmd, $o, $rc);
 		if ($rc == 0) {
@@ -351,7 +385,7 @@ function connectInterface($n, $p)
 			return 80030;
 		}
 	} else if (isOvs($n)) {
-		$cmd = 'sudo ovs-vsctl add-port ' . $n . ' ' . $p . ' 2>&1';
+		$cmd = 'sudo ovs-vsctl add-port ' . escapeshellarg($n) . ' ' . escapeshellarg($p) . ' 2>&1';
 		exec($cmd, $o, $rc);
 		if ($rc == 0) {
 			return 0;
@@ -374,7 +408,7 @@ function disconnectInterface($n, $p)
 	$n = secureCmd($n);
 	$p = secureCmd($p);
 	if (isBridge($n)) {
-		$cmd = 'sudo brctl delif ' . $n . ' ' . $p . ' 2>&1';
+		$cmd = 'sudo brctl delif ' . escapeshellarg($n) . ' ' . escapeshellarg($p) . ' 2>&1';
 		error_log(date('M d H:i:s ') . $cmd);
 		exec($cmd, $o, $rc);
 		
@@ -387,7 +421,7 @@ function disconnectInterface($n, $p)
 			return 80030;
 		}
 	} else if (isOvs($n)) {
-		$cmd = 'sudo ovs-vsctl del-port ' . $n . ' ' . $p . ' 2>&1';
+		$cmd = 'sudo ovs-vsctl del-port ' . escapeshellarg($n) . ' ' . escapeshellarg($p) . ' 2>&1';
 		exec($cmd, $o, $rc);
 		if ($rc == 0) {
 			return 0;
@@ -414,10 +448,10 @@ function delBridge($s)
 {
 	$s = secureCmd($s);
 	// Need to deactivate it
-	$cmd = 'sudo ip link set dev ' . $s . ' down 2>&1';
+	$cmd = 'sudo ip link set dev ' . escapeshellarg($s) . ' down 2>&1';
 	exec($cmd, $o, $rc);
 
-	$cmd = 'sudo brctl delbr ' . $s . ' 2>&1';
+	$cmd = 'sudo brctl delbr ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
 		return 0;
@@ -438,7 +472,7 @@ function delBridge($s)
 function delOvs($s)
 {
 	$s = secureCmd($s);
-	$cmd = 'sudo ovs-vsctl del-br ' . $s . ' 2>&1';
+	$cmd = 'sudo ovs-vsctl del-br ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
 		return 0;
@@ -461,15 +495,15 @@ function delTap($s)
 	$s = secureCmd($s);
 	if (isInterface($s)) {
 		// Remove interface from OVS switches
-		$cmd = 'sudo ip link set dev ' . $s . ' down 2>&1';
+		$cmd = 'sudo ip link set dev ' . escapeshellarg($s) . ' down 2>&1';
 		exec($cmd, $o, $rc);
-		$cmd = 'sudo ip link delete ' . $s . ' 2>&1';
+		$cmd = 'sudo ip link delete ' . escapeshellarg($s) . ' 2>&1';
 		exec($cmd, $o, $rc);
-		$cmd = 'sudo ovs-vsctl del-port ' . $s . ' 2>&1';
+		$cmd = 'sudo ovs-vsctl del-port ' . escapeshellarg($s) . ' 2>&1';
 		exec($cmd, $o, $rc);
 
 		// Delete TAP (so it's removed from bridges too)
-		$cmd = 'sudo tunctl -d ' . $s . ' 2>&1';
+		$cmd = 'sudo tunctl -d ' . escapeshellarg($s) . ' 2>&1';
 		error_log($cmd);
 		exec($cmd, $o, $rc);
 		
@@ -540,9 +574,14 @@ function export($n, $lab)
 function isBridge($s)
 {
 	$s = secureCmd($s);
-	$cmd = 'brctl show ' . $s . ' 2>&1';
+	$o = array();
+	$cmd = 'brctl show ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
-	if (preg_match('/8000/', $o[1])) {
+	// brctl prints a header row and then one row per bridge, so a real bridge
+	// puts its id on line 1. A missing bridge produces fewer lines; indexing
+	// blindly raised "Undefined array key 1" on every call and passed null to
+	// preg_match, which PHP 8.1+ deprecates.
+	if (isset($o[1]) && preg_match('/8000/', $o[1])) {
 		// "brctl show" on a ovs bridge or on a non-existent bridge return 0 -> check for 8000
 		return True;
 	} else {
@@ -559,7 +598,7 @@ function isBridge($s)
 function isInterface($s)
 {
 	$s = secureCmd($s);
-	$cmd = 'sudo ip link show ' . $s . ' 2>&1';
+	$cmd = 'sudo ip link show ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
 		return True;
@@ -571,7 +610,7 @@ function isInterface($s)
 function isInterfaceUp($s)
 {
 	$s = secureCmd($s);
-	$cmd = 'sudo ip link show ' . $s . ' | grep UP';
+	$cmd = 'sudo ip link show ' . escapeshellarg($s) . ' | grep UP';
 	exec($cmd, $o, $rc);
 	if(count($o) > 0) return true;
 	return false;
@@ -586,7 +625,7 @@ function isInterfaceUp($s)
 function isOvs($s)
 {
 	$s = secureCmd($s);
-	$cmd = 'ovs-vsctl br-exists ' . $s . ' 2>&1';
+	$cmd = 'ovs-vsctl br-exists ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
 		return True;
@@ -605,7 +644,7 @@ function isRunning($p)
 {
 	$p = secureCmd($p);
 	// If node is running, the console port is used
-	$cmd = 'fuser -n tcp ' . $p . ' 2>&1';
+	$cmd = 'fuser -n tcp ' . escapeshellarg($p) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
 		return True;
