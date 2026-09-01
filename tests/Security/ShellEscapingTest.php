@@ -17,6 +17,7 @@ $root = realpath(__DIR__ . '/../..');
 // Files converted by the shell sweep. Append as the sweep progresses.
 $swept = [
     'includes/cli.php',
+    'includes/functions.php',
 ];
 
 $violations = [];
@@ -24,6 +25,8 @@ foreach ($swept as $rel) {
     $path = $root . '/' . $rel;
     foreach (file($path) as $n => $line) {
         // A command assignment that concatenates a bare variable.
+        // Commented-out code is not executed.
+        if (preg_match('/^\s*(\/\/|\*|#)/', $line)) continue;
         if (!preg_match('/\$cmd\s*\.?=/', $line)) continue;
         if (!preg_match('/[\'"]\s*\.\s*\$/', $line)) continue;
         // Escaped, or a variable that already holds an escaped value.

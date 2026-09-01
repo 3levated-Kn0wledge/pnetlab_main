@@ -578,8 +578,8 @@ function addWireshark($lab, $node_id, $interface_id)
 
 function addWiresharkSystem($lab, $node_id, $interface_id)
 {
-	secureCmd($node_id);
-	secureCmd($interface_id);
+	$node_id = secureCmd($node_id);
+	$interface_id = secureCmd($interface_id);
 	if ($interface_id === '' || $node_id === '') throw new Exception('Missing data');
 
 	$lab_session = $lab->getSession();
@@ -629,52 +629,55 @@ function addWiresharkSystem($lab, $node_id, $interface_id)
 
 	// create wireshark docker container.
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container ls -a | grep ' . $dockerName; // Check docker is exist
+	$cmd = 'docker -H=tcp://127.0.0.1:4243 container ls -a | grep ' . escapeshellarg($dockerName); // Check docker is exist
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	if (count($o) == 0) {
-		$cmd = 'docker -H=tcp://127.0.0.1:4243 create --shm-size 1G --privileged -ti --net=none --name=' . $dockerName . ' -h "' . $node_name . '_' . $interface_name . '" pnetlab/pnet-wireshark';
+		$cmd = 'docker -H=tcp://127.0.0.1:4243 create --shm-size 1G --privileged -ti --net=none --name=' . escapeshellarg($dockerName)
+			. ' -h ' . escapeshellarg($node_name . '_' . $interface_name) . ' pnetlab/pnet-wireshark';
 		exec($cmd, $o, $rc);
 	}
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 start ' . $dockerName;
+	$cmd = 'docker -H=tcp://127.0.0.1:4243 start ' . escapeshellarg($dockerName);
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format "{{ .State.Pid }}" ' . $dockerName;
+	$cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format "{{ .State.Pid }}" ' . escapeshellarg($dockerName);
 	$o = [];
 	exec($cmd, $o, $rc);
 	$pid = $o[0];
 
 	// Create rdp connection to eth1
 
-	$cmd = 'ip link | grep rdp' . $uniqueId;
+	$cmd = 'ip link | grep ' . escapeshellarg('rdp' . $uniqueId);
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	if (count($o) == 0) {
-		$cmd = 'ip link add rdp' . $uniqueId . ' type veth peer name dc0' . $uniqueId;
+		$cmd = 'ip link add ' . escapeshellarg('rdp' . $uniqueId) . ' type veth peer name ' . escapeshellarg('dc0' . $uniqueId);
 		exec($cmd, $o, $rc);
-		$cmd = 'ip link set dev rdp' . $uniqueId . ' up';
+		$cmd = 'ip link set dev ' . escapeshellarg('rdp' . $uniqueId) . ' up';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev dc0' . $uniqueId . ' up';
+		$cmd = 'ip link set dev ' . escapeshellarg('dc0' . $uniqueId) . ' up';
 		exec($cmd, $o, $rc);
 
 		// Add eth1 for docker
 
-		$cmd = 'ip link set netns ' . $pid . ' dc0' . $uniqueId . ' name eth1 address ' . '48:' . sprintf('%02x', $lab_session) . ':' . sprintf('%02x', $node_id / 512) . ':' . sprintf('%02x', $node_id % 512) . ':' . sprintf('%02x', $interface_id) . ':' . sprintf('%02x', 1) . ' up';
+		$mac = sprintf('48:%02x:%02x:%02x:%02x:%02x', $lab_session, intdiv($node_id, 512), $node_id % 512, $interface_id, 1);
+		$cmd = 'ip link set netns ' . escapeshellarg($pid) . ' ' . escapeshellarg('dc0' . $uniqueId)
+			. ' name eth1 address ' . escapeshellarg($mac) . ' up';
 		exec($cmd, $o, $rc);
 
 		//connect eth1 to docker 0
-		$cmd = 'brctl addif docker0 rdp' . $uniqueId;
+		$cmd = 'brctl addif docker0 ' . escapeshellarg('rdp' . $uniqueId);
 		exec($cmd, $o, $rc);
 
 		//config ip address eth1
-		$cmd = 'sudo /opt/unetlab/wrappers/nsenter -t ' . $pid . ' -n ip addr add ' . $ipAddress . '/16 dev eth1';
+		$cmd = 'sudo /opt/unetlab/wrappers/nsenter -t ' . escapeshellarg($pid) . ' -n ip addr add ' . escapeshellarg($ipAddress . '/16') . ' dev eth1';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'sudo /opt/unetlab/wrappers/nsenter -t ' . $pid . ' -n ip route add default via ' . $ipAddress;
+		$cmd = 'sudo /opt/unetlab/wrappers/nsenter -t ' . escapeshellarg($pid) . ' -n ip route add default via ' . escapeshellarg($ipAddress);
 		exec($cmd, $o, $rc);
 
 		// // nat rdp port
@@ -686,37 +689,39 @@ function addWiresharkSystem($lab, $node_id, $interface_id)
 		// exec($cmd, $o, $rc);
 	}
 
-	$cmd = 'ip link | grep span' . $uniqueId;
+	$cmd = 'ip link | grep ' . escapeshellarg('span' . $uniqueId);
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	if (count($o) == 0) {
 
-		$cmd = 'ip link add span' . $uniqueId . ' type veth peer name cap' . $uniqueId;
+		$cmd = 'ip link add ' . escapeshellarg('span' . $uniqueId) . ' type veth peer name ' . escapeshellarg('cap' . $uniqueId);
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev span' . $uniqueId . ' up';
+		$cmd = 'ip link set dev ' . escapeshellarg('span' . $uniqueId) . ' up';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev span' . $uniqueId. ' mtu 9000';
+		$cmd = 'ip link set dev ' . escapeshellarg('span' . $uniqueId) . ' mtu 9000';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev cap' . $uniqueId . ' up';
+		$cmd = 'ip link set dev ' . escapeshellarg('cap' . $uniqueId) . ' up';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev cap' . $uniqueId. ' mtu 9000';
+		$cmd = 'ip link set dev ' . escapeshellarg('cap' . $uniqueId) . ' mtu 9000';
 		exec($cmd, $o, $rc);
 
 		// add capture port to docker 
-		$cmd = 'ip link set netns ' . $pid . ' cap' . $uniqueId . ' name eth0 address ' . '48:' . sprintf('%02x', $lab_session) . ':' . sprintf('%02x', $node_id / 512) . ':' . sprintf('%02x', $node_id % 512) . ':' . sprintf('%02x', $interface_id) . ':' . sprintf('%02x', 0) . ' up';
+		$mac = sprintf('48:%02x:%02x:%02x:%02x:%02x', $lab_session, intdiv($node_id, 512), $node_id % 512, $interface_id, 0);
+		$cmd = 'ip link set netns ' . escapeshellarg($pid) . ' ' . escapeshellarg('cap' . $uniqueId)
+			. ' name eth0 address ' . escapeshellarg($mac) . ' up';
 		exec($cmd, $o, $rc);
 
 		// add span port to network need capture
-		$cmd = 'brctl addif ' . $net_name . ' span' . $uniqueId;
+		$cmd = 'brctl addif ' . escapeshellarg($net_name) . ' ' . escapeshellarg('span' . $uniqueId);
 		exec($cmd, $o, $rc);
 
 		// set age
-		$cmd = 'brctl setageing ' . $net_name . ' 0';
+		$cmd = 'brctl setageing ' . escapeshellarg($net_name) . ' 0';
 		exec($cmd, $o, $rc);
 	}
 
@@ -787,28 +792,28 @@ function deleteWiresharkSystem($tenant, $lab_session, $node_id, $interface_id, $
 	$dockerName = 'Capture_' . $uniqueId;
 	$connectPort = 3389;
 	// nat rdp port
-	$cmd = 'sudo iptables -t nat -D PREROUTING -p tcp --dport ' . $port . ' -j DNAT --to ' . $ipAddress . ':' . $connectPort;
+	$cmd = 'sudo iptables -t nat -D PREROUTING -p tcp --dport ' . escapeshellarg($port) . ' -j DNAT --to ' . escapeshellarg($ipAddress . ':' . $connectPort);
 	exec($cmd, $o, $rc);
 
 	$dockerIp = getDockerIp();
-	$cmd = 'sudo iptables -t nat -D POSTROUTING -p tcp -d ' . $ipAddress . ' --dport ' . $connectPort . ' -j SNAT --to ' . $dockerIp;
+	$cmd = 'sudo iptables -t nat -D POSTROUTING -p tcp -d ' . escapeshellarg($ipAddress) . ' --dport ' . escapeshellarg($connectPort) . ' -j SNAT --to ' . escapeshellarg($dockerIp);
 	exec($cmd, $o, $rc);
 
 	// remove rdp connection to eth1
-	$cmd = 'ip link delete rdp' . $uniqueId;
+	$cmd = 'ip link delete ' . escapeshellarg('rdp' . $uniqueId);
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	// remove span connection to eth1
-	$cmd = 'ip link delete span' . $uniqueId;
+	$cmd = 'ip link delete ' . escapeshellarg('span' . $uniqueId);
 	$o = [];
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container stop ' . $dockerName;
+	$cmd = 'docker -H=tcp://127.0.0.1:4243 container stop ' . escapeshellarg($dockerName);
 	$o = [];
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container rm ' . $dockerName . ' &';
+	$cmd = 'docker -H=tcp://127.0.0.1:4243 container rm ' . escapeshellarg($dockerName) . ' &';
 	$o = [];
 	exec($cmd, $o, $rc);
 
@@ -1177,10 +1182,10 @@ function destroyLabSession($lab)
 			'lab_session' =>  $lab->getSession(),
 		]);
 
-		$cmd = 'brctl show | grep vnet' . $lab->getSession() . ' | sed \'s/^\(vnet[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ifconfig $line down; sudo brctl delbr $line; done';
+		$cmd = 'brctl show | grep ' . escapeshellarg('vnet' . $lab->getSession()) . ' | sed \'s/^\(vnet[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ifconfig $line down; sudo brctl delbr $line; done';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'sudo rm -rf ' . BASE_TMP . '/' . $lab->getSession();
+		$cmd = 'sudo rm -rf ' . escapeshellarg(BASE_TMP . '/' . $lab->getSession());
 		exec($cmd, $o, $rc);
 
 		return ['result' => true, 'message' => 'Success'];
@@ -1241,12 +1246,12 @@ function destroyBrokenLabSession($lab_session)
 		$result = $statement->fetchAll(PDO::FETCH_ASSOC);
 		foreach ($result as $node) {
 			if ($node['node_session_type'] == 'docker') {
-				$cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop docker' . $node['node_session_id'];
+				$cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop ' . escapeshellarg('docker' . $node['node_session_id']);
 				exec($cmd, $o, $rc);
-				$cmd = 'sudo docker -H=tcp://127.0.0.1:4243 rm docker' . $node['node_session_id'];
+				$cmd = 'sudo docker -H=tcp://127.0.0.1:4243 rm ' . escapeshellarg('docker' . $node['node_session_id']);
 				exec($cmd, $o, $rc);
 			} else {
-				$cmd = 'sudo fuser -k -TERM ' . $node['node_session_workspace'] . ' > /dev/null 2>&1';
+				$cmd = 'sudo fuser -k -TERM ' . escapeshellarg($node['node_session_workspace']) . ' > /dev/null 2>&1';
 				exec($cmd, $o, $rc);
 			}
 		}
@@ -1269,10 +1274,10 @@ function destroyBrokenLabSession($lab_session)
 			'lab_session' =>  $lab_session
 		]);
 
-		$cmd = 'brctl show | grep vnet' . $lab_session . ' | sed \'s/^\(vnet[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ifconfig $line down; sudo brctl delbr $line; done';
+		$cmd = 'brctl show | grep ' . escapeshellarg('vnet' . $lab_session) . ' | sed \'s/^\(vnet[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ifconfig $line down; sudo brctl delbr $line; done';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'sudo rm -rf ' . BASE_TMP . '/' . $lab_session;
+		$cmd = 'sudo rm -rf ' . escapeshellarg(BASE_TMP . '/' . $lab_session);
 		exec($cmd, $o, $rc);
 
 		return ['result' => true, 'message' => 'Success'];
@@ -1387,7 +1392,7 @@ function getNodeStatus($session, $type, $running_path, $port)
 	if (!isset($session)) return 0;
 
 	if ($type == 'docker') {
-		$cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format="{{ .State.Running }}" docker' . $session;
+		$cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format="{{ .State.Running }}" ' . escapeshellarg('docker' . $session);
 		exec($cmd, $o, $rc);
 		if ($rc == 0) {
 			if ($o[0] == 'true') {
@@ -1412,7 +1417,7 @@ function getNodeStatus($session, $type, $running_path, $port)
 		}
 	} else {
 		// Need to check if node port is used (netstat + grep doesn't require root privileges)
-		$cmd = 'netstat -a -t -n | grep LISTEN | grep :' . $port . ' 2>&1';
+		$cmd = 'netstat -a -t -n | grep LISTEN | grep ' . escapeshellarg(':' . $port) . ' 2>&1';
 		
 		exec($cmd, $o, $rc);
 		if ($rc == 0) {
@@ -1495,7 +1500,7 @@ function getTemplates()
 				if($templ == 'docker'){
 					$found = 1;
 				}else{
-					$cmd = 'docker -H=tcp://127.0.0.1:4243 images | grep "'. $templ. '"';
+					$cmd = 'docker -H=tcp://127.0.0.1:4243 images | grep ' . escapeshellarg($templ);
 					exec($cmd, $o, $r);
 					if(count($o) > 0) $found = 1;
 				}
