@@ -26,6 +26,32 @@ jobs:
       - run: tools/php-lint.sh
       - run: tools/run-tests.sh
 
+  wrappers:
+    name: Console wrappers (C)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with the hardening flags the install uses
+        # -Werror is the point: the Makefile builds with -Wall -Wextra -Werror
+        # -fstack-protector-strong -D_FORTIFY_SOURCE=2, and install/lib/platform.sh
+        # compiles these during the platform step and fails the install if the
+        # build fails. A warning that lands here is an install that breaks on a
+        # user's machine.
+        run: make -C platform/wrappers/src all
+      - name: Unit tests
+        # The pure logic: telnet IAC handling, command assembly, option parsing,
+        # NETMAP generation and the frame bounds checks. No root, no network, no
+        # deployed tree -- everything here runs in a container.
+        run: make -C platform/wrappers/src test
+      - name: The binaries are named what the PHP invokes
+        # R3 in the wrapper spec. includes/api_status.php greps for these names
+        # and device::stop() kills by them, so a rename breaks node teardown
+        # silently. Cheap to assert, expensive to discover.
+        run: |
+          for w in qemu_wrapper_telnet docker_wrapper iol_wrapper; do
+            test -x "platform/wrappers/src/$w"
+          done
+
   frontend-build:
     name: Frontend production build
     runs-on: ubuntu-latest
