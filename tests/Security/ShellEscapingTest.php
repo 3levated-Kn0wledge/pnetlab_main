@@ -25,6 +25,7 @@ $root = realpath(__DIR__ . '/../..');
 $swept = [
     'includes/cli.php',
     'includes/functions.php',
+    'devices/interfc.php',
 ];
 
 $violations = [];

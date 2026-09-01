@@ -409,22 +409,22 @@ class Interfc
 		$p = $this->getQuality();
 		$delay = '';
 		if (isset($p['delay']) && $p['delay'] != '') {
-			$delay = ' delay ' . $p['delay'] . 'ms';
-			if (isset($p['jitter']) && $p['jitter'] != '') $delay .= ' ' . $p['jitter'] . 'ms';
+			$delay = ' delay ' . escapeshellarg((int) $p['delay'] . 'ms');
+			if (isset($p['jitter']) && $p['jitter'] != '') $delay .= ' ' . escapeshellarg((int) $p['jitter'] . 'ms');
 		}
 
 		$loss = '';
-		if (isset($p['loss']) && $p['loss'] != '') $loss = ' loss ' . $p['loss'] . '%';
+		if (isset($p['loss']) && $p['loss'] != '') $loss = ' loss ' . escapeshellarg((float) $p['loss'] . '%');
 
 		$bandwidth = '';
-		if (isset($p['bandwidth']) && $p['bandwidth'] != '') $bandwidth = ' rate ' . $p['bandwidth'] . 'Kbit';
+		if (isset($p['bandwidth']) && $p['bandwidth'] != '') $bandwidth = ' rate ' . escapeshellarg((int) $p['bandwidth'] . 'Kbit');
 
 		if ($delay == '' && $loss == '' && $bandwidth == '') {
 			$this->unApplyQuality();
 			return 0;
 		}
 
-		$cmd = secureCmd('sudo tc qdisc replace dev ' . $vunl . ' root netem' . $bandwidth . $delay . $loss) . ' 2>&1';
+		$cmd = 'sudo tc qdisc replace dev ' . escapeshellarg($vunl) . ' root netem' . $bandwidth . $delay . $loss . ' 2>&1';
 		error_log(date('M d H:i:s ') . $cmd);
 		
 		exec($cmd, $o, $rc);
@@ -447,7 +447,7 @@ class Interfc
 	{
 		if ($this->type == 'serial') return 0;
 		$vunl = 'vunl' . $this->if_session[IF_SESSION_NODE] . '_' . $this->id;
-		$cmd = 'sudo tc qdisc del dev ' . $vunl . ' root';
+		$cmd = 'sudo tc qdisc del dev ' . escapeshellarg($vunl) . ' root';
 		secureCmd($cmd);
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
@@ -605,12 +605,13 @@ class Interfc
 		if ($this->device->getNType() == 'qemu' && $this->device->getStatus() > 0) {
 			$vunl = $this->getSysName();
 			$monSocket = $this->device->getRunningPath() . '/monitor.sock';
-			$cmd = "echo 'info network' | sudo nc -U " . $monSocket . " -q 0 | grep " . $vunl . " | sed 's/.*\(net[0-9]\+\)\:.*/\\1/g'";
+			$cmd = "echo 'info network' | sudo nc -U " . escapeshellarg($monSocket) . " -q 0 | grep " . escapeshellarg($vunl) . " | sed 's/.*\(net[0-9]\+\)\:.*/\\1/g'";
 			error_log(date('M d H:i:s ') . $cmd);
 			exec($cmd, $netIndex, $rc);
 			if (isset($netIndex[0])) {
 
-				$cmd = "echo 'set_link " . $netIndex[0] . " " . ($status == 'up' ? 'on' : 'off') . "' | sudo nc -U " . $monSocket . " -q 0";
+				$cmd = 'echo ' . escapeshellarg('set_link ' . $netIndex[0] . ' ' . ($status == 'up' ? 'on' : 'off'))
+				. ' | sudo nc -U ' . escapeshellarg($monSocket) . ' -q 0';
 				error_log(date('M d H:i:s ') . $cmd);
 				exec($cmd, $netIndex, $rc);
 			}
@@ -626,18 +627,23 @@ class Interfc
 
 			// if ($ifIndex === null) return;
 
-			$cmd = 'id -u ' . 'unl' . $this->device->getSession() . ' 2>&1';
+			$cmd = 'id -u ' . escapeshellarg('unl' . $this->device->getSession()) . ' 2>&1';
 			exec($cmd, $o, $rc);
 			$uid = $o[0];
 
-			$cmd = "sudo perl " . $this->device->getRunningPath() . '/keepalive.pl' . " -i " . $this->device->getIolId() . " -p " . $this->getId() . ' -n ' . $this->device->getSession() . '_' . $this->getId() . ' > ' . $this->device->getRunningPath() . '/keepalive.log 2>&1 &';
+			$cmd = 'sudo perl ' . escapeshellarg($this->device->getRunningPath() . '/keepalive.pl')
+					. ' -i ' . escapeshellarg($this->device->getIolId())
+					. ' -p ' . escapeshellarg($this->getId())
+					. ' -n ' . escapeshellarg($this->device->getSession() . '_' . $this->getId())
+					. ' > ' . escapeshellarg($this->device->getRunningPath() . '/keepalive.log') . ' 2>&1 &';
 			if ($status == 'up') {
 				$wrapper = "sudo php /opt/unetlab/html/store/app/Console/Commands/wrapper 32768 " . $uid . " '" . $cmd . "'";
 				error_log(date('M d H:i:s ') . $wrapper);
 				exec($wrapper, $netIndex, $rc);
 			} else {
 
-				$cmd = 'ps -aux | grep keepalive | grep ' . $this->device->getSession() . '_' . $this->getId() . ' | grep -v "ps -aux" | tr -s " "| cut -d " " -f 2';
+				$cmd = 'ps -aux | grep keepalive | grep ' . escapeshellarg($this->device->getSession() . '_' . $this->getId())
+					. ' | grep -v "ps -aux" | tr -s " "| cut -d " " -f 2';
 				$o = [];
 				exec($cmd, $o, $rc);
 				foreach ($o as $pid) {
@@ -652,9 +658,9 @@ class Interfc
 		if ($this->device->getNType() == 'docker' && $this->device->getStatus() > 0) {
 			$vunl = $this->getSysName();
 			if ($status == 'up') {
-				$cmd = 'sudo ip link set ' . $vunl . ' up';
+				$cmd = 'sudo ip link set ' . escapeshellarg($vunl) . ' up';
 			} else {
-				$cmd = 'sudo ip link set ' . $vunl . ' down';
+				$cmd = 'sudo ip link set ' . escapeshellarg($vunl) . ' down';
 			}
 			error_log(date('M d H:i:s ') . $cmd);
 			exec($cmd, $netIndex, $rc);
