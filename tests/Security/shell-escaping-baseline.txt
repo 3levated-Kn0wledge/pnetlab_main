@@ -190,10 +190,16 @@ includes/functions.php $cmd
 # every value in them is escaped now: socket access is root-equivalent on this
 # host, so an image name that can become a second command was worth exactly what
 # the sudo was.
-store/app/Helpers/Request/Query.php $p['proxy_ip']
-store/app/Helpers/Request/Query.php $p['proxy_port']
-store/app/Helpers/Request/Query.php $p['proxy_username']
-store/app/Helpers/Request/Query.php $p['proxy_password']
+#
+# Query.php's FOUR entries are gone, and they were the worst four in the file.
+# setProxy() concatenated proxy_ip, proxy_port, proxy_username and proxy_password
+# — all four straight off the request body — into
+#     exec("echo '".$proxyAddr."' | sudo tee ".$file);
+# a SINGLE-quoted shell string, so one apostrophe ended the quoting; and $file is
+# /etc/apt/apt.conf.d/00proxy, which can carry APT::Update::Pre-Invoke and run as
+# root at the next apt run. It is now `unl_wrapper -a set-proxy`: four separately
+# validated options, the password on stdin, and a file the action writes itself
+# with no shell anywhere on the path.
 store/app/Helpers/Admin/SystemHelper.php $path
 store/app/Helpers/Admin/SystemHelper.php $nodeSession->{}
 

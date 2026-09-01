@@ -23,7 +23,8 @@ umask(0002);
 // on installing a package nobody has signed (the other half is a root-owned
 // marker file, checked below — one switch that the web layer could ever reach
 // is not a gate).
-$options = getopt('oT:D:S:F:P:I:a:', array('allow-unsigned', 'state:', 'type:', 'name:'));
+$options = getopt('oT:D:S:F:P:I:a:', array('allow-unsigned', 'state:', 'type:', 'name:',
+	'scope:', 'proxy-host:', 'proxy-port:', 'proxy-user:', 'proxy-pass-stdin', 'clear'));
 
 /**
  * One value for an option, or null.
@@ -262,6 +263,86 @@ switch ($action) {
 		if (!$commitResult['ok']) {
 			error_log(date('M d H:i:s ') . 'ERROR: image-commit: ' . $commitResult['error']);
 			exit(42);
+		}
+		break;
+	case 'fixperms':
+		// Give one enumerated tree back to the web user.
+		//
+		// This replaces six `sudo chown www-data:www-data` call sites, which
+		// were the last consumers of the chown grant. Five were constants; the
+		// sixth was Admin/DefaultController's
+		//     exec('sudo chown www-data:www-data '. $file);
+		// on a template path built from $req->input('template') by way of
+		// secureCmd(), which passes backticks, $( ), spaces and quotes.
+		//
+		// THE CALLER SENDS A SCOPE WORD AND NEVER A PATH. Every path lives in
+		// actions/UnlFixPerms.php, an unrecognised scope is refused here rather
+		// than interpreted, and there is no scope that names a leaf — a scope
+		// names a root and the whole tree under it gets the same owner.
+		require_once(__DIR__ . '/actions/UnlFixPerms.php');
+
+		$fixPerms = new UnlFixPerms();
+		$fixResult = $fixPerms->run(unl_single_option($options, 'scope'));
+		echo 'FIXPERMS-RESULT ' . json_encode($fixResult) . "\n";
+		if (!$fixResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: fixperms: ' . $fixResult['error']);
+			exit(43);
+		}
+		break;
+	case 'set-proxy':
+		// Write /etc/apt/apt.conf.d/00proxy.
+		//
+		// What this replaces is a root remote-code-execution bug, written out
+		// in full at the top of actions/UnlSetProxy.php: Query::setProxy()
+		// interpolated four request fields into
+		//     exec("echo '" . $proxyAddr . "' | sudo tee " . $file);
+		// so an apostrophe in any of them broke out of the quoting, and the
+		// destination is an apt config file, which can carry
+		// APT::Update::Pre-Invoke and thus run as root at the next apt run.
+		//
+		// Here the four components arrive as four separately validated options
+		// and the file is written by PHP. No shell is involved on this path.
+		//
+		// THE PASSWORD COMES FROM STDIN, never from argv. /proc/<pid>/cmdline is
+		// readable by every local account, and the web layer's own sudo policy
+		// grants it `ps`; a secret on a command line is a secret handed to
+		// anyone who can loop on it.
+		require_once(__DIR__ . '/actions/UnlSetProxy.php');
+
+		$clearProxy = isset($options['clear']);
+		$proxyHost  = unl_single_option($options, 'proxy-host');
+		if ($clearProxy && $proxyHost !== null) {
+			error_log(date('M d H:i:s ') . 'ERROR: -a set-proxy takes --clear or --proxy-host, not both');
+			exit(44);
+		}
+		if (!$clearProxy && $proxyHost === null) {
+			error_log(date('M d H:i:s ') . 'ERROR: -a set-proxy needs --proxy-host <host> or --clear');
+			exit(44);
+		}
+
+		// Only read stdin when asked to. Reading it unconditionally would hang
+		// the wrapper on a terminal.
+		$proxyPassword = null;
+		if (isset($options['proxy-pass-stdin'])) {
+			$proxyPassword = stream_get_contents(STDIN, 4097);
+			if ($proxyPassword === false || strlen($proxyPassword) > 4096) {
+				error_log(date('M d H:i:s ') . 'ERROR: -a set-proxy could not read the password from stdin');
+				exit(44);
+			}
+			$proxyPassword = rtrim($proxyPassword, "\r\n");
+		}
+
+		$setProxy = new UnlSetProxy();
+		$proxyResult = $clearProxy
+			? $setProxy->run(null, null, null, null)
+			: $setProxy->run($proxyHost,
+				unl_single_option($options, 'proxy-port'),
+				unl_single_option($options, 'proxy-user'),
+				$proxyPassword);
+		echo 'SET-PROXY-RESULT ' . json_encode($proxyResult) . "\n";
+		if (!$proxyResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: set-proxy: ' . $proxyResult['error']);
+			exit(45);
 		}
 		break;
 	case 'iol-keepalive':

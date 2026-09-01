@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use App\Helpers\Request\Checker;
 use App\Helpers\Request\Query;
 use App\Helpers\Request\Reply;
+use App\Helpers\System\Wrapper;
 use Illuminate\Support\Facades\Auth;
 use App\Helpers\Uploader\FileFunc;
 
@@ -58,10 +59,13 @@ class DependenceController extends Controller
         
         if (!$result['result']) return $result;
 
-        exec('sudo chown www-data:www-data -R /opt/unetlab/addons');
-        exec('sudo chown www-data:www-data -R /opt/unetlab/html/templates');
-        exec('sudo chown www-data:www-data -R /opt/unetlab/html/images/icons');
-        exec('sudo chown www-data:www-data -R /opt/unetlab/scripts');
+        // A dependency unpacks into four trees that the web user then has to be
+        // able to write. That used to be four `sudo chown www-data:www-data -R`
+        // call sites, and they were four of the six that kept the chown grant
+        // alive. It is now one scope word: the wrapper holds the four paths,
+        // refuses anything that is not one of its six scopes, and never
+        // receives a path at all.
+        Wrapper::fixperms('dependencies');
 
         $file = $result['data'][DEPEND_PATH];
         $fileMd5 = get($result['data'][DEPEND_MD5], '');

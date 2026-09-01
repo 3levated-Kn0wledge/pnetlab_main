@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use App\Helpers\Request\Checker;
 use App\Helpers\Request\Query;
 use App\Helpers\Request\Reply;
+use App\Helpers\System\Wrapper;
 use Illuminate\Support\Facades\Auth;
 use App\Helpers\Uploader\FileFunc;
 
@@ -75,7 +76,9 @@ class VersionsController extends Controller
         // echo $result; die;
         if (!$result['result']) return $result;
 
-        exec('sudo chown www-data:www-data -R /opt/unetlab/labs');
+        // Was `sudo chown www-data:www-data -R /opt/unetlab/labs`. One scope
+        // word now; the wrapper owns the path.
+        Wrapper::fixperms('labs');
         //$file = $result['data'][VERSION_PATH];
 
         $versionName = get($result['data'][VERSION_NAME], '');

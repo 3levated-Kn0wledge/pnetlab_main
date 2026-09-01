@@ -3,6 +3,7 @@
 namespace App\Helpers\Request;
 use App\Helpers\Control\Ctrl;
 use App\Helpers\Request\Reply;
+use App\Helpers\System\Wrapper;
 use Illuminate\Support\Facades\Auth;
 
 
@@ -22,6 +23,9 @@ class Query {
      */
     const LOW_SPEED_LIMIT = 512;
     const LOW_SPEED_TIME  = 60;
+
+    /** The file `unl_wrapper -a set-proxy` writes. Read here, never written here. */
+    const PROXY_FILE = '/etc/apt/apt.conf.d/00proxy';
 
     public static $ch = null;
     
@@ -158,46 +162,90 @@ class Query {
         return $data;
     }
 
+    /**
+     * Read the configured proxy back out of the apt configuration.
+     *
+     * The pattern is wider than the one it replaces in three ways, because the
+     * writer is now correct and the reader has to keep up with it:
+     *
+     *   - `[\d\w\.]+` could not match a hostname containing a hyphen, nor a
+     *     bracketed IPv6 literal. Both are accepted by the validator in
+     *     actions/UnlSetProxy.php, so both have to be readable back.
+     *   - the credential is percent-encoded in the file (that is what makes a
+     *     rich password safe to write at all), so it is decoded here. The old
+     *     `([^@]+)` would have handed the encoded form to the admin form and to
+     *     curl, and the password would have silently stopped working.
+     *   - the old pattern anchored on Acquire::https::Proxy with /m, and the
+     *     file it was reading had literal backslash-n rather than newlines in
+     *     it, so ^ never matched and this function returned null for the whole
+     *     life of the feature.
+     */
     public static function getProxy()
     {
         try {
-            $file = '/etc/apt/apt.conf.d/00proxy';
-            if (!is_file($file)) return null;
-            $data = file_get_contents($file);
-            $re = '/^Acquire::https::Proxy\s*\"https?:\/\/(?:(\w+):([^@]+)@)?([\d\w\.]+):(\d+).*$/im';
-            if (preg_match($re, $data, $matches)) {
-                $proxyData = [];
-                if (isset($matches[1])) $proxyData['proxy_username'] = $matches[1];
-                if (isset($matches[2])) $proxyData['proxy_password'] = $matches[2];
-                if (isset($matches[3])) $proxyData['proxy_ip'] = $matches[3];
-                if (isset($matches[4])) $proxyData['proxy_port'] = $matches[4];
-                return $proxyData;
-            }
-            return null;
+            if (!is_file(self::PROXY_FILE)) return null;
+            $data = file_get_contents(self::PROXY_FILE);
+            return $data === false ? null : self::parseProxy($data);
         } catch (\Exception $th) {
             return null;
         }
     }
 
-    public static function setProxy($p){
-        $file = '/etc/apt/apt.conf.d/00proxy';
-        if(!is_file($file)) exec('sudo touch '.$file);
+    /**
+     * The parser, separated from the file so it can be tested against exactly
+     * what the wrapper writes. tests/Security/SetProxyTest.php asserts the round
+     * trip, which is the property that broke silently before: a writer and a
+     * reader that disagree leave an admin looking at an empty form over a
+     * working proxy, or the reverse.
+     *
+     * @return array|null proxy_ip, proxy_port, and the credential when present
+     */
+    public static function parseProxy($data)
+    {
+        if (!is_string($data)) return null;
+        $re = '/^Acquire::https?::Proxy\s+"https?:\/\/'
+            . '(?:([^:@\/"]*):([^@\/"]*)@)?'
+            . '(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+):([0-9]{1,5})\/?";/m';
+        if (!preg_match($re, $data, $matches)) return null;
 
-        $proxyAddr = '';
-        if(isset($p['proxy_ip']) && isset($p['proxy_port']) && $p['proxy_ip'] != '' && $p['proxy_port'] != ''){
-            $proxyAddr = $p['proxy_ip'].':'.$p['proxy_port'];
-            if(isset($p['proxy_username']) && isset($p['proxy_password']) && $p['proxy_username'] != '' && $p['proxy_password']!=''){
-                $proxyAddr = $p['proxy_username'].':'.$p['proxy_password'].'@'.$proxyAddr;
-            }
+        $proxyData = [
+            'proxy_ip'   => trim($matches[3], '[]'),
+            'proxy_port' => $matches[4],
+        ];
+        if ($matches[1] !== '') {
+            $proxyData['proxy_username'] = rawurldecode($matches[1]);
+            $proxyData['proxy_password'] = rawurldecode($matches[2]);
         }
-
-        if($proxyAddr != ''){
-            $proxyAddr = 'Acquire::http::Proxy "http://'.$proxyAddr.'/";\nAcquire::https::Proxy "http://'.$proxyAddr.'/";\nAcquire::ftp::Proxy "http://'.$proxyAddr.'/";';
-        }
-       
-        $result = exec("echo '".$proxyAddr."' | sudo tee ".$file);
-       
+        return $proxyData;
     }
-    
+
+    /**
+     * Configure or clear the system proxy.
+     *
+     * WHAT THIS USED TO BE. The four lines below replace the shortest path from
+     * an HTTP request to root that this tree contained:
+     *
+     *     if(!is_file($file)) exec('sudo touch '.$file);
+     *     $proxyAddr = $p['proxy_username'].':'.$p['proxy_password'].'@'
+     *                . $p['proxy_ip'].':'.$p['proxy_port'];
+     *     $result = exec("echo '".$proxyAddr."' | sudo tee ".$file);
+     *
+     * Every component came off the request body and none was escaped. They went
+     * into a single-quoted shell string, so one apostrophe ended the quoting and
+     * the remainder ran; and whatever survived was written as root into an apt
+     * configuration file, which can carry APT::Update::Pre-Invoke and therefore
+     * execute at the next apt run. Two root primitives, from one admin form.
+     *
+     * Nothing is composed here now. The four values cross the boundary as four
+     * separate arguments — the password on stdin — and are validated
+     * individually on the far side by actions/UnlSetProxy.php, which owns the
+     * destination path and writes the file itself.
+     *
+     * @return array ['ok'=>bool,'error'=>string|null,...]
+     */
+    public static function setProxy($p){
+        return Wrapper::setProxy(is_array($p) ? $p : []);
+    }
+
 }
 

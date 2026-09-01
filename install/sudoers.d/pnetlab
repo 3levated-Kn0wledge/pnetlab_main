@@ -27,7 +27,7 @@
 # ---------------------------------------------------------------------------
 # What this policy is, and is not
 # ---------------------------------------------------------------------------
-# It is an allowlist of the 42 binaries the web layer actually invokes, derived
+# It is an allowlist of the 26 binaries the web layer actually invokes, derived
 # from the tree and kept honest by tests/Security/SudoersPolicyTest.php, which
 # fails if the code and this file drift apart.
 #
@@ -84,15 +84,16 @@ www-data ALL=(root) NOPASSWD: /usr/bin/nc
 # grant stays, because changing links genuinely needs it.
 www-data ALL=(root) NOPASSWD: /usr/sbin/dmidecode
 www-data ALL=(root) NOPASSWD: /usr/bin/ps
-# echo is down to ONE caller, Admin/SystemController's iourc write:
+# There is deliberately no /bin/echo line. Its last caller was
+# Admin/SystemController's iourc write:
 #     sudo echo -e "[license]\n$license" > .../iourc
-# which is both injectable and broken — sudo applies to echo while the redirect
-# runs unprivileged — and needs rewriting rather than relocating. The three
-# bridge sysfs writes in includes/cli.php had the same shape and are now
-# file_put_contents() through unl_write_sysfs(), which validates the interface
-# name and takes the knob from a three-value list. When SystemController moves,
-# this line goes with it.
-www-data ALL=(root) NOPASSWD: /bin/echo
+# which was injectable AND broken: sudo applied to echo while the redirect ran
+# as www-data, so the write was never privileged at all — the same shape as the
+# three bridge sysfs writes in includes/cli.php, recorded there. It was rewritten
+# rather than relocated. refreshIolLicense() runs the keygen through proc_open()
+# with an argv array and writes the file with file_put_contents(), unprivileged,
+# because that is what it always was. Making it privileged would have been worse
+# than the bug: the keygen lives in a tree the web user owns.
 
 # --- Appliance control (availability impact only) -------------------------
 www-data ALL=(root) NOPASSWD: /usr/sbin/shutdown
@@ -131,11 +132,32 @@ www-data ALL=(root) NOPASSWD: /usr/sbin/service          # launches anything
 # it replaced an unauthenticated daemon socket on 127.0.0.1:4243, which any
 # local account could reach with no membership at all.
 www-data ALL=(root) NOPASSWD: /opt/unetlab/html/store/app/Console/Commands/idlepc
-www-data ALL=(root) NOPASSWD: /usr/bin/tee               # arbitrary file write
 www-data ALL=(root) NOPASSWD: /usr/bin/rm                # arbitrary deletion
-www-data ALL=(root) NOPASSWD: /usr/bin/chmod             # arbitrary mode change
-www-data ALL=(root) NOPASSWD: /usr/bin/chown             # arbitrary ownership
-www-data ALL=(root) NOPASSWD: /usr/bin/touch
+# tee and touch are gone, and they went together. Both had exactly one caller,
+# Query::setProxy(), which was the shortest path from an HTTP request to root in
+# this tree:
+#     if(!is_file($file)) exec('sudo touch '.$file);
+#     $result = exec("echo '".$proxyAddr."' | sudo tee ".$file);
+# with $proxyAddr concatenated from four request fields inside a SINGLE-QUOTED
+# shell string — one apostrophe ends the quoting — and the destination an apt
+# configuration file, which can carry APT::Update::Pre-Invoke and therefore run
+# as root at the next apt run. Two root primitives from one admin form. It is now
+# `unl_wrapper -a set-proxy`, which takes the four components as four validated
+# options, takes the password on stdin so it is not in /proc/<pid>/cmdline, and
+# writes a file whose path is a constant in the action.
+#
+# chown is gone. Its six call sites were four constants in
+# User/DependenceController, one in User/VersionsController, and
+#     exec('sudo chown www-data:www-data '. $file);
+# in Admin/DefaultController, where $file came from $req->input('template')
+# through secureCmd() — a blocklist that passes backticks, $( ) and quotes. All
+# six are `unl_wrapper -a fixperms --scope <word>`: the caller sends one of six
+# scope words, never a path, and an unrecognised scope is refused rather than
+# interpreted.
+#
+# chmod is gone with them. Its last caller chmodded the IOL keygen, which sits in
+# /opt/unetlab/addons — a tree the fixperms 'addons' scope hands to www-data, so
+# the web user can chmod its own file without borrowing root to do it.
 # cp, mv, mkdir and link are gone. Every one of them was reached from the QEMU
 # commit flow in Admin/Node_sessionsController.php, on paths concatenated from
 # request input without a quote anywhere:

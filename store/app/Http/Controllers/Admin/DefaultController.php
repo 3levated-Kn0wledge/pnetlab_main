@@ -8,6 +8,7 @@ use App\Helpers\Box\License;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Helpers\Request\Reply;
+use App\Helpers\System\Wrapper;
 use Illuminate\Support\Facades\Auth;
 use App\Helpers\View\JS;
 use Illuminate\Support\Facades\Cookie;
@@ -251,8 +252,26 @@ class DefaultController extends Controller
             $content = preg_replace('/^idlepc\s?:\s?(.+)$/m', 'idlepc: "'.$idlepc.'"', $content);
         }
 
-        exec('sudo chown www-data:www-data '. $file);
-    
+        // This chown looks like cargo — the very next line writes the file — and
+        // it is not. $file is /opt/unetlab/html/templates/<template>.yml, and on
+        // a deployed box that tree is root:root 0644; checked on the reference
+        // install rather than assumed. Without the chown, file_put_contents()
+        // runs as www-data and silently writes nothing, which is why it was
+        // there.
+        //
+        // What was wrong was its shape: `sudo chown www-data:www-data ` . $file
+        // where $file is built from $req->input('template') by way of
+        // secureCmd(), a blocklist that passes backticks, $( ), spaces and
+        // quotes — the call site group 8 of the shell-escaping baseline names
+        // by hand. The templates tree is one of the wrapper's scopes, so the
+        // repair is now a scope word and the path stays on the far side of the
+        // boundary.
+        Wrapper::fixperms('templates');
+        clearstatcache(true, $file);
+
+        if (!is_writable($file)) {
+            Reply::finish(false, 'Cannot write {data}', ['data' => basename($file)]);
+        }
         file_put_contents($file, $content);
 
         Reply::finish(true, 'idlepc_success_alert', ['idlepc'=>$idlepc, 'file' => basename($file)]);

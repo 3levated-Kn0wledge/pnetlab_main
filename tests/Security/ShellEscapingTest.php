@@ -617,8 +617,10 @@ foreach (file($baselineFile, FILE_IGNORE_NEW_LINES) as $l) {
 // honest, 91 once signed packages removed DevicesController's two, 88 once
 // `-a iol-keepalive` removed the ps|grep|cut -> `sudo kill -9 $pid` teardown in
 // devices/interfc.php and devices/iol/device_iol.php, 77 once `-a image-commit`
-// took the whole QEMU commit flow out of Node_sessionsController.
-const SWEEP_BASELINE_MAX = 77;
+// took the whole QEMU commit flow out of Node_sessionsController, 73 once
+// `-a set-proxy` took the four proxy fields out of Query::setProxy() — which was
+// the only entry in this file that was a root RCE rather than a route to one.
+const SWEEP_BASELINE_MAX = 73;
 assert_true(count($baseline) <= SWEEP_BASELINE_MAX,
     sprintf('the known-unfixed baseline has not grown (%d of %d)', count($baseline), SWEEP_BASELINE_MAX));
 
