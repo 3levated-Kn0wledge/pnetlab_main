@@ -163,6 +163,77 @@ print(d.get('$ID',{}).get('url','').rsplit(':',1)[-1])" 2>/dev/null)
 			has "the console relays a shell command and its output" "$OUT" "pnetlab-console-ok"
 		fi
 
+		# ---------------------------------------------------------------
+		# The HTML5 console, for THIS node.
+		#
+		# tools/integration/guacamole-console.sh proves the Guacamole stack
+		# works -- guacd, the web application, the Apache proxy and the
+		# websocket upgrade -- but it seeds its own connection row to do it.
+		# The seam it cannot cover is PNETLab provisioning a connection for a
+		# node that actually exists, which is the only part of the path this
+		# project wrote. That is what these assertions cover, so they belong
+		# here, next to a running node, rather than there.
+		#
+		# getGuacConsoleLink() calls html5AddSession(), which writes the
+		# guacamole_connection rows keyed <console port><tenant>, then returns
+		# /html5/#/client/<base64 id>?token=<token>.
+		# The API is JSON, so the path arrives with its slashes escaped
+		# (\/html5\/#\/client\/...). Unescape before matching, rather than
+		# asserting on the escaped form, so the assertion says what it means.
+		LINK=$(A "$S/console_guac_link?node_id=$ID&index=1" | sed 's/\\\//\//g')
+		has "the API returns an HTML5 console link" "$LINK" '/html5/#/client/'
+
+		GTOKEN=$(printf '%s' "$LINK" | sed -n 's/.*token=\([0-9A-Fa-f]*\).*/\1/p')
+		GB64=$(printf '%s' "$LINK" | sed -n 's/.*client\\\/\([A-Za-z0-9+/=]*\)?token.*/\1/p')
+		[ -z "$GB64" ] && GB64=$(printf '%s' "$LINK" | sed -n 's/.*client\/\([A-Za-z0-9+/=]*\)?token.*/\1/p')
+		GCONN=$(printf '%s' "$GB64" | base64 -d 2>/dev/null | tr '\0' '|' | cut -d'|' -f1)
+
+		if [ -n "$GCONN" ]; then
+			ok "the link carries a connection id ($GCONN)"
+		else
+			bad "the link carries a connection id" "could not decode: $GB64"
+		fi
+
+		# The connection must point at THIS node's console port. A row that
+		# exists but points somewhere else is the failure mode that looks fine
+		# in the UI until the console opens on the wrong node.
+		GPORT=$(sudo mysql -N guacdb -e \
+			"SELECT parameter_value FROM guacamole_connection_parameter WHERE connection_id=${GCONN:-0} AND parameter_name='port';" 2>/dev/null)
+		chk "the guacdb connection points at this node's console port" "$GPORT" "$PORT"
+
+		GPROTO=$(sudo mysql -N guacdb -e \
+			"SELECT protocol FROM guacamole_connection WHERE connection_id=${GCONN:-0};" 2>/dev/null)
+		chk "and is a telnet connection" "$GPROTO" "telnet"
+
+		# Now actually open it. A tunnel UUID comes back only after the web
+		# application completed the guacd handshake, which guacd only completes
+		# after it connected to the console port above -- so this single
+		# assertion covers Apache, Jetty, the web app, guacd and the wrapper.
+		if [ -n "$GTOKEN" ] && [ -n "$GCONN" ]; then
+			GHDR=$(mktemp)
+			GUUID=$(curl -s --max-time 30 -D "$GHDR" -X POST "$B/html5/tunnel?connect" \
+				--data-urlencode "token=$GTOKEN" --data-urlencode GUAC_DATA_SOURCE=mysql \
+				--data-urlencode "GUAC_ID=$GCONN" --data-urlencode GUAC_TYPE=c \
+				--data-urlencode GUAC_WIDTH=1024 --data-urlencode GUAC_HEIGHT=768 \
+				--data-urlencode GUAC_DPI=96 --data-urlencode GUAC_AUDIO=audio/L16 \
+				--data-urlencode GUAC_IMAGE=image/png 2>/dev/null)
+			case "$GUUID" in
+				[0-9a-f]*-*-*-*-*)
+					ok "a tunnel opens to the live node's console (UUID $GUUID)"
+					# And it streams: the first instructions off the tunnel are
+					# the terminal sizing guacd emits once the console answers.
+					GTT=$(grep -i 'Guacamole-Tunnel-Token' "$GHDR" | tr -d '\r' | cut -d' ' -f2)
+					GOUT=$(curl -s --max-time 12 "$B/html5/tunnel?read:${GUUID}:0" \
+						-H "Guacamole-Tunnel-Token: $GTT" 2>/dev/null | head -c 200)
+					has "and streams Guacamole protocol instructions back" "$GOUT" "size,"
+					;;
+				*)  bad "a tunnel opens to the live node's console" "$(printf '%s' "$GUUID" | head -c 160)" ;;
+			esac
+			rm -f "$GHDR"
+		else
+			bad "a tunnel opens to the live node's console" "no token or connection id in the link"
+		fi
+
 		has "stop it" "$(A -X POST $S/nodes/stop -d "{\"id\":\"$ID\"}")" "80051"
 		sleep 2
 		if [ -n "$PORT" ] && sudo netstat -a -t -n 2>/dev/null | grep LISTEN | grep -q ":$PORT"; then
