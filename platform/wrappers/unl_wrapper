@@ -224,6 +224,46 @@ switch ($action) {
 			exit(35);
 		}
 		break;
+	case 'image-commit':
+		// Commit a running QEMU node's disk back into a template.
+		//
+		// This replaces fifteen sudo call sites in
+		// Admin/Node_sessionsController.php — qemu-img, cp, mv, mkdir, rm and
+		// chown, run on paths concatenated from request input, none of them
+		// quoted. The one that mattered most was
+		//     $newFolder = '/opt/unetlab/addons/qemu/' . $imageQemu[0] . '-' . $deviceName;
+		// with $imageQemu taken straight off the request body.
+		//
+		// Now the caller sends a session id, one of four type words, and a name
+		// that has to match a strict slug pattern. Every path is built here, and
+		// the backing chain of every disk is resolved and checked to be inside
+		// the image roots BEFORE qemu-img is allowed to follow it — see the
+		// header of actions/UnlImageCommit.php for why that matters.
+		require_once(__DIR__ . '/actions/UnlImageCommit.php');
+
+		$imageCommit = new UnlImageCommit(array(
+			'lookup' => function ($session) {
+				$db = checkDatabase();
+				$statement = $db->prepare('SELECT ' . NODE_SESSION_LAB . ', ' . NODE_SESSION_TYPE
+					. ' FROM ' . NODE_SESSIONS_TABLE . ' WHERE ' . NODE_SESSION_ID . ' = :id');
+				$statement->execute(array('id' => $session));
+				$row = $statement->fetch(PDO::FETCH_ASSOC);
+				if (!is_array($row)) return null;
+				return array('lab' => $row[NODE_SESSION_LAB], 'type' => $row[NODE_SESSION_TYPE]);
+			},
+		));
+
+		$commitResult = $imageCommit->run(
+			unl_single_option($options, 'S'),
+			unl_single_option($options, 'type'),
+			unl_single_option($options, 'name')
+		);
+		echo 'IMAGE-COMMIT-RESULT ' . json_encode($commitResult) . "\n";
+		if (!$commitResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: image-commit: ' . $commitResult['error']);
+			exit(42);
+		}
+		break;
 	case 'iol-keepalive':
 		// Start or stop the IOL L1 keepalive helper for a link.
 		//

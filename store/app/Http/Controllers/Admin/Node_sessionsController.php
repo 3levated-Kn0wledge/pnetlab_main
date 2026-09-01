@@ -77,28 +77,18 @@ class Node_sessionsController extends Controller
             if ($type == 'snapshot') {
                 $addSize = (int) SystemHelper::FolderSize($nodeSession->{NODE_SESSION_WORKSPACE});
             } else {
-                $files = scandir($nodeSession->{NODE_SESSION_WORKSPACE});
-                $qcowFiles = [];
-                foreach ($files as $file) {
-                    if (preg_match('/^.+\.qcow2$/', $file)) {
-                        $qcowFiles[] = $nodeSession->{NODE_SESSION_WORKSPACE} . '/' . $file;
-                    }
+                // The disk images and their backing chain used to be walked
+                // here, with `sudo qemu-img info --backing-chain` on a path
+                // built from the workspace and passed through secureCmd(),
+                // which is a blocklist of [#;|&] and '..' and lets a backtick
+                // straight through. The wrapper does the walk now and reports
+                // one number; it also refuses a chain that points outside the
+                // image roots, which this loop never checked.
+                $imageResult = $this->imageCommit($nodeSession->{NODE_SESSION_ID}, 'check');
+                if (!$imageResult['ok']) {
+                    Reply::finish(false, 'Can not read the disk images: {data}', ['data' => $imageResult['error']]);
                 }
-
-                foreach ($qcowFiles as $qcowFile) {
-                    $o = [];
-                    $result = exec('sudo qemu-img info --backing-chain ' . secureCmd($qcowFile) . ' | grep image', $o, $r);
-                    foreach ($o as $item) {
-                        if (preg_match('/^image\:\s+(.+)$/', $item, $match)) {
-                            $qcowTree[] = $match[1];
-                            if (!is_file($match[1])) Reply::finish(false, 'Can not define: {data}', ['data' => $match[1]]);
-                        }
-                    }
-                    $qcowTree[0] = $qcowFile;
-                    foreach ($qcowTree as $item) {
-                        $addSize += filesize($item);
-                    }
-                }
+                $addSize = (int) $imageResult['size'];
             }
         }
 
@@ -143,26 +133,32 @@ class Node_sessionsController extends Controller
                 if (count($imageDocker) < 2) Reply::finish(false, ERROR_FORMAT, ['data' => 'Docker Image']);
                 $newName = $imageDocker[0] . ':' . $deviceName;
 
-                $result = exec('docker -H=unix:///var/run/docker.sock images -q ' . $newName, $o, $r);
+                // Every value below is escaped. These no longer go through
+                // sudo, but talking to the Docker socket is root-equivalent on
+                // this host, so an image name that can become a second command
+                // is worth exactly as much to an attacker as the sudo was.
+                $result = exec('docker -H=unix:///var/run/docker.sock images -q ' . escapeshellarg($newName), $o, $r);
                 if (isset($o[0])) Reply::finish(false, 'This Name already exists');
 
-                $result = exec('docker -H=unix:///var/run/docker.sock commit docker' . $nodeSession->{NODE_SESSION_ID} . ' ' . $newName, $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock commit '
+                    . escapeshellarg('docker' . $nodeSession->{NODE_SESSION_ID}) . ' ' . escapeshellarg($newName), $o, $r);
                 if ($r != 0) Reply::finish(false, 'Docker Commit Failed');
                 Reply::finish(true, 'success', ['name' => $newName]);
             } else if ($type == 'existed') {
 
-                $result = exec('docker -H=unix:///var/run/docker.sock images -q ' . $node_image, $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock images -q ' . escapeshellarg($node_image), $o, $r);
                 if (!isset($o[0])) Reply::finish(false, ERROR_UNDEFINE, ['data' => 'Docker Image']);
                 $oldId = $o[0];
 
                 $o = [];
-                $result = exec('docker -H=unix:///var/run/docker.sock inspect ' . $oldId . ' --format="{{.Parent}}"', $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock inspect ' . escapeshellarg($oldId) . ' --format="{{.Parent}}"', $o, $r);
                 if (!isset($o[0]) || $o[0] == '') Reply::finish(false, "docker_commit_alert");
 
-                $result = exec('docker -H=unix:///var/run/docker.sock commit docker' . $nodeSession->{NODE_SESSION_ID} . ' ' . $node_image, $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock commit '
+                    . escapeshellarg('docker' . $nodeSession->{NODE_SESSION_ID}) . ' ' . escapeshellarg($node_image), $o, $r);
                 if ($r != 0) Reply::finish(false, 'Docker Commit Failed', 'Docker Commit Failed');
 
-                if (isset($oldId)) $result = exec('docker -H=unix:///var/run/docker.sock image rm ' . $oldId, $o, $r);
+                if (isset($oldId)) $result = exec('docker -H=unix:///var/run/docker.sock image rm ' . escapeshellarg($oldId), $o, $r);
 
                 Reply::finish(true, 'success', ['name' => '']);
             }
@@ -173,90 +169,83 @@ class Node_sessionsController extends Controller
             $addSize += (int) SystemHelper::FolderSize('/opt/unetlab/addons/qemu/' . $node_image);
             if ($freeDisk - $addSize < 100 * 1024 * 1024) Reply::finish(false, 'You do not have enough free hard disk to save the new device');
 
-
-            $files = scandir($nodeSession->{NODE_SESSION_WORKSPACE});
-            $qcowFiles = [];
-            foreach ($files as $file) {
-                if (preg_match('/^.+\.qcow2$/', $file)) {
-                    $qcowFiles[] = $nodeSession->{NODE_SESSION_WORKSPACE} . '/' . $file;
-                }
-            }
-
+            // What was here: a scandir for *.qcow2, then between four and
+            // fifteen `sudo` commands per commit — qemu-img info, mkdir, cp,
+            // qemu-img rebase, qemu-img commit, mv, rm -rf and chown -R —
+            // every one of them built by concatenating $newFolder, $qcowFile,
+            // $tmpFile and $parentFile into a root shell without a single
+            // quote. $newFolder came from explode('-', $request->input(
+            // 'node_image'))[0], so the destination of a root `mkdir` was
+            // request input.
+            //
+            // It is now one wrapper call. The controller decides nothing about
+            // paths: it sends a session id, a type word from a closed set, and
+            // a name, and the wrapper builds every path under a root it owns.
             if ($type == 'existed') {
-                foreach ($qcowFiles as $qcowFile) {
-                    $result = exec('sudo qemu-img commit ' . $qcowFile . ' 2>&1', $o, $r);
-                    if ($r != 0) Reply::finish(false, 'Qemu Commit Failed.' . $result);
-                }
+                $imageResult = $this->imageCommit($nodeSession->{NODE_SESSION_ID}, 'existed');
+                if (!$imageResult['ok']) Reply::finish(false, 'Qemu Commit Failed. {data}', ['data' => $imageResult['error']]);
                 Reply::finish(true, 'success', ['name' => '']);
-            } else if ($type == 'snapshot') {
+            } else if ($type == 'snapshot' || $type == 'new') {
                 $imageQemu = explode('-', $node_image);
                 if (count($imageQemu) < 1) Reply::finish(false, ERROR_FORMAT, ['data' => 'Qemu Image']);
 
                 $newName = $imageQemu[0] . '-' . $deviceName;
-                $newFolder = '/opt/unetlab/addons/qemu/' . $newName;
 
-                if (is_dir($newFolder)) Reply::finish(false, 'This Name already exists');
-                $result = exec('sudo mkdir ' . $newFolder);
-
-                foreach ($qcowFiles as $qcowFile) {
-                    $result = exec('sudo cp -f ' . $qcowFile . ' ' . $newFolder . '/' . basename($qcowFile), $o, $r);
-                    if ($r != 0) Reply::finish(false, 'Qemu Commit Failed.' . $result);
+                // These two checks are kept here so the user gets the message
+                // the screen expects. Neither is the security boundary: the
+                // wrapper repeats both, refuses a name that is not a plain
+                // slug, and creates nothing outside the addons root.
+                if (is_dir('/opt/unetlab/addons/qemu/' . $newName)) Reply::finish(false, 'This Name already exists');
+                if ($type == 'new' && !is_dir('/opt/unetlab/addons/qemu/' . $node_image)) {
+                    Reply::finish(false, 'Original Folder is not exists');
                 }
 
-                $result = exec('sudo chown -R www-data:www-data ' . $newFolder);
-                Reply::finish(true, 'success', ['name' => $newName]);
-            } else if ($type == 'new') {
-                $imageQemu = explode('-', $node_image);
-                if (count($imageQemu) < 1) Reply::finish(false, ERROR_FORMAT, ['data' => 'Qemu Image']);
-
-                $newName = $imageQemu[0] . '-' . $deviceName;
-                $newFolder = '/opt/unetlab/addons/qemu/' . $newName;
-                $oldFolder = '/opt/unetlab/addons/qemu/' . $node_image;
-                $tmpFolder = '/tmp/commit/' . $nodeSession->{NODE_SESSION_ID};
-                $result = exec('sudo rm -rf ' . $tmpFolder);
-
-                if (is_dir($newFolder)) Reply::finish(false, 'This Name already exists');
-
-                if (!is_dir($oldFolder)) Reply::finish(false, 'Original Folder is not exists');
-                $result = exec('sudo mkdir ' . $newFolder);
-
-                foreach ($qcowFiles as $qcowFile) {
-                    $o = [];
-                    $result = exec('sudo qemu-img info --backing-chain ' . $qcowFile . ' | grep image', $o, $r);
-                    $qcowTree = [];
-
-                    foreach ($o as $item) {
-                        if (preg_match('/^image\:\s+(.+)$/', $item, $match)) {
-                            $qcowTree[] = $match[1];
-                            if (!is_file($match[1])) Reply::finish(false, 'Can not define: ' . $match[1]);
-                        }
-                    }
-                    $qcowTree[0] = $qcowFile;
-
-                    foreach ($qcowTree as $item) {
-                        $tmpFile = $tmpFolder . $item;
-                        $result = exec('sudo mkdir -p ' . dirname($tmpFile), $o, $r);
-                        $result = exec('sudo cp -f ' . $item . ' ' . $tmpFile);
-                    }
-
-                    foreach ($qcowTree as $key => $item) {
-                        $tmpFile = $tmpFolder . $item;
-                        if (isset($qcowTree[$key + 1])) {
-                            $parentFile = $tmpFolder . $qcowTree[$key + 1];
-                            $result = exec('sudo qemu-img rebase -b ' . $parentFile . ' ' . $tmpFile, $o, $r);
-                            $result = exec('sudo qemu-img commit ' . $tmpFile, $o, $r);
-                        } else {
-                            exec('sudo mv -f ' . $tmpFile . ' ' . $newFolder . '/' . basename($tmpFile));
-                        }
-                    }
-                }
-
-                $result = exec('sudo rm -rf ' . $tmpFolder);
-                $result = exec('sudo chown -R www-data:www-data ' . $newFolder);
+                $imageResult = $this->imageCommit($nodeSession->{NODE_SESSION_ID}, $type, $newName);
+                if (!$imageResult['ok']) Reply::finish(false, 'Qemu Commit Failed. {data}', ['data' => $imageResult['error']]);
 
                 Reply::finish(true, 'success', ['name' => $newName]);
             }
         }
+    }
+
+    /**
+     * Ask unl_wrapper to do one enumerated thing to this node's disk images.
+     *
+     * Three values cross the privilege boundary and no more: an integer session
+     * id, a type word chosen from a closed set BY THIS METHOD (the branches
+     * below append literals, so $type never reaches the command line), and a
+     * name that is escaped here and revalidated against
+     * ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ inside the wrapper. No path is sent,
+     * because no path the web layer can name should decide where root writes.
+     *
+     * @return array ['ok'=>bool,'error'=>string|null,'name'=>string|null,'size'=>int,'files'=>int]
+     */
+    private function imageCommit($sessionId, $type, $name = null)
+    {
+        $cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a image-commit -S ' . (int) $sessionId;
+        if ($type === 'check') {
+            $cmd .= ' --type check';
+        } else if ($type === 'existed') {
+            $cmd .= ' --type existed';
+        } else if ($type === 'snapshot') {
+            $cmd .= ' --type snapshot';
+        } else if ($type === 'new') {
+            $cmd .= ' --type new';
+        } else {
+            return ['ok' => false, 'error' => 'unsupported commit type', 'name' => null, 'size' => 0, 'files' => 0];
+        }
+        if ($name !== null) $cmd .= ' --name ' . escapeshellarg($name);
+
+        $o = [];
+        exec($cmd, $o, $r);
+        foreach ($o as $line) {
+            if (strpos($line, 'IMAGE-COMMIT-RESULT ') !== 0) continue;
+            $decoded = json_decode(substr($line, strlen('IMAGE-COMMIT-RESULT ')), true);
+            if (is_array($decoded) && isset($decoded['ok'])) {
+                return $decoded + ['error' => null, 'name' => null, 'size' => 0, 'files' => 0];
+            }
+        }
+        return ['ok' => false, 'error' => 'the wrapper returned no result', 'name' => null, 'size' => 0, 'files' => 0];
     }
 
 

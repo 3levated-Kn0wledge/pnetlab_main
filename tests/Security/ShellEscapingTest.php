@@ -616,8 +616,9 @@ foreach (file($baselineFile, FILE_IGNORE_NEW_LINES) as $l) {
 // Ratchet. It has only ever moved downwards: 93 when the sweep was first made
 // honest, 91 once signed packages removed DevicesController's two, 88 once
 // `-a iol-keepalive` removed the ps|grep|cut -> `sudo kill -9 $pid` teardown in
-// devices/interfc.php and devices/iol/device_iol.php.
-const SWEEP_BASELINE_MAX = 88;
+// devices/interfc.php and devices/iol/device_iol.php, 77 once `-a image-commit`
+// took the whole QEMU commit flow out of Node_sessionsController.
+const SWEEP_BASELINE_MAX = 77;
 assert_true(count($baseline) <= SWEEP_BASELINE_MAX,
     sprintf('the known-unfixed baseline has not grown (%d of %d)', count($baseline), SWEEP_BASELINE_MAX));
 

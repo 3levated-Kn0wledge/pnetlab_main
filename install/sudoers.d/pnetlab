@@ -124,15 +124,25 @@ www-data ALL=(root) NOPASSWD: /usr/sbin/service          # launches anything
 # local account could reach with no membership at all.
 www-data ALL=(root) NOPASSWD: /opt/unetlab/html/store/app/Console/Commands/idlepc
 www-data ALL=(root) NOPASSWD: /usr/bin/tee               # arbitrary file write
-www-data ALL=(root) NOPASSWD: /usr/bin/cp                # arbitrary file write
-www-data ALL=(root) NOPASSWD: /usr/bin/mv                # arbitrary file write
 www-data ALL=(root) NOPASSWD: /usr/bin/rm                # arbitrary deletion
 www-data ALL=(root) NOPASSWD: /usr/bin/chmod             # arbitrary mode change
 www-data ALL=(root) NOPASSWD: /usr/bin/chown             # arbitrary ownership
-www-data ALL=(root) NOPASSWD: /usr/bin/mkdir
 www-data ALL=(root) NOPASSWD: /usr/bin/touch
-www-data ALL=(root) NOPASSWD: /usr/bin/link
+# cp, mv, mkdir and link are gone. Every one of them was reached from the QEMU
+# commit flow in Admin/Node_sessionsController.php, on paths concatenated from
+# request input without a quote anywhere:
+#     $newFolder = '/opt/unetlab/addons/qemu/' . $imageQemu[0] . '-' . $deviceName;
+#     exec('sudo mkdir ' . $newFolder);
+#     exec('sudo cp -f ' . $qcowFile . ' ' . $newFolder . '/' . basename($qcowFile));
+# That flow is now `unl_wrapper -a image-commit`, which receives a session id, a
+# type word from a closed set and a slug — never a path. link had no live call
+# site at all: devices/qemu/device_qemu.php assigned the command to $cmd and
+# never executed it.
 www-data ALL=(root) NOPASSWD: /usr/bin/qemu-img          # reads/writes any path
+# qemu-img is down to ONE caller, Admin/LabsController::…'s dependency listing
+# (`sudo qemu-img info --backing-chain`), which is a read that needs no
+# privilege at all. That file belongs to the CSRF work in flight; when its sudo
+# goes, this line goes with it and SudoersPolicyTest will say so.
 www-data ALL=(root) NOPASSWD: /usr/sbin/useradd          # can create a uid 0 account
 
 # --- Deliberately ABSENT. Do not reinstate. --------------------------------

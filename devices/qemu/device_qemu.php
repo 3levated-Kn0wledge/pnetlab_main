@@ -577,9 +577,16 @@ class device_qemu extends device
                         error_log(date('M d H:i:s ') . implode("\n", $o));
                         return 80045;
                     }
-                }else{
-                    $cmd = 'sudo link ' . escapeshellarg($image . '/' . $filename) . ' ' . escapeshellarg($this->getRunningPath() . '/' . $filename);
                 }
+                // There used to be an else branch here assigning
+                //     $cmd = 'sudo link ' . <template file> . ' ' . <running path>
+                // and nothing ever executed it, so non-qcow2 template files have
+                // never been linked into a node workspace. Deleting the dead
+                // assignment retires the /usr/bin/link grant; it is deliberately
+                // not "fixed" into a working hard link, because that would be a
+                // behaviour change dressed up as a cleanup. If a template ever
+                // needs a companion file in the workspace, add it here on
+                // purpose, with symlink() or link() and no shell.
             }
 
             if (is_file($this->getRunningPath() . '/.lock')) {

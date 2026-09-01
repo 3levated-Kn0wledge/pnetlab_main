@@ -180,17 +180,16 @@ includes/functions.php $cmd
 # `sudo <file>` on a script downloaded from upstream, and decoded that script
 # with htmlspecialchars_decode() on the way. Signed packages replaced it, so
 # there is no longer a shell there to escape into.
-store/app/Http/Controllers/Admin/Node_sessionsController.php $request->input()
-store/app/Http/Controllers/Admin/Node_sessionsController.php $qcowFile
-store/app/Http/Controllers/Admin/Node_sessionsController.php $qcowTree[]
-store/app/Http/Controllers/Admin/Node_sessionsController.php $imageQemu[0]
-store/app/Http/Controllers/Admin/Node_sessionsController.php $imageDocker[0]
-store/app/Http/Controllers/Admin/Node_sessionsController.php $item
-store/app/Http/Controllers/Admin/Node_sessionsController.php $o[0]
-store/app/Http/Controllers/Admin/Node_sessionsController.php $nodeSession->{}
-store/app/Http/Controllers/Admin/Node_sessionsController.php basename()
-store/app/Http/Controllers/Admin/Node_sessionsController.php dirname()
-store/app/Http/Controllers/Admin/Node_sessionsController.php preg_replace()
+#
+# Node_sessionsController's ELEVEN entries are gone too. They were the QEMU
+# commit flow — qemu-img/mkdir/cp/mv/rm/chown on paths concatenated from
+# $request->input('node_image') — which is now `unl_wrapper -a image-commit`:
+# a session id, a type word from a closed set and a slug, with every path built
+# on the far side of the boundary. The docker half of the same controller kept
+# its exec() calls, because talking to the daemon socket needs no sudo, but
+# every value in them is escaped now: socket access is root-equivalent on this
+# host, so an image name that can become a second command was worth exactly what
+# the sudo was.
 store/app/Helpers/Request/Query.php $p['proxy_ip']
 store/app/Helpers/Request/Query.php $p['proxy_port']
 store/app/Helpers/Request/Query.php $p['proxy_username']
