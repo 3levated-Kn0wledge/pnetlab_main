@@ -291,6 +291,19 @@ print(d.get('$QID',{}).get('status',''))" 2>/dev/null)
 			bad "qemu_wrapper_telnet is the process serving the console" \
 				"no such process; the node may be running without a telnet console"
 		fi
+
+		# The emulator must not be root. QEMU is the node type where the drop is
+		# worth the most and where it was hardest to get right: it needs
+		# /dev/kvm through a supplementary group, a tap it can attach to, and a
+		# disk it can write. Two of those three failed silently on the first
+		# attempt, because command() sends QEMU's output to wrapper.txt and
+		# qemu_wrapper_telnet truncates the same file a second later.
+		QU=$(ps -eo user=,args= | grep '[q]emu-system' | awk '{print $1}' | sort -u | tr '\n' ' ')
+		case "$QU" in
+			*root*) bad "no qemu-system process runs as root" "users: $QU" ;;
+			*unl*)  ok  "qemu-system runs as the tenant account (users: $QU)" ;;
+			*)      bad "qemu-system runs as the tenant account" "no qemu-system process found" ;;
+		esac
 		has "stop it" "$(A -X POST $S/nodes/stop -d "{\"id\":\"$QID\"}")" "80051"
 	fi
 fi

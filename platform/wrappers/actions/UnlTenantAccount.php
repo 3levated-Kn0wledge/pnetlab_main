@@ -85,6 +85,11 @@ class UnlTenantAccount
 {
     /** The group every tenant account has as its primary group. */
     const TENANT_GROUP = 'unl';
+    /**
+     * Supplementary groups a tenant account is given, when the host has them.
+     * A fixed list: nothing a caller says can extend it. See create().
+     */
+    const EXTRA_GROUPS = array('kvm');
     /** Its gid on a stock install. A fallback only; the name is resolved first. */
     const TENANT_GID = 32768;
     /** uid of the account for node session N. Mirrors checkUsername(). */
@@ -194,17 +199,24 @@ class UnlTenantAccount
         return $entry === false ? null : $entry;
     }
 
+    /** True if the host has a group of this name. */
+    private function groupExists($name)
+    {
+        return $this->group($name) !== null;
+    }
+
+    private function group($name)
+    {
+        if ($this->grnam !== null) return call_user_func($this->grnam, $name);
+        if (!function_exists('posix_getgrnam')) return null;
+        $entry = posix_getgrnam($name);
+        return $entry === false ? null : $entry;
+    }
+
     /** The gid of the `unl` group, resolved by NAME. */
     private function tenantGid()
     {
-        if ($this->grnam !== null) {
-            $group = call_user_func($this->grnam, self::TENANT_GROUP);
-        } elseif (function_exists('posix_getgrnam')) {
-            $group = posix_getgrnam(self::TENANT_GROUP);
-            if ($group === false) $group = null;
-        } else {
-            $group = null;
-        }
+        $group = $this->group(self::TENANT_GROUP);
         if (is_array($group) && isset($group['gid'])) return (int) $group['gid'];
         // The group is created by the installer, and its absence is a broken
         // install rather than a licence to guess. Falling back to the stock gid
@@ -359,7 +371,7 @@ class UnlTenantAccount
         }
 
         $home = $this->usersRoot . '/' . $session;
-        $result = $this->spawn(array(
+        $argv = array(
             $this->useradd,
             '-c', 'Unified Networking Lab TID=' . $session,
             '-d', $home,
@@ -367,8 +379,29 @@ class UnlTenantAccount
             '-M',
             '-s', $this->shell,
             '-u', (string) $uid,
-            $name,
-        ));
+        );
+
+        // Supplementary groups the emulators need once they stop running as
+        // root. Only kvm today: most shipped QEMU templates carry accel=kvm in
+        // qemu_options, /dev/kvm is 0660 root:kvm, and device::spawnAsTenant()
+        // cannot add a group after it has dropped the uid. The list is a fixed
+        // constant here and every member is checked to exist before it is asked
+        // for, so a host without KVM does not fail every node start.
+        //
+        // Accounts created BEFORE this landed do not have it. They self-heal:
+        // the reaper removes a tenant account at the end of every session, so
+        // the next start recreates it through this path.
+        $extra = array();
+        foreach (self::EXTRA_GROUPS as $group) {
+            if ($this->groupExists($group)) $extra[] = $group;
+        }
+        if (count($extra)) {
+            $argv[] = '-G';
+            $argv[] = implode(',', $extra);
+        }
+
+        $argv[] = $name;
+        $result = $this->spawn($argv);
         if ($result['rc'] !== 0) {
             return $fail('useradd failed: ' . trim($result['out']));
         }

@@ -383,6 +383,31 @@ assert_true(in_array('unl', $argv, true), 'in the unl group');
 assert_true(in_array('unl5', $argv, true), 'for the constructed name');
 assert_true(in_array('32773', $argv, true), 'with the computed uid');
 
+assert_true(!in_array('-G', $argv, true),
+    'and no supplementary group when the host does not have one');
+
+// kvm, when the host has it: QEMU needs /dev/kvm (0660 root:kvm) and
+// device::spawnAsTenant() cannot add a group after it has dropped the uid.
+$withKvm = ta([
+    'pwnam' => function ($n) { return null; },
+    'grnam' => function ($n) {
+        if ($n === 'unl') return ['name' => 'unl', 'gid' => 32768];
+        if ($n === 'kvm') return ['name' => 'kvm', 'gid' => 994];
+        return null;
+    },
+]);
+$withKvm->create(5);
+$argv = $withKvm->commands[0];
+$g = array_search('-G', $argv, true);
+assert_true($g !== false, 'a host with a kvm group gets a supplementary group');
+assert_same('kvm', $argv[$g + 1], 'and it is kvm');
+assert_same('unl5', $argv[count($argv) - 1],
+    'the account name is still the last argument, after the group list');
+
+// The list is a constant. Nothing a caller says can extend it.
+assert_same(array('kvm'), UnlTenantAccount::EXTRA_GROUPS,
+    'the supplementary group list is a fixed constant on the class');
+
 $r = ta()->create(1);
 assert_true($r['ok'] && !$r['created'], 'an existing healthy account is a no-op success');
 $r = ta()->create(7);

@@ -273,7 +273,24 @@ function addTap($s, $u)
 	$s = secureCmd($s);
 	$u = secureCmd($u);
 	// TODO if already exist should fail?
-	$cmd = 'sudo tunctl -u ' . escapeshellarg($u) . ' -g root -t ' . escapeshellarg($s) . ' 2>&1';
+	//
+	// -g unl, NOT -g root. This one word decides whether an emulator can run as
+	// its own tenant, and the kernel's rule is not the obvious one:
+	//
+	//     tun_not_capable() = ((owner set && euid != owner)
+	//                       || (group set && !in_egroup_p(group))) && !CAP_NET_ADMIN
+	//
+	// so being the tap's OWNER is not sufficient — both clauses have to be
+	// satisfied. With -g root, unl<N> owns the tap and still cannot open it,
+	// because it is not in group root, and the failure is a bare EPERM from
+	// TUNSETIFF with no diagnostic anywhere. The node starts, its console works,
+	// and no frame ever moves. That is what it looked like here.
+	//
+	// It does NOT widen access to other tenants. Measured on the reference host:
+	// with -g unl, the owning tenant opens the tap; a different unl account, in
+	// the same group, is still refused, because the owner clause binds it.
+	// Root is unaffected either way — it has CAP_NET_ADMIN.
+	$cmd = 'sudo tunctl -u ' . escapeshellarg($u) . ' -g unl -t ' . escapeshellarg($s) . ' 2>&1';
 	error_log(date('M d H:i:s ') . 'INFO: ' . $cmd);
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {

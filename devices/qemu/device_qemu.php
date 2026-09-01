@@ -176,6 +176,33 @@ class device_qemu extends device
         
     }
 
+    /**
+     * QEMU runs as the tenant account.
+     *
+     * What it needs, and where each piece comes from:
+     *
+     *   - the tap. prepare() creates it with `tunctl -u unl<N> -g unl`, and the
+     *     emulator attaches to the existing persistent device through
+     *     /dev/net/tun, which is 0666. See addTap() in includes/cli.php for why
+     *     the group on that line is load-bearing.
+     *   - /dev/kvm, which is 0660 root:kvm and is needed because almost every
+     *     shipped template carries accel=kvm. The tenant account is created with
+     *     kvm as a supplementary group; device::spawnAsTenant() applies it with
+     *     posix_initgroups() BEFORE dropping the uid, because there is no way
+     *     back afterwards.
+     *   - the running directory and the linked-clone qcow2 inside it, which are
+     *     root:unl 0775/0664, so the tenant writes through the group. The
+     *     backing image under /opt/unetlab/addons is read-only to it.
+     *   - the console and VNC ports, 3xxxx and 59xx. Neither is privileged.
+     *
+     * qemu-img still runs as root in prepare(), and so does qemu_wrapper_telnet
+     * in start(). Both are deliberate and both are recorded there.
+     */
+    protected function runsAsTenant()
+    {
+        return true;
+    }
+
     public function command()
     {
 
@@ -576,6 +603,32 @@ class device_qemu extends device
                         error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80045]);
                         error_log(date('M d H:i:s ') . implode("\n", $o));
                         return 80045;
+                    }
+
+                    // Hand the clone to the tenant that is about to run QEMU.
+                    //
+                    // qemu-img creates it 0644, and the wrapper's umask does not
+                    // change that, so the file lands root:unl with the group
+                    // read-only. QEMU opens its drive READ-WRITE, so as unl<N>
+                    // it exits immediately — and the exit message is invisible,
+                    // because command() redirects QEMU's output to wrapper.txt
+                    // and device_qemu::start() then points qemu_wrapper_telnet
+                    // at the SAME file a second later and truncates it. That
+                    // collision is not new and is not fixed here; it is written
+                    // down because it is what makes this failure look like "the
+                    // node simply does not start".
+                    //
+                    // Owner rather than group: /opt/unetlab/tmp is group unl and
+                    // group-writable, so every tenant can already reach every
+                    // other tenant's workspace. Making the disk owned by the one
+                    // account that needs it does not fix that — tightening
+                    // /opt/unetlab/tmp is its own roadmap item — but it does not
+                    // widen it either.
+                    $clone = $this->getRunningPath() . '/' . $filename;
+                    $tenant = posix_getpwnam('unl' . (int) $this->getSession());
+                    if ($tenant !== false) {
+                        @chown($clone, (int) $tenant['uid']);
+                        @chmod($clone, 0660);
                     }
                 }
                 // There used to be an else branch here assigning

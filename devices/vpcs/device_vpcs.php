@@ -11,6 +11,19 @@
 class device_vpcs extends device
 {
 
+    /**
+     * VPCS runs as the tenant account.
+     *
+     * It needs the tap, which prepare() has already handed to unl<session> with
+     * `tunctl -u`, the running directory, which is root:unl 0775, and a console
+     * port at 3xxxx. Nothing on that list is privileged, and running it as root
+     * was never a requirement — only the default.
+     */
+    protected function runsAsTenant()
+    {
+        return true;
+    }
+
     public function createEthernets($quantity)
     {
         $ethernets = [];

@@ -583,7 +583,15 @@ switch ($action) {
         exec($cmd, $o, $rc);
 		$cmd = 'ovs-vsctl list-br | while read line; do ovs-vsctl del-br $line; done';
 		exec($cmd, $o, $rc);
-		$cmd = 'ifconfig | grep vunl | cut -d\' \' -f1 | while read line; do tunctl -d $line; done';
+		// `ifconfig` with no arguments lists only interfaces that are UP, so this
+		// used to walk past every tap belonging to a node that had already been
+		// killed — which is all of them, by this point in stopall. The taps
+		// survived the action whose entire job is to clear the system, and with
+		// the tenant reaper below they would also pin the accounts that own
+		// them, because a surviving vunl<N>_* is a refusal to reap. `ip -o link
+		// show` lists every interface regardless of state.
+		$cmd = 'ip -o link show | grep -o \'vunl[0-9]\+_[0-9]\+\' | sort -u'
+			. ' | while read line; do ip link set $line down; tunctl -d $line; done';
 		exec($cmd, $o, $rc);
 		$cmd = 'find /opt/unetlab/labs/ -name "*.lock" -exec rm -f {} \;';
 		exec($cmd, $o, $rc);

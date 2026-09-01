@@ -121,6 +121,13 @@ for n in 1 2 3; do
 done
 sleep 3
 chk "six vpcs processes (VPCS forks two per node)" "$(pgrep -c vpcs 2>/dev/null || true)" "6"
+
+# The emulator must not be root. Everything below this line — the taps, the
+# bridge, the pings — is what proves the drop did not cost the data plane, which
+# is the failure mode that matters: with the tap group set to root the node
+# starts, its console answers, and no frame ever moves.
+chk "no vpcs process runs as root"                  "$(ps -o user= -C vpcs 2>/dev/null | grep -c '^root' || true)" "0"
+chk "all six run as a tenant account instead"       "$(ps -o user= -C vpcs 2>/dev/null | grep -c '^unl' || true)"  "6"
 chk "three taps exist"                 "$(ip -o link show | grep -c vunl)" "3"
 
 # The session ids this run is actually using, so the account assertions can name

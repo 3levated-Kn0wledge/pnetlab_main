@@ -691,7 +691,7 @@ class device
         }
 
         $cmd = $this->command();
-        $cmd = secureCmd($cmd) . " 2>&1 &";
+        $cmd = secureCmd($cmd);
         if (!isset($cmd) || $cmd == '') return;
         $cmd = preg_replace('/\s+/m', ' ', $cmd);
 
@@ -699,7 +699,12 @@ class device
         error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
         // Clean TCP port
         exec("fuser -k -n tcp " . ($this->getPort()));
-        exec($cmd, $o, $rcp);
+
+        if ($this->runsAsTenant()) {
+            $rcp = $this->spawnAsTenant($cmd . ' 2>&1');
+        } else {
+            exec($cmd . ' 2>&1 &', $o, $rcp);
+        }
 
         if ($rcp == 0 && $this->type != 'docker') {
             $ethernets = $this->getEthernets();
@@ -713,8 +718,118 @@ class device
     }
 
     /**
+     * Does this node type's emulator run as the tenant account?
+     *
+     * False here, and overridden to true only for the types that have been
+     * driven end to end unprivileged on a real host. Adding a type to that list
+     * is a claim about the whole start path, not a preference, so it is made per
+     * class rather than by a flag.
+     *
+     * Note that only IOL dropped privileges before this, and it did so by
+     * calling posix_setuid() in prepare() — inside the WRAPPER's own process.
+     * That is why unl_wrapper's start-all loop postpones IOL nodes: once the
+     * wrapper has setuid'd, it cannot start anything else, cannot create the
+     * next tenant account, and cannot bring up the next tap. spawnAsTenant()
+     * drops in a forked child instead, so the wrapper stays root and the
+     * ordering constraint goes away.
+     */
+    protected function runsAsTenant()
+    {
+        return false;
+    }
+
+    /**
+     * Start the emulator as the tenant account, in a forked child.
+     *
+     * WHY THE PIECES ARE ALREADY IN PLACE
+     *
+     * prepare() has, by this point, created the tap with `tunctl -u unl<N>` and
+     * attached it to the bridge. A persistent tap can be opened by its owning
+     * uid — that is what tunctl's -u means — so the emulator does not need
+     * CAP_NET_ADMIN to attach to it, and /dev/net/tun is 0666. The running
+     * directory and the disk images beneath it are root:unl 0775/0664, so the
+     * tenant reaches them through the group. The console ports are 3xxxx and
+     * the VNC ports 59xx, neither of which is privileged.
+     *
+     * ORDER IN THE CHILD MATTERS. Supplementary groups have to be set before the
+     * uid is dropped, because setuid is one-way; kvm is what /dev/kvm needs, and
+     * accel=kvm is in most of the shipped templates. stdio is replaced last, so
+     * a redirect the command carries lands as the tenant and not as root.
+     *
+     * A SHELL IS STILL USED, deliberately. The command string is assembled by
+     * command() and carries its own redirection, and the template option strings
+     * are argument injection by design (docs/HANDOVER.md, item 4). Handing it an
+     * argv array here would break every template and would not close that
+     * surface — what closes it is that the shell now runs as unl<N> and not as
+     * root, which is the whole point of this method.
+     *
+     * @param   string  $cmd                The full command line
+     * @return  int                         0 if the child was forked
+     */
+    protected function spawnAsTenant($cmd)
+    {
+        $session = (int) $this->getSession();
+        $user = 'unl' . $session;
+
+        if (!function_exists('pcntl_fork') || !function_exists('pcntl_exec')
+            || !function_exists('posix_setuid')) {
+            error_log(date('M d H:i:s ') . 'ERROR: ext-pcntl and ext-posix are required to '
+                . 'run a node as its tenant');
+            return 80036;
+        }
+
+        // Computed, then CONFIRMED against the passwd database, exactly as
+        // UnlIolKeepalive does it: an account called unl<session> that does not
+        // hold uid 32768+session is not the platform's, and dropping to it would
+        // put the node somewhere nobody expects. The uid is never taken from the
+        // output of `id`, which is what device_iol::prepare() used to do.
+        $entry = posix_getpwnam($user);
+        $expected = 32768 + $session;
+        if ($entry === false || (int) $entry['uid'] !== $expected) {
+            error_log(date('M d H:i:s ') . 'ERROR: tenant account ' . $user
+                . ' is missing or holds the wrong uid; not starting');
+            return 80036;
+        }
+        $gid = (int) $entry['gid'];
+        $cwd = $this->getRunningPath();
+
+        $pid = pcntl_fork();
+        if ($pid < 0) {
+            error_log(date('M d H:i:s ') . 'ERROR: fork failed; not starting ' . $user);
+            return 80036;
+        }
+
+        if ($pid === 0) {
+            // --- child ------------------------------------------------------
+            posix_setsid();
+            // Supplementary groups first: kvm is not the tenant's primary group,
+            // and after setuid() there is no way back to set it.
+            if (function_exists('posix_initgroups')) posix_initgroups($user, $gid);
+            if (!posix_setgid($gid) || !posix_setuid($expected)) exit(126);
+            @chdir($cwd);
+            fclose(STDIN);
+            fclose(STDOUT);
+            fclose(STDERR);
+            @fopen('/dev/null', 'r');
+            @fopen('/dev/null', 'w');
+            @fopen('/dev/null', 'w');
+            pcntl_exec('/bin/sh', array('-c', $cmd));
+            exit(127);   // only reached if exec failed
+        }
+
+        // --- parent ---------------------------------------------------------
+        // Deliberately not waited on: the emulator is a long-lived daemon, and
+        // the caller polls the console port for it. setsid() above means it
+        // survives the wrapper and is reparented to init, which is what the old
+        // `exec("... &")` achieved by letting sh fork and exit.
+        error_log(date('M d H:i:s ') . 'INFO: started as ' . $user . ' (uid ' . $expected
+            . '), pid ' . $pid);
+        return 0;
+    }
+
+    /**
      * stop device
-     * 
+     *
      */
     public function stop()
     {
