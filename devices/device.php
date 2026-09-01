@@ -718,6 +718,42 @@ class device
      */
     public function stop()
     {
+        $this->stopNode();
+        $this->reapTenant();
+        return 0;
+    }
+
+    /**
+     * Reap the Unix account this node session manufactured.
+     *
+     * Node start runs `useradd ... unl<session>` once per node session and
+     * nothing ever removed one, so the accounts grew without bound for the life
+     * of the appliance. This is the ordinary end of a session, and therefore
+     * where the ordinary reap belongs.
+     *
+     * ORDER MATTERS AND THIS CALL IS LAST ON PURPOSE. The account owns the tap
+     * interfaces and the running directory, so it may only go after both are
+     * finished with. It runs unconditionally — including when getStatus() said
+     * the node was already stopped — because a half-torn-down session that
+     * leaves an account behind is exactly the case that lets a later session's
+     * id collide with it.
+     *
+     * Through sudo rather than in-process because this method has TWO callers
+     * with different privileges: `unl_wrapper -a stop`, which is root, and
+     * destroyLabSession()/stopLabSession() in includes/functions.php, which run
+     * inside the web request as www-data. The wrapper decides for itself
+     * whether the reap is safe; see actions/UnlTenantAccount.php.
+     */
+    protected function reapTenant()
+    {
+        $cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a reap-tenant'
+            . ' -S ' . (int) $this->getSession() . ' > /dev/null 2>&1';
+        exec($cmd, $o, $rc);
+        return 0;
+    }
+
+    private function stopNode()
+    {
         if ($this->getStatus() != 0) {
             if ($this->getNType() == 'docker') {
                 $cmd = 'docker -H=unix:///var/run/docker.sock stop ' . escapeshellarg('docker' . $this->getSession());

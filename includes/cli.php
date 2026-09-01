@@ -341,23 +341,33 @@ function checkUsername($i)
 	}
 
 	$path = '/opt/unetlab/users/' . $i;
-	$uid = 32768 + $i;
 
-	$cmd = 'id ' . escapeshellarg('unl' . $i) . ' 2>&1';
-	exec($cmd, $o, $rc);
-	if ($rc != 0) {
-		// Need to add the user
-		$cmd = 'sudo /usr/sbin/useradd -c ' . escapeshellarg('Unified Networking Lab TID=' . $i)
-			. ' -d ' . escapeshellarg($path) . ' -g unl -M -s /bin/bash -u ' . escapeshellarg($uid)
-			. ' ' . escapeshellarg('unl' . $i) . ' 2>&1';
-		error_log(date('M d H:i:s ') . 'ERROR: ' . $cmd);
-		exec($cmd, $o, $rc);
-		if ($rc != 0) {
-			// Failed to add the username
-			error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80009]);
-			error_log(date('M d H:i:s ') . implode("\n", $o));
-			return False;
-		}
+	// Creating the account is UnlTenantAccount::create(), which is also where
+	// reaping it lives. Keeping the two in one file is the point: the name, the
+	// uid and the group have to agree between them, and when they did not the
+	// account outlived the session id that named it and the next session handed
+	// that id inherited the previous tenant's home directory.
+	//
+	// It also runs useradd DIRECTLY, with no sudo. checkUsername() is reached
+	// only from a device's prepare(), which is reached only from
+	// `unl_wrapper -a start` — already root — so the `sudo` that used to be on
+	// that call site was root running sudo to become root. Removing it retired
+	// /usr/sbin/useradd from install/sudoers.d/pnetlab, and
+	// tests/Security/SudoersPolicyTest.php will fail if either half comes back
+	// alone.
+	$accountAction = __DIR__ . '/../platform/wrappers/actions/UnlTenantAccount.php';
+	if (!is_file($accountAction)) {
+		$accountAction = '/opt/unetlab/wrappers/actions/UnlTenantAccount.php';
+	}
+	require_once($accountAction);
+
+	$account = new UnlTenantAccount();
+	$accountResult = $account->create($i);
+	if (!$accountResult['ok']) {
+		// Failed to add the username
+		error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80009]);
+		error_log(date('M d H:i:s ') . 'ERROR: ' . $accountResult['error']);
+		return False;
 	}
 
 	// Now check if the home directory exists
@@ -367,13 +377,11 @@ function checkUsername($i)
 		return False;
 	}
 
-	// Be sure of the setgid bit
-	if ($rc != 0) {
-		// Failed to set the setgid bit
-		error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80011]);
-		error_log(date('M d H:i:s ') . implode("\n", $o));
-		return False;
-	}
+	// The "be sure of the setgid bit" check that used to be here tested $rc,
+	// which by then held the exit status of `id unl<N>` and had nothing to do
+	// with any setgid bit — the chmod it was written for is not in this
+	// function. With the `id` call gone it would have been reading an undefined
+	// variable, so it is deleted rather than given a fresh value to ignore.
 
 	// Set permissions
 	if (!chown($path, 'unl' . $i)) {

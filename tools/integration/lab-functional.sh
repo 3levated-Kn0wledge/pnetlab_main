@@ -39,6 +39,17 @@ has()  { case "$2" in *"$3"*) ok "$1";; *) bad "$1" "'$3' not in: $(echo "$2" | 
 # shellcheck source=tools/integration/lib/http-login.sh
 . "$(dirname "$0")/lib/http-login.sh"
 
+# Recorded BEFORE anything runs.
+#
+# Node start manufactures a Unix account per node session and, until
+# `unl_wrapper -a reap-tenant` existed, nothing ever removed one — so a host that
+# has run this script before is carrying its leftovers. Print the count, so
+# nobody credits the reaper with clearing accounts it never saw, and so a
+# non-zero number here is read as "this host was already leaking" rather than as
+# a failure of the run about to start.
+BASE_ACCOUNTS=$(getent passwd | grep -c '^unl[0-9]' || true)
+printf "  note tenant accounts on this host before the run: %s\n" "$BASE_ACCOUNTS"
+
 echo "=============== AUTHENTICATION ==============="
 csrf_session_start "$B"
 [ -n "${CSRF_TOKEN:-}" ] && ok "the login page issues an XSRF-TOKEN cookie" \
@@ -111,7 +122,19 @@ done
 sleep 3
 chk "six vpcs processes (VPCS forks two per node)" "$(pgrep -c vpcs 2>/dev/null || true)" "6"
 chk "three taps exist"                 "$(ip -o link show | grep -c vunl)" "3"
-chk "three tenant accounts created"    "$(getent passwd | grep -c '^unl')" "3"
+
+# The session ids this run is actually using, so the account assertions can name
+# them instead of counting.
+#
+# The assertion that used to be here was
+#     chk "three tenant accounts created" "$(getent passwd | grep -c '^unl')" "3"
+# and it could never fail. destroy empties node_sessions, so the next run is
+# handed ids 1, 2 and 3 again — and the three accounts the LAST run leaked
+# satisfy the count for this one without a single useradd being run. The leak was
+# what made the assertion pass. Ask about these three sessions instead.
+SIDS=$(sudo mysql -N pnetlab_db -e 'SELECT node_session_id FROM node_sessions ORDER BY node_session_id;' 2>/dev/null | tr '\n' ' ')
+MADE=0; for s in $SIDS; do getent passwd "unl$s" >/dev/null 2>&1 && MADE=$((MADE+1)); done
+chk "a tenant account exists for each node session ($SIDS)" "$MADE" "3"
 chk "three consoles are listening"     "$(ss -ltn 2>/dev/null | grep -cE ':3000[0-9]')" "3"
 BR=$(sudo brctl show 2>/dev/null | awk '/^vnet/{f=1} f&&/vunl/{c++} END{print c+0}')
 chk "all three taps are on the bridge"  "$BR" "3"
@@ -184,6 +207,15 @@ chk "no consoles remain"       "$(ss -ltn 2>/dev/null | grep -cE ':3000[0-9]')" 
 STOPPED=$(A $S/nodes | grep -o '"status":0' | wc -l)
 chk "all three nodes report stopped" "$STOPPED" "3"
 
+# Stopping a node is the ordinary end of a session, and device::stop() reaps the
+# account after the taps are down. Both halves are checked: the passwd entry and
+# the home directory, because userdel without -r leaves the second behind and
+# /opt/unetlab/users would then grow on its own.
+LEFT=0;  for s in $SIDS; do getent passwd "unl$s" >/dev/null 2>&1 && LEFT=$((LEFT+1)); done
+HOMES=0; for s in $SIDS; do [ -d "/opt/unetlab/users/$s" ] && HOMES=$((HOMES+1)); done
+chk "stopping the nodes reaped their tenant accounts" "$LEFT" "0"
+chk "and removed their home directories"              "$HOMES" "0"
+
 echo
 echo "=============== DELETE ==============="
 has "delete a node"  "$(A -X POST $S/nodes/delete -d '{"id":"3"}')" "success"
@@ -193,6 +225,24 @@ LS=$(A $S/info >/dev/null; sudo mysql -N pnetlab_db -e 'SELECT lab_session_id FR
 has "destroy the session" "$(A -X POST $S/factory/destroy -d "{\"lab_session\":\"${LS:-1}\"}")" "success"
 chk "lab_sessions is empty after destroy" "$(sudo mysql -N pnetlab_db -e 'SELECT COUNT(*) FROM lab_sessions;' 2>/dev/null)" "0"
 chk "node_sessions is empty after destroy" "$(sudo mysql -N pnetlab_db -e 'SELECT COUNT(*) FROM node_sessions;' 2>/dev/null)" "0"
+
+# THE REGRESSION THIS WHOLE TASK EXISTS TO PREVENT.
+#
+# A completed lab session must leave no tenant account on the host. This is a
+# whole-host count on purpose: a per-session check cannot see an account whose
+# session row was deleted before anything reaped it, and that is precisely the
+# shape the leak had. If it fails and BASE_ACCOUNTS at the top was non-zero, the
+# host was already carrying accounts from an earlier run — clear those and run
+# again before believing anything else about this result.
+END_ACCOUNTS=$(getent passwd | grep -c '^unl[0-9]' || true)
+if [ "$END_ACCOUNTS" = "0" ]; then
+  ok "a completed lab session leaves no tenant accounts behind"
+else
+  bad "a completed lab session leaves no tenant accounts behind" \
+      "$END_ACCOUNTS left (this run started with $BASE_ACCOUNTS): $(getent passwd | grep '^unl[0-9]' | cut -d: -f1 | tr '\n' ' ')"
+fi
+chk "and /opt/unetlab/users holds nothing" "$(ls -1 /opt/unetlab/users 2>/dev/null | wc -l)" "0"
+
 has "delete the lab" "$(A -X DELETE $B/api/labs -d '{"path":"/func.unl"}')" "success"
 
 echo

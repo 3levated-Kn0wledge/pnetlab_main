@@ -1462,6 +1462,19 @@ function destroyBrokenLabSession($lab_session)
 				$cmd = 'sudo fuser -k -TERM ' . escapeshellarg($node['node_session_workspace']) . ' > /dev/null 2>&1';
 				exec($cmd, $o, $rc);
 			}
+
+			// Reap the tenant account. This path does NOT go through
+			// device::stop(), which is where the ordinary reap lives — it kills
+			// the processes itself, precisely because the lab is too broken to
+			// build Node objects for — so without this call, destroying a broken
+			// session is the one teardown that still leaks an account.
+			//
+			// After the kill, never before it: the account owns the taps and the
+			// running directory. The wrapper re-checks that for itself and keeps
+			// the account if anything is still alive under it.
+			$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a reap-tenant'
+				. ' -S ' . (int) $node['node_session_id'] . ' > /dev/null 2>&1';
+			exec($cmd, $o, $rc);
 		}
 
 		$query = 'DELETE FROM node_sessions WHERE node_session_lab = :node_session_lab';

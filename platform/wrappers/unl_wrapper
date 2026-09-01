@@ -406,9 +406,69 @@ switch ($action) {
 			exit(41);
 		}
 		break;
+	case 'reap-tenant':
+		// Remove the Unix account a node session manufactured.
+		//
+		// Node start runs, from includes/cli.php:
+		//     useradd -c "Unified Networking Lab TID=N" -g unl -M -s /bin/bash unlN
+		// once per NODE session. Nothing in the tree ever removed one — there is
+		// no userdel and no deluser anywhere — so a login-shell account with a
+		// home directory accumulated for every node ever started, for the life
+		// of the appliance. It is also why an id reused by createNodeSession()
+		// inherited the previous tenant's home directory.
+		//
+		// THE CALLER SENDS A SESSION ID OR THE WORD 'all', NEVER A NAME. The
+		// account name is built inside actions/UnlTenantAccount.php, must still
+		// match ^unl[0-9]+$ afterwards, must hold exactly uid 32768+session, and
+		// must have `unl` as its primary group — three independent checks, any
+		// one of which refuses. See that file's header for the ordering rules,
+		// which are the part that breaks a running lab if they are got wrong.
+		require_once(__DIR__ . '/actions/UnlTenantAccount.php');
+
+		$reapScope   = unl_single_option($options, 'scope');
+		$reapSession = unl_single_option($options, 'S');
+		if ($reapScope !== null && $reapScope !== 'all') {
+			error_log(date('M d H:i:s ') . 'ERROR: -a reap-tenant takes --scope all, nothing else');
+			exit(46);
+		}
+		if (($reapScope === null) === ($reapSession === null)) {
+			error_log(date('M d H:i:s ') . 'ERROR: -a reap-tenant needs -S <session> or '
+				. '--scope all, and not both');
+			exit(46);
+		}
+
+		$reaper = new UnlTenantAccount(array(
+			// The database is the third of the three "is it finished?" checks,
+			// and the weakest — it is a netstat probe on the console port, and
+			// the row may already be gone. It is here as a belt to the /proc
+			// and tap braces, not as the decision.
+			'status' => function ($session) {
+				$db = checkDatabase();
+				$statement = $db->prepare('SELECT ' . NODE_SESSION_TYPE . ', '
+					. NODE_SESSION_WORKSPACE . ', ' . NODE_SESSION_PORT
+					. ' FROM ' . NODE_SESSIONS_TABLE . ' WHERE ' . NODE_SESSION_ID . ' = :id');
+				$statement->execute(array('id' => $session));
+				$row = $statement->fetch(PDO::FETCH_ASSOC);
+				if (!is_array($row)) return null;
+				return getNodeStatus($session, $row[NODE_SESSION_TYPE],
+					$row[NODE_SESSION_WORKSPACE], $row[NODE_SESSION_PORT]);
+			},
+		));
+
+		$reapResult = $reapScope === 'all'
+			? $reaper->reapAll()
+			: $reaper->reap($reapSession);
+		echo 'REAP-TENANT-RESULT ' . json_encode($reapResult) . "\n";
+		if (!$reapResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: reap-tenant: ' . $reapResult['error']);
+			exit(47);
+		}
+		break;
 	case 'delete':
 		if (isset($node_id)) {
 			// Removing temporary files for a single node in all tenants
+			require_once(__DIR__ . '/actions/UnlTenantAccount.php');
+			$deleteReaper = new UnlTenantAccount();
 			$nodeSessions = getAllSessionOfNode($lab->getId(), $node_id);
 			foreach ($nodeSessions as $nodeSession) {
 				$runningPath = $nodeSession['node_session_workspace'];
@@ -417,6 +477,11 @@ switch ($action) {
 					error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $cmd);
 					exec($cmd, $o, $rc);
 				}
+				// The workspace has just been deleted, so this session is over
+				// whatever the row still says. apiDeleteLabNode() refuses to
+				// reach here while any of these sessions reports running, and
+				// the reaper checks again for itself.
+				$deleteReaper->reap($nodeSession['node_session_id']);
 				if($nodeSession['node_session_type'] == 'docker'){
 					$cmd = 'sudo /usr/bin/docker -H=tcp://127.0.0.1:4243 rm ' . escapeshellarg('docker' . $nodeSession['node_session_id']);
 					error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $cmd);
@@ -522,6 +587,16 @@ switch ($action) {
 		exec($cmd, $o, $rc);
 		$cmd = 'find /opt/unetlab/labs/ -name "*.lock" -exec rm -f {} \;';
 		exec($cmd, $o, $rc);
+
+		// Every node is dead and every tap is gone, so every tenant account is
+		// finished by definition. This is also the net under node stop: a stop
+		// that declined to reap because the emulator was still dying leaves an
+		// account behind, and this is where it goes. Called in-process rather
+		// than through sudo — we are already root here.
+		require_once(__DIR__ . '/actions/UnlTenantAccount.php');
+		$sweeper = new UnlTenantAccount();
+		$sweepResult = $sweeper->reapAll();
+		echo 'REAP-TENANT-RESULT ' . json_encode($sweepResult) . "\n";
 		break;
 	   case "platform":
         $cmd = "(egrep vmx /proc/cpuinfo | grep -q ept && echo vmx )";

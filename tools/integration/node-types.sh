@@ -42,6 +42,13 @@ has()  { case "$2" in *"$3"*) ok "$1";; *) bad "$1" "'$3' not in: $(echo "$2" | 
 
 DOCKER="docker -H=unix:///var/run/docker.sock"
 
+# Recorded before anything runs, for the same reason lab-functional.sh records
+# it: a host that has run these suites before may still be carrying the tenant
+# accounts they leaked, and the reaper must not be credited with removing
+# accounts it never saw.
+BASE_ACCOUNTS=$(getent passwd | grep -c '^unl[0-9]' || true)
+printf "  note tenant accounts on this host before the run: %s\n" "$BASE_ACCOUNTS"
+
 echo "=============== WRAPPERS ==============="
 # Not a skip if these are missing. install/lib/platform.sh builds them from
 # platform/wrappers/src as part of the platform step; absence means the install
@@ -324,6 +331,17 @@ if [ "$DOCKER_OK" = "1" ]; then
 	fi
 fi
 ok "lab removed"
+
+# The same regression lab-functional.sh guards, asked of the node types that go
+# through the Docker and QEMU stop paths rather than the VPCS one. Both override
+# device::stop(); both must still reach the reap at the end of it.
+END_ACCOUNTS=$(getent passwd | grep -c '^unl[0-9]' || true)
+if [ "$END_ACCOUNTS" = "0" ]; then
+	ok "a completed session leaves no tenant accounts behind"
+else
+	bad "a completed session leaves no tenant accounts behind" \
+		"$END_ACCOUNTS left (this run started with $BASE_ACCOUNTS): $(getent passwd | grep '^unl[0-9]' | cut -d: -f1 | tr '\n' ' ')"
+fi
 
 echo
 echo "============================================"
