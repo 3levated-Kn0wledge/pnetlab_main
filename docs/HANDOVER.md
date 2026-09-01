@@ -11,6 +11,11 @@ touching the node start path.
 The previous handover is the commit before this one, if you want to see what
 changed and why.
 
+**Amended for Phase 03**, which was done afterwards on its own branch and is
+recorded in "Phase 03: Laravel 10 -> 12" at the foot of this document. `store/`
+is Laravel 12.69.1 now, not 10.50.3. Everything above and below that section was
+measured before the upgrade and re-measured after it; the numbers did not move.
+
 ---
 
 ## Where this got to
@@ -47,7 +52,7 @@ tools/php-lint.sh (8.4 and 7.4)            → 343 files, 0 failed
 | | |
 |---|---|
 | Legacy API (18 routes) | works |
-| Laravel 10 admin UI on PHP 8.4 | works |
+| Laravel 12 admin UI on PHP 8.4 | works |
 | VPCS nodes | works, end to end — and run as the tenant, not root |
 | QEMU nodes, VNC console | works |
 | QEMU nodes, **telnet** console | works — reimplemented wrapper; run as the tenant |
@@ -357,4 +362,95 @@ in the repository.
 | `docs/audit.html` | single-page summary of the live-box findings |
 
 `docs/ROADMAP.md` predates most of this session. Where it and this document
-disagree about what works, this one was measured more recently.
+disagree about what works, this one was measured more recently. Note that
+`docs/ROADMAP.md` is referenced in the table above but is not in the tree — it
+has never been committed on this branch, and `git log --all -- docs/ROADMAP.md`
+finds nothing.
+
+---
+
+## Phase 03: Laravel 10 -> 12
+
+Done, in two hops, each verified before the next. `store/` is now Laravel
+12.69.1 on PHP 8.4. The application structure was deliberately not migrated to
+the Laravel 11 skeleton — the upgrade guide advises against it and
+`store/bootstrap/app.php` still requires `/opt/unetlab/html/includes/init.php`
+before the Application is constructed, which is the line welding the two halves
+of this tree together.
+
+The application needed exactly two changes, both in the JWT auth layer and both
+fatals rather than deprecations, because PHP will not declare a class that does
+not implement every method of its interface: `UserProvider` gained
+`rehashPasswordIfRequired()` and `Authenticatable` gained
+`getAuthPasswordName()` in Laravel 11. Nothing at all was needed for 12.
+
+**The config-set worry was inverted.** `store/config/` is still the Laravel 5.5
+set — no `logging.php`, no `hashing.php` — and the fear was a framework that
+starts depending on files this application does not ship. Laravel 11 does the
+reverse: `LoadConfiguration` now merges the framework's own defaults for any
+config file the application does not define (laravel/framework 10.50.3 ships no
+`config/` directory; 11 and 12 do). So `config('logging.default')` went from
+NULL to `'stack'` and the application now logs through a real channel instead of
+LogManager's emergency fallback. The path is unchanged and already www-data
+owned, so nothing had to move. `config/readonly_actions.php`, which is this
+fork's own file, still loads — 23 entries.
+
+**Going to 12 rather than stopping at 11 was the security answer, not a
+preference.** `composer audit` at 11.56.1 reported two laravel/framework
+advisories — a CRLF injection in the default email rule (high) and a temporary
+signed URL path confusion (medium) — whose fixed versions are 12.60.0 and
+12.61.1. There is no 11.x release that carries either fix. Stopping at 11 would
+have left the tree knowingly vulnerable. At 12.69.1 the framework audits clean;
+the one remaining advisory is `firebase/php-jwt` CVE-2025-45769, which is
+pre-existing, low, and has no fixed release (`<7.0.0`, and 7.0.0 does not
+exist).
+
+Traps this phase found, none of which announce themselves:
+
+  - **A composer run in a partial `store/` tree silently ships a stale
+    autoloader.** `store/composer.json` classmaps `database/seeds` and
+    `database/factories`. Run composer somewhere those do not exist and it
+    extracts every package, then *fails* at "Generating optimized autoload
+    files" — so `vendor/` holds the new framework with the old classmap. The
+    symptom is a fatal deep in `Illuminate/Container/Container.php` about a
+    missing trait, which reads exactly like a broken framework release. It is
+    not: in 12.69.1 `ReflectsClosures.php` moved to
+    `src/Illuminate/Reflection/Traits/` while still declaring
+    `namespace Illuminate\Support\Traits`, so only a regenerated classmap can
+    find it. Run composer in a full copy of `store/`, and never filter its
+    output when you need to know whether it worked.
+  - **LaravelBootTest prefers a checkout that has a `store/vendor` over the
+    deployment**, and building one there is exactly what an upgrade does. A
+    checkout has no `.env` — it is gitignored — so the test then booted a tree
+    with a framework and no APP_KEY and reported four 500s that looked precisely
+    like the upgrade having broken the application. A missing `.env` is now
+    skipped as loudly as an unreadable one.
+  - **RemovedFunctionsTest scanned generated code.** A Blade view compiled into
+    `store/storage/framework/views/` by that same bad run was Laravel's own
+    debug exception page, which inlines a minified highlight.js containing
+    `e.split(a)`; the test's negative lookbehind excludes `[\w$>:]` but not a
+    dot, so it reported a call to PHP's removed `split()` in a file nobody
+    wrote. Compiled views are now excluded alongside `vendor/`.
+
+Measured on the reference VM at 12.69.1, against the deployed application:
+
+```
+tools/php-lint.sh (8.4 and 7.4)      344 files, 0 failed
+tools/run-tests.sh                   990 assertions across 25 files, 0 failed
+tests/Laravel/LaravelBootTest.php    22 assertions, 0 failed (as root)
+lab-functional.sh                    55 shell, 8 data-plane, 0 failed
+node-types.sh                        30 passed, 0 failed, 1 skipped (IOL)
+```
+
+`lab-functional.sh` is the suite that matters for the auth changes: it logs in
+through `POST /auth/login/login`, which is `JwtGuard::attempt()` ->
+`JwtUserProvider::retrieveByCredentials()` -> `validateCredentials()`, with
+`VerifyCsrfToken` in front of it. Authenticated admin pages
+(`admin/main/view`, `admin/status/view`, `admin/users/view`) were driven by hand
+and render byte-identically to Laravel 11.
+
+Not done, and worth knowing: the deployed `store/vendor` was installed by hand
+in a scratch copy of `store/` rather than by `install/install.sh --only store`,
+because that step returns early when `vendor/autoload.php` already exists and so
+cannot perform an upgrade. Making it able to is small and is the honest next
+step for the installer.

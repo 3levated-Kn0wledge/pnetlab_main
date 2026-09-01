@@ -9,7 +9,7 @@
     "type": "project",
     "require": {
         "firebase/php-jwt": "^6.10",
-        "laravel/framework": "^11.0",
+        "laravel/framework": "^12.0",
         "laravel/tinker": "^2.9",
         "laravel/ui": "^4.6",
         "php": "^8.2"

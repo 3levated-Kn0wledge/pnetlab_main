@@ -60,7 +60,7 @@ assert_true($framework !== null, 'store/composer.lock pins laravel/framework');
 // drifted off the line composer.json asks for is the one upgrade failure no
 // other assertion in this file can see. Bump it deliberately, as part of an
 // upgrade, and never to make a red run green.
-$LARAVEL_LINE = '11.';
+$LARAVEL_LINE = '12.';
 assert_true($framework !== null && strpos(ltrim($framework, 'v'), $LARAVEL_LINE) === 0,
     "laravel/framework is on {$LARAVEL_LINE}x (locked: " . var_export($framework, true) . ")");
 
