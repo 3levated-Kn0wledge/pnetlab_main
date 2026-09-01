@@ -183,7 +183,11 @@ class LoginController extends Controller
         $statement->execute(['user_id'=> $html5Pod, 'entity_id'=> $html5Pod, 'hash'=> $hashPass]);
 		
         $role = 'READ';
-        if ($user->{USER_ROLE} == 0) $role = 'UPDATE';
+        // Same root test as Role::checkRoot(), and the same PHP 8 trap: the
+        // built-in admin's role is the string 'admin', which stopped being == 0
+        // in PHP 8. Left as `== 0` this silently downgraded the admin's
+        // Guacamole permission from UPDATE to READ.
+        if (\App\Helpers\Auth\Role::isRootRole($user->{USER_ROLE})) $role = 'UPDATE';
         $query = "REPLACE INTO guacamole_user_permission (entity_id, affected_user_id, permission) VALUES ( :entity_id , :affected_user_id , :permission ) ;";
         $statement = $html5_db->prepare($query);
         $statement->execute([
