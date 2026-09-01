@@ -2,6 +2,11 @@
 #
 # PNETLab — install the web layer on a clean Ubuntu 24.04 server.
 #
+# 24.04 is the supported and verified platform. The installer runs elsewhere and
+# says so once, loudly, naming what is at risk rather than failing halfway
+# through apt; docs/PLATFORM-SUPPORT.md is the record of what that means and what
+# a bring-up on a newer release still owes.
+#
 #   sudo ./install/install.sh
 #
 # What this is
@@ -30,6 +35,23 @@ readonly SRC_DIR
 readonly LIB_DIR="${SRC_DIR}/install/lib"
 
 # --- defaults --------------------------------------------------------------
+# The release this installer is developed, run and verified on. Everything else
+# gets one warning naming what is most likely to break; see
+# docs/PLATFORM-SUPPORT.md and step_preflight below.
+readonly SUPPORTED_RELEASE='24.04'
+
+# A preference, not a pin — install/lib/packages.sh resolves it against what the
+# host can actually install and derives the fpm socket, the unit name, the
+# drop-in directory and the verify checks from the answer.
+#
+# Set explicitly — in the environment or with --php-version — it is honoured as
+# a pin: an explicit version that cannot be installed is a failure, not a thing
+# to quietly substitute. The test has to come before the default is applied.
+if [[ -n "${PHP_VERSION:-}" ]]; then
+	PHP_VERSION_EXPLICIT=1
+else
+	PHP_VERSION_EXPLICIT=0
+fi
 PHP_VERSION="${PHP_VERSION:-8.4}"
 SERVER_NAME=''
 SCHEMA_DIR="${SRC_DIR}/install/sql/schema"
@@ -52,7 +74,8 @@ Usage: sudo install/install.sh [options]
 
 Steps, in order:
   preflight   sanity-check the host and the source tree
-  packages    apt: apache2, mariadb, PHP 8.4 from ppa:ondrej/php (FPM)
+  packages    apt: apache2, mariadb, and PHP under FPM — 8.4 from
+              ppa:ondrej/php where the archive does not carry it
   deploy      create /opt/unetlab/... and rsync the web layer into html/
   sudoers     validate and install /etc/sudoers.d/pnetlab; remove the
               upstream blanket grant
@@ -69,7 +92,12 @@ Steps, in order:
 Options:
   --only  a,b,c            run only these steps
   --skip  a,b,c            run everything except these steps
-  --php-version X.Y        default 8.4; must be a version the PPA carries
+  --php-version X.Y        pin the PHP version. The default is 8.4, which is
+                           a preference: where neither the archive nor the PPA
+                           can provide it, the newest phpX.Y-fpm the host
+                           carries is used instead and the install says so.
+                           Given explicitly it is a pin and an unavailable
+                           version is fatal. The floor is 8.2.
   --server-name NAME       vhost ServerName (default: this host's FQDN)
   --schema-dir DIR         where to look for pnetlab_db.sql and guacdb.sql
                            (default: install/sql/schema)
@@ -104,7 +132,8 @@ while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--only)                 ONLY="${2:?--only needs a value}"; shift 2 ;;
 		--skip)                 SKIP="${2:?--skip needs a value}"; shift 2 ;;
-		--php-version)          PHP_VERSION="${2:?--php-version needs a value}"; shift 2 ;;
+		--php-version)          PHP_VERSION="${2:?--php-version needs a value}"
+		                        PHP_VERSION_EXPLICIT=1; shift 2 ;;
 		--server-name)          SERVER_NAME="${2:?--server-name needs a value}"; shift 2 ;;
 		--schema-dir)           SCHEMA_DIR="${2:?--schema-dir needs a value}"; shift 2 ;;
 		--guacamole-dir)        GUACAMOLE_DIR="${2:?--guacamole-dir needs a value}"; shift 2 ;;
@@ -172,6 +201,59 @@ validate_step_names() {
 	done
 }
 
+# --- supported release -----------------------------------------------------
+#
+# One warning, naming what is actually at risk, rather than a wall of apt errors
+# halfway through. It deliberately does NOT refuse to run: a release that is
+# untested is not the same as a release that is known broken, and the installer
+# now derives the PHP version and checks package availability before it acts on
+# either. What it must not do is let someone believe an unverified platform was
+# verified.
+#
+# The specific risks are named because they are established facts about the
+# archive, not guesses — see docs/PLATFORM-SUPPORT.md, which cites the source
+# for each. Keep the two in step.
+check_supported_release() {
+	detect_os_release
+	info "host: ${PRETTY_NAME:-unknown} (kernel $(uname -r))"
+
+	if [[ -z "${ID:-}" ]]; then
+		warn "no usable /etc/os-release; cannot tell what this host is. Ubuntu
+             ${SUPPORTED_RELEASE} is the only verified platform."
+		return 0
+	fi
+
+	if [[ "${ID:-}" != 'ubuntu' ]]; then
+		warn "this installer targets Ubuntu. ${ID} is untested: the PPA, the
+             package names and the Apache layout are all Debian-family
+             assumptions, and only Ubuntu ${SUPPORTED_RELEASE} is verified."
+		return 0
+	fi
+
+	if [[ "${VERSION_ID:-}" == "$SUPPORTED_RELEASE" ]]; then
+		ok "Ubuntu ${SUPPORTED_RELEASE} — the supported and verified platform"
+		return 0
+	fi
+
+	warn "Ubuntu ${VERSION_ID:-unknown} is UNTESTED.
+             Ubuntu ${SUPPORTED_RELEASE} is the only release this fork is
+             verified on. The install may still complete; what it produces has
+             not been tested. Most likely to break, worst first:
+               1. HTML5 consoles. guacamole-server — guacd and every
+                  libguac-client-* protocol library — is published for
+                  ${SUPPORTED_RELEASE} and was not carried forward past it.
+                  The guacamole step checks for the packages and skips rather
+                  than failing the install, so consoles will simply be absent.
+               2. PHP. php${PHP_VERSION} comes from ${PHP_PPA}, which
+                  publishes per release. Where it has no pocket for this one,
+                  the newest phpX.Y-fpm the archive carries is used instead and
+                  the install continues on a version nothing here is verified
+                  against.
+               3. Everything derived from those two: the fpm socket path, the
+                  php-fpm unit name and its drop-in, and the jetty9 layout.
+             Read docs/PLATFORM-SUPPORT.md before relying on the result."
+}
+
 # --- preflight -------------------------------------------------------------
 step_preflight() {
 	# A half-finished dpkg transaction makes every apt call fail with exit 100 and
@@ -187,22 +269,7 @@ step_preflight() {
 
 	step "Preflight"
 
-	if [[ -r /etc/os-release ]]; then
-		# shellcheck disable=SC1091
-		. /etc/os-release
-		info "host: ${PRETTY_NAME:-unknown} (kernel $(uname -r))"
-		if [[ "${ID:-}" != 'ubuntu' ]]; then
-			warn "this installer targets Ubuntu. ${ID:-this distribution} is
-             untested: the PPA, the package names and the Apache layout are all
-             Debian-family assumptions and only Ubuntu 24.04 has been verified."
-		elif [[ "${VERSION_ID:-}" != '24.04' ]]; then
-			warn "verified on Ubuntu 24.04; this is ${VERSION_ID:-unknown}.
-             It may well work — nothing here is 24.04-specific — but it has not
-             been tried."
-		fi
-	else
-		warn "no /etc/os-release; cannot tell what this host is"
-	fi
+	check_supported_release
 
 	verify_base_dir_is_hardcoded
 	verify_credentials_match_source
@@ -260,6 +327,18 @@ on_error() {
 main() {
 	require_root
 	validate_step_names
+	detect_os_release
+
+	# Ordering: the floor applies to whatever was asked for, including an
+	# explicit --php-version, and it applies before any step runs. The rest of
+	# the resolution belongs to the packages step, which has apt to consult —
+	# but when that step is not running, nothing is going to install the
+	# preferred version, so follow the host instead of asserting a version that
+	# is not there. See install/lib/packages.sh.
+	php_version_floor_check "$PHP_VERSION"
+	if ! should_run packages; then
+		php_version_from_installed
+	fi
 
 	# Resolved here rather than in preflight so that `--only apache` still
 	# renders a vhost with a ServerName.

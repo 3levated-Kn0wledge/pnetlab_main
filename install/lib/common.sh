@@ -72,6 +72,29 @@ require_root() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# --- what host is this -----------------------------------------------------
+#
+# /etc/os-release is the only thing here that identifies the release. It is
+# sourced rather than parsed because that is what the file is specified for, and
+# it defines ID, VERSION_ID, UBUNTU_CODENAME and PRETTY_NAME as globals for the
+# rest of the install — the PPA probe in packages.sh needs the codename, and the
+# supported-release check needs the version.
+#
+# Sourced once, from main(), so that the values are present whether or not the
+# preflight step is in the selection: --only packages must still be able to tell
+# which release it is adding a repository for. lsb_release is deliberately not
+# used; it is not installed on a minimal server image.
+OS_RELEASE_READ=0
+detect_os_release() {
+	[[ $OS_RELEASE_READ -eq 1 ]] && return 0
+	OS_RELEASE_READ=1
+	if [[ -r /etc/os-release ]]; then
+		# shellcheck disable=SC1091
+		. /etc/os-release
+	fi
+	return 0
+}
+
 # --- filesystem helpers (idempotent) ---------------------------------------
 
 # ensure_dir <path> [owner:group] [mode]
