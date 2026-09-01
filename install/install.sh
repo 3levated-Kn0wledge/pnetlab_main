@@ -40,7 +40,7 @@ STRIP_SUDOERS_GRANTS=0
 ONLY=''
 SKIP=''
 
-readonly ALL_STEPS='preflight packages deploy sudoers database apache store verify'
+readonly ALL_STEPS='preflight packages deploy sudoers database apache platform store verify'
 
 usage() {
 	cat <<'EOF'
@@ -110,6 +110,7 @@ done
 . "${LIB_DIR}/deploy.sh"
 # shellcheck source=lib/sudoers.sh
 . "${LIB_DIR}/sudoers.sh"
+. "${LIB_DIR}/platform.sh"
 # shellcheck source=lib/database.sh
 . "${LIB_DIR}/database.sh"
 # shellcheck source=lib/apache.sh
