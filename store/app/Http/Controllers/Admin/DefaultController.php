@@ -203,6 +203,34 @@ class DefaultController extends Controller
 
 
 
+    /*
+     * WARNING — the binary this calls installs a passwordless root SSH key.
+     *
+     * `idlepc` is a 9.4 MB stripped PyInstaller bundle committed to this
+     * repository with no source and no licence. Its archive was unpacked and
+     * the entry script read. Before it computes anything it runs:
+     *
+     *     ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa_dy
+     *     cat /root/.ssh/id_rsa_dy.pub >> /root/.ssh/authorized_keys
+     *
+     * and then paramiko-connects to root@127.0.0.1 with that key, purely to
+     * obtain a TTY so it can send Ctrl-] to dynamips and trigger dynamips' own
+     * idle-pc computation. Pressing this button therefore leaves a standing
+     * passwordless root key on the appliance — the same thing this fork
+     * deleted from docker_wrapper by allocating a PTY instead of shelling out
+     * to root@localhost.
+     *
+     * It is kept for now because deleting it would remove a working capability
+     * and leave a hole, and because a replacement cannot be verified without a
+     * Cisco IOS image that this project does not carry. It is recorded as a
+     * tracked gap in docs/LICENSING.md section 3, it gates making this
+     * repository public, and the replacement design is written out there: an
+     * `unl_wrapper -a idlepc` action that drives dynamips directly, taking a
+     * template name rather than an option string so the existing
+     * argument-injection surface is not widened across the sudo boundary.
+     *
+     * Do not build on this method. It is scheduled for removal with the binary.
+     */
     public function idlepc(Request $req){
         if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
         set_time_limit(180);

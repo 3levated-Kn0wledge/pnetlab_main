@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * includes/__lab.php
+ *
+ * Class for labs.
+ *
+ * Derived from UNetLab html/includes/__lab.php.
+ * Its BSD-3-Clause notice was absent from the copy this fork inherited
+ * and is restored below. See docs/LICENSING.md section 2.2.
+ *
+ * @author Andrea Dainese <andrea.dainese@gmail.com>
+ * @copyright 2014-2016 Andrea Dainese
+ * @license BSD-3-Clause https://github.com/dainok/unetlab/blob/master/LICENSE
+ * @link http://www.unetlab.com/
+ *
+ * Substantially modified by PNETLab and by the pnetlab_main fork. Those
+ * modifications are licensed under the terms in this repository's LICENSE;
+ * the notice above must be retained regardless.
+ */
+
 
 class Lab
 {
