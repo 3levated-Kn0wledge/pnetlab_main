@@ -641,9 +641,28 @@ require_once $root . '/includes/cli.php';
 foreach (['vnet1_1', 'vunl12_0', 'pnet0', 'nat0', 'docker0', 'eth0'] as $good) {
     assert_true(unl_valid_ifname($good), "accepts a real interface name: $good");
 }
-foreach (['a;id', 'a$(id)', 'a`id`', "a\nid", 'a>b', 'a b', '../etc', '',
+foreach (['a;id', 'a$(id)', 'a`id`', "a\nid", "vnet1_1\n", 'a>b', 'a b', '../etc', '',
           'toolongtoolong16'] as $bad) {
     assert_true(!unl_valid_ifname($bad), 'rejects ' . json_encode($bad));
+}
+
+// ------------------------------------------------- the bridge sysfs validator
+
+// unl_write_sysfs() replaced three `sudo echo N > /sys/.../bridge/<knob>` calls.
+// It is the only thing standing between a bridge name and a root-side file
+// write, so both halves of the path are checked here. Every case below must be
+// refused BEFORE any write is attempted, which is why they can run unprivileged.
+foreach ([
+    ['/sys/class/net/vnet1_1/bridge/forward_delay', '0', 'a knob outside the three-value list'],
+    ['/sys/class/net/../../../etc/hostname', '0',     'a path that leaves /sys/…/net'],
+    ['/sys/class/net/a b/bridge/group_fwd_mask', '0', 'an interface name with a space'],
+    ['/sys/class/net/a;id/bridge/group_fwd_mask', '0', 'an interface name with a semicolon'],
+    ['/etc/hostname', '0',                            'a path that is not under /sys at all'],
+    ['/sys/class/net/vnet1_1/bridge/group_fwd_mask', '1;id', 'a value that is not digits'],
+    ['/sys/class/net/vnet1_1/bridge/group_fwd_mask', "1\n",  'a value with a trailing newline'],
+    ['/sys/class/net/vnet1_1/bridge/group_fwd_mask', '', 'an empty value'],
+] as [$path, $value, $why]) {
+    assert_same(1, unl_write_sysfs($path, $value), "unl_write_sysfs refuses $why");
 }
 
 test_summary();

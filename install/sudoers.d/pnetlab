@@ -84,6 +84,14 @@ www-data ALL=(root) NOPASSWD: /usr/bin/nc
 # grant stays, because changing links genuinely needs it.
 www-data ALL=(root) NOPASSWD: /usr/sbin/dmidecode
 www-data ALL=(root) NOPASSWD: /usr/bin/ps
+# echo is down to ONE caller, Admin/SystemController's iourc write:
+#     sudo echo -e "[license]\n$license" > .../iourc
+# which is both injectable and broken — sudo applies to echo while the redirect
+# runs unprivileged — and needs rewriting rather than relocating. The three
+# bridge sysfs writes in includes/cli.php had the same shape and are now
+# file_put_contents() through unl_write_sysfs(), which validates the interface
+# name and takes the knob from a three-value list. When SystemController moves,
+# this line goes with it.
 www-data ALL=(root) NOPASSWD: /bin/echo
 
 # --- Appliance control (availability impact only) -------------------------

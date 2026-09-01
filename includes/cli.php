@@ -32,7 +32,38 @@
  */
 function unl_valid_ifname($name)
 {
-	return is_string($name) && preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$/', $name) === 1;
+	// \z, not $. Without /D, PCRE's `$` also matches immediately before a
+	// trailing newline, so '/...$/ ' accepted "vnet1_1\n" — a name that passes
+	// the validator and is then two words to anything that reads it line by
+	// line. The same trap is recorded in platform/wrappers/actions/.
+	return is_string($name) && preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}\z/', $name) === 1;
+}
+
+/**
+ * Write one bridge sysfs tunable.
+ *
+ * This replaces three `sudo echo N > /sys/.../bridge/<knob>` calls. sudo
+ * applied to echo; the REDIRECTION ran in the calling shell as whoever that
+ * was, so the write was never privileged at all. They worked only because
+ * addBridge() is reached from inside unl_wrapper, which is already root.
+ *
+ * Both halves are closed: the interface name goes through unl_valid_ifname()
+ * and the knob has to be one of three literals, so no caller can name a file
+ * even if one day a caller gets to choose part of the path.
+ *
+ * @return int 0 on success, 1 on refusal or failure — the shape the call sites
+ *             already test, since they used to read an exit status.
+ */
+function unl_write_sysfs($path, $value)
+{
+	$knobs = array('group_fwd_mask', 'multicast_snooping', 'multicast_router');
+	if (!is_string($path) || !preg_match('#^/sys/(?:class|devices/virtual)/net/([^/]+)/bridge/([a-z_]+)\z#', $path, $m)) {
+		return 1;
+	}
+	if (!unl_valid_ifname($m[1]) || !in_array($m[2], $knobs, true)) return 1;
+	if (!is_string($value) || !preg_match('/^[0-9]{1,10}\z/', $value)) return 1;
+	if (is_link($path) || !is_file($path)) return 1;
+	return @file_put_contents($path, $value) === false ? 1 : 0;
 }
 
 /**
@@ -91,23 +122,25 @@ function addBridge($s)
 		// fails outright. Measured on kernel 6.8: 65535 -> EINVAL, 65528 -> ok.
 		// The shipped 4.15 appliance shows 0x8 on its bridges, so the 65535 write
 		// never took effect there either.
-		$cmd = 'sudo echo 65528 > ' . escapeshellarg('/sys/class/net/' . $s['name'] . '/bridge/group_fwd_mask') . ' 2>&1';
-		
-		exec($cmd, $o, $rc);
+		// file_put_contents(), not `sudo echo N > path`. sudo applied to echo
+		// while the REDIRECTION ran in the calling shell as whoever that was,
+		// so the write was never privileged: this worked only because
+		// addBridge() is reached from inside unl_wrapper, which is already
+		// root. Anyone "fixing" it by moving the redirect under sudo — a tee,
+		// say — would be adding a genuine arbitrary-write primitive where
+		// there was a silent no-op. It is one sysfs write, so it is written.
+		$rc = unl_write_sysfs('/sys/class/net/' . $s['name'] . '/bridge/group_fwd_mask', '65528');
 		if ($rc != 0) {
 			// Failed to configure forward mask
-			error_log(date('M d H:i:s ') . 'ERROR: ' . $cmd . " --- " . $GLOBALS['messages'][80028]);
-			error_log(date('M d H:i:s ') . implode("\n", $o));
+			error_log(date('M d H:i:s ') . 'ERROR: group_fwd_mask --- ' . $GLOBALS['messages'][80028]);
 			return 80028;
 		}
 
 		// Disable multicast_snooping
-		$cmd = 'sudo echo 0 > ' . escapeshellarg('/sys/devices/virtual/net/' . $s['name'] . '/bridge/multicast_snooping') . ' 2>&1';
-		exec($cmd, $o, $rc);
+		$rc = unl_write_sysfs('/sys/devices/virtual/net/' . $s['name'] . '/bridge/multicast_snooping', '0');
 		if ($rc != 0) {
 			// Failed to configure multicast_snooping
 			error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80071]);
-			error_log(date('M d H:i:s ') . implode("\n", $o));
 			return 80071;
 		}
 	}
@@ -122,11 +155,9 @@ function addBridge($s)
 			return 80055;
 		}
 		
-		$cmd = 'sudo echo 2 > ' . escapeshellarg('/sys/class/net/' . $s['name'] . '/bridge/multicast_router') . '  2>&1';
-		exec($cmd, $o, $rc);
+		$rc = unl_write_sysfs('/sys/class/net/' . $s['name'] . '/bridge/multicast_router', '2');
 		if ($rc != 0) {
 			error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80055]);
-			error_log(date('M d H:i:s ') . implode("\n", $o));
 			return 80055;
 		}
 	}
