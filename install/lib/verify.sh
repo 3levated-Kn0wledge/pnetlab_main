@@ -31,7 +31,9 @@ check_soft() {
 _php_fpm_active()   { systemctl is-active --quiet "php${PHP_VERSION}-fpm"; }
 _apache_active()    { systemctl is-active --quiet apache2; }
 _mariadb_active()   { systemctl is-active --quiet mariadb; }
-_socket_present()   { [[ -S "/run/php/php${PHP_VERSION}-fpm.sock" ]]; }
+# fpm_socket() from install/lib/apache.sh, so the check and the vhost cannot
+# disagree about where the pool listens.
+_socket_present()   { [[ -S "$(fpm_socket)" ]]; }
 _site_enabled()     { [[ -e /etc/apache2/sites-enabled/pnetlab.conf ]]; }
 _sudoers_installed(){ [[ -f /etc/sudoers.d/pnetlab ]]; }
 _sudoers_mode()     { [[ "$(stat -c '%a %U %G' /etc/sudoers.d/pnetlab)" == '440 root root' ]]; }

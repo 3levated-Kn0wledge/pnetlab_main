@@ -29,6 +29,13 @@
 #    three wars declare web.xml version="2.5" and contain zero jakarta.servlet
 #    references). It cannot deploy on noble's tomcat10, and noble has no
 #    tomcat9 server package. jetty9 is the servlet container that exists.
+# 4. The servlet container is NOT the fragile half of this step, which is the
+#    opposite of what was expected. jetty9 is 9.4 and EOL upstream, so it looked
+#    like the thing that would disappear first — but it is still published in
+#    26.04 (9.4.58-1, universe), while guacamole-server, which nothing here can
+#    substitute, stopped at 24.04. The availability guard below is aimed at
+#    guacd for that reason. docs/PLATFORM-SUPPORT.md carries the archive
+#    queries.
 #
 # This step is optional by design. The war is not in any Ubuntu archive and is
 # staged out of band (see install/vendor/guacamole/README.md); if it is absent
@@ -60,18 +67,67 @@ readonly MARIADB_JDBC='/usr/share/java/mariadb-java-client.jar'
 # second run is quiet and does not bounce a service that is serving consoles.
 GUAC_CHANGED=0
 
+# The protocol client libraries, by protocol.
+#
+# The name carries the 64-bit time_t suffix on 24.04: the transition renamed
+# every library package whose ABI changed, so libguac-client-telnet0 became
+# libguac-client-telnet0t64. The suffix is not a property of Ubuntu 24.04 that
+# will be reverted — it is part of the binary package name until the SONAME
+# moves again — but it is also not something to assert about a release we have
+# never seen. Resolve it: prefer the t64 name, fall back to the plain one, and
+# let the availability guard below speak if neither exists.
+#
+# These MUST be named. Each is only a Suggests: of guacd, and telnet is
+# PNETLab's default console protocol, so an absent client does not look like a
+# missing package — it looks like "consoles are broken".
+GUAC_PROTOCOLS='vnc rdp ssh telnet'
+
+guac_client_package() {
+	local proto="$1" name
+	for name in "libguac-client-${proto}0t64" "libguac-client-${proto}0"; do
+		if apt_available "$name"; then
+			printf '%s\n' "$name"
+			return 0
+		fi
+	done
+	# Nothing installable under either spelling. Return the name this installer
+	# was written against so the guard has something to report.
+	printf 'libguac-client-%s0t64\n' "$proto"
+	return 1
+}
+
+# openjdk-17 is pinned rather than taking default-jre: noble's default is 21 and
+# Jetty 9.4 claims support only through 17.
 guacamole_packages() {
-	# libguac-client-telnet0t64 is only a Suggests: of guacd and MUST be named.
-	# telnet is PNETLab's default console protocol, so its absence does not look
-	# like a missing package — it looks like "consoles are broken".
-	#
-	# openjdk-17 is pinned rather than taking default-jre: noble's default is 21
-	# and Jetty 9.4 claims support only through 17.
-	printf '%s\n' \
-		guacd \
-		libguac-client-vnc0t64 libguac-client-rdp0t64 \
-		libguac-client-ssh0t64 libguac-client-telnet0t64 \
-		jetty9 libmariadb-java openjdk-17-jre-headless
+	local proto
+	printf '%s\n' guacd
+	for proto in $GUAC_PROTOCOLS; do
+		guac_client_package "$proto" || true
+	done
+	printf '%s\n' jetty9 libmariadb-java openjdk-17-jre-headless
+}
+
+# Everything this step apt-installs, checked before a single package is touched.
+#
+# guacamole-server is the one that matters. It is in 24.04 and was NOT carried
+# forward: neither guacd nor any libguac-client-* is published for a later
+# release (see docs/PLATFORM-SUPPORT.md for the archive query). Without this
+# guard, an install on such a host runs into `apt-get install guacd` and dies
+# with a package-resolution error two hundred lines into a transcript, having
+# already changed the host. With it, the step behaves the way it already does
+# for a missing .war: say exactly what is absent and what to do, skip, and let
+# the rest of the install succeed. Consoles are optional by design; the PHP
+# treats an unreachable console service as a warning, not a login failure.
+guac_unavailable_packages() {
+	local p
+	local -a pkgs missing=()
+	mapfile -t pkgs < <(guacamole_packages)
+	for p in "${pkgs[@]}"; do
+		apt_available "$p" || missing+=("$p")
+	done
+	if (( ${#missing[@]} )); then
+		printf '%s\n' "${missing[@]}"
+	fi
 }
 
 guac_war_path()  { printf '%s/guacamole-%s.war\n' "$GUACAMOLE_DIR" "$GUAC_VERSION"; }
@@ -153,6 +209,31 @@ step_guacamole() {
 	guac_verify_artefact "$jar"
 
 	# --- packages -------------------------------------------------------
+	# apt lists first: apt_available answers from the cache, and an empty cache
+	# would make every package look absent and skip a step that would have
+	# worked. apt_install would refresh them a moment later anyway.
+	apt_update_if_needed
+
+	local -a unavailable
+	mapfile -t unavailable < <(guac_unavailable_packages)
+	if (( ${#unavailable[@]} )); then
+		skip "HTML5 consoles: this host's archives do not carry ${unavailable[*]}
+             The artefacts ARE staged, so this is not a staging problem: the
+             packages the console service is built out of are not published for
+             this release. guacamole-server (guacd and the libguac-client-*
+             protocol libraries) is in Ubuntu ${SUPPORTED_RELEASE:-24.04} and
+             was not carried forward past it; see docs/PLATFORM-SUPPORT.md.
+             Options, in the order they cost you least:
+               - install on Ubuntu ${SUPPORTED_RELEASE:-24.04}, which is the
+                 verified platform;
+               - build guacamole-server from source, matching guacd's version to
+                 the staged web application, then re-run:
+                     sudo install/install.sh --only guacamole
+             The rest of the install is unaffected. Logins still work; the
+             console tabs in the UI will not open."
+		return 0
+	fi
+
 	local -a pkgs
 	mapfile -t pkgs < <(guacamole_packages)
 	apt_install "${pkgs[@]}"
@@ -161,13 +242,13 @@ step_guacamole() {
 	# configuration: /etc/default/guacd sets LISTEN_ADDRESS=127.0.0.1 and
 	# LISTEN_PORT=4822, which are Guacamole's own defaults for guacd-hostname
 	# and guacd-port. That is why guacamole.properties names neither.
-	local p
-	for p in vnc rdp ssh telnet; do
-		if dpkg-query -W -f='${Status}' "libguac-client-${p}0t64" 2>/dev/null |
-			grep -q '^install ok installed'; then
-			dim "protocol client: ${p}"
+	local p pkg
+	for p in $GUAC_PROTOCOLS; do
+		pkg="$(guac_client_package "$p" || true)"
+		if dpkg_installed "$pkg"; then
+			dim "protocol client: ${p} (${pkg})"
 		else
-			warn "libguac-client-${p}0t64 is not installed; ${p} consoles will fail
+			warn "${pkg} is not installed; ${p} consoles will fail
              to connect with an unhelpful error rather than a missing-package one."
 		fi
 	done
