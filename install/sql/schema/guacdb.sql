@@ -2,7 +2,15 @@
 --
 -- Provenance: extracted with `mysqldump --no-data` from a PNETLab 5.3.13
 -- appliance. It is the stock schema published by the Apache Guacamole project
--- for its JDBC authentication extension, and is Apache-2.0 licensed there.
+-- for its JDBC authentication extension.
+--
+--   Apache Guacamole
+--   Copyright The Apache Software Foundation
+--   Licensed under the Apache License, Version 2.0
+--   https://www.apache.org/licenses/LICENSE-2.0
+--
+-- Modified relative to Guacamole's own .sql files only by the dump: table,
+-- column and constraint definitions are unchanged. See THIRD-PARTY.md.
 --
 -- Structure only: no rows, no credentials, no connection definitions. The
 -- application populates guacamole_entity and guacamole_user at login, and

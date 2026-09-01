@@ -68,13 +68,19 @@ live call site (QEMU's own `-vnc` is the console listener; dynamips has `-T`),
 `iol_wrapper_telnet` is referenced only from commented-out code, and `nsenter`
 is stock util-linux, which the installer symlinks.
 
-**This was written clean-room, and that was a choice.** BSD-3-Clause source for
-these exists publicly — `dainok/unetlab`, plus `pnetlab/pnetlab_wrapper` for the
-two variants upstream never shipped — and vendoring it would have been days
-rather than weeks. The decision was to own the implementation outright. The
+**This was written clean-room, and that was a choice.** Source for these exists
+publicly — `dainok/unetlab`, plus `pnetlab/pnetlab_wrapper` for the two variants
+upstream never shipped — and vendoring it would have been days rather than
+weeks. The decision was to own the implementation outright. The
 specification was written by one party from the fork's own PHP and from observed
 behaviour; no implementer read the originals. If you continue this work, keep
 that property: do not paste upstream source into these files.
+
+An earlier revision of this paragraph called both sources BSD-3-Clause. Only
+`dainok/unetlab` is: `pnetlab/pnetlab_wrapper` has no licence file and reports
+`"license": null`, so vendoring the two variants from it would have imported
+exactly the unlicensed-code problem `docs/LICENSING.md` §2.3 is about. The
+clean-room decision turns out to have bought more than it was made for.
 
 Two deliberate improvements over the originals are recorded in the code:
 `docker_wrapper` allocates its own PTY instead of shelling out over SSH to
@@ -238,6 +244,8 @@ in the repository.
 
 | File | What it is |
 |---|---|
+| `docs/LICENSING.md` | the licence position: what is inherited, what blocks publishing, a recommendation, a pre-public checklist |
+| `THIRD-PARTY.md` | the attribution that must accompany every distribution |
 | `docs/PACKAGES.md` | the signed-package format, trust model and threat model |
 | `docs/ROADMAP.md` | the plan, v2, revised against live-box evidence |
 | `docs/REVIEW-ADVERSARIAL.md` | an adversarial review of that plan |
