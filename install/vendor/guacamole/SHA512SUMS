@@ -1,0 +1,29 @@
+# SHA-512 of every Guacamole artefact this installer will accept.
+#
+# This file is the pin. tools/vendor-guacamole.sh refuses to stage an artefact
+# whose digest is not listed here, and install/lib/guacamole.sh refuses to
+# deploy one — so a file dropped into this directory by hand, by a mirror, or
+# by anything else has to match a hash that went through code review.
+#
+# Apache publishes a .sha256 beside each artefact; the vendor script checks
+# that too. Two independent digests, one of them stored here rather than on the
+# same host as the bytes it describes.
+#
+# Adding a version: run tools/vendor-guacamole.sh, which prints the line to add
+# when it meets an artefact this file does not carry. Never edit a line to make
+# a mismatch go away — a changed digest for a released Apache artefact means
+# the bytes changed, and that needs explaining, not silencing.
+#
+# The .war and the -mysql .jar of the SAME version must be installed together;
+# guacamole-ext is a version-locked API.
+
+# --- 1.5.5 — the pinned version -------------------------------------------
+0c021992d46305416bd9849878e42a357fa929fecd3bb44802b40f08fbaa81aa7c91a3df0654619b70651c025cd0503e97ae0b0d2e42e898fa60505e0b66f716  guacamole-1.5.5.war
+738e2539b96c1968ef1bf7e814e0561f6405132d78172687e6a3c0a56d06f000b964464ce0acd807b8618f2714878b5dd13ef1a02af75f432bb6a581f7a973e9  guacamole-auth-jdbc-1.5.5.tar.gz
+35c4b9e25fd36555b859a2bf6096bbea2adbb754032b0837b42183b36fd3e67f0db68ac1ca0b835bafdc238954daf8e016e695ce0fa2683dea638cd0022869ee  guacamole-auth-jdbc-mysql-1.5.5.jar
+
+# --- 1.3.0 — the fallback, at exact version parity with noble's guacd ------
+# Listed so that walking the version back is one flag and no new review.
+0352a3c94a82c8cda539a9a3eddcfa15234a7133e71c481c98fd5ad46b28d44bbf6b16358e5fbb38fadb02e303579893e691a5f767d03fb7d7e38eecb9929b56  guacamole-1.3.0.war
+a5c8ff2d25fe73a88bc5648f7cba41d6e1d1fa847b371424ba612320203a1dbe127cf3b7cfe907841a083a939dc0cf2d856d5a85ff8d675eb97581df47047be8  guacamole-auth-jdbc-1.3.0.tar.gz
+1da1b647d2b36ca15dfcee62344384bc9709404382b7288cf313c0de04487cd2d09ac0a25fd27bdbe7c6dc87e373a547c4861f866698bbbc14b67a165eb485f1  guacamole-auth-jdbc-mysql-1.3.0.jar

@@ -1,0 +1,68 @@
+# Guacamole configuration. Rendered by install/lib/guacamole.sh — edit the
+# template, not /etc/guacamole/guacamole.properties, or the next install run
+# will overwrite your changes.
+#
+# Installed 0640 root:jetty. It holds a database password; the PNETLab
+# appliance shipped this file 0755, which is a small but real regression not
+# to repeat.
+#
+# Placeholders of the form NAME wrapped in at-signs are substituted at install
+# time by render_template.
+
+# The JDBC authentication provider. Its data source identifier is the string
+# "mysql", and that is not cosmetic: devices/device.php builds the console URL
+# as base64("<port><tenant>\0c\0mysql"), so the identifier the extension
+# registers and the identifier in the URL have to agree. Any other auth
+# extension — header auth, file auth, guacamole-auth-jdbc-postgresql — makes
+# every console URL a 404.
+mysql-hostname: 127.0.0.1
+mysql-port: 3306
+mysql-database: @GUAC_DB@
+mysql-username: @GUAC_DB_USER@
+mysql-password: @GUAC_DB_PASS@
+
+# 127.0.0.1, not localhost: includes/functions.php html5_checkDatabase() and
+# install/lib/verify.sh both reach guacdb over TCP, and the grants the database
+# step creates are for 'localhost' AND '127.0.0.1' for exactly that reason.
+
+# noble has no libmysql-java; the driver is MariaDB Connector/J from
+# libmariadb-java, symlinked into /etc/guacamole/lib. This property selects it
+# and exists from Guacamole 1.3.0 onward — one of the reasons the .war cannot
+# be pinned at the appliance's 1.2.0.
+mysql-driver: mariadb
+
+# NOT optional, and the single easiest way to get a working-looking install that
+# 500s on every login. Guacamole defaults mysql-ssl-mode to "preferred", and
+# MariaDB Connector/J 2.7 treats "preferred" as "use TLS" and then FAILS rather
+# than falling back when the server has none:
+#
+#   Could not connect to address=(host=127.0.0.1)(port=3306)(type=master)
+#   : Trying to connect with ssl, but ssl not enabled in the server
+#
+# which surfaces at the REST layer as a bare "Unexpected internal error" with no
+# mention of TLS. Ubuntu's MariaDB ships with no certificates configured, so
+# that is the out-of-the-box state on every target this installer supports.
+#
+# Disabling it costs nothing here: the connection is loopback, to a database on
+# this same host, reached over 127.0.0.1:3306 by a user whose grants exist only
+# for localhost and 127.0.0.1. There is no network segment to protect. If
+# MariaDB is ever moved off-box, this line has to change and so does everything
+# else about that deployment.
+#
+# The property exists in guacamole-auth-jdbc-mysql from 1.3.0 onward — verified
+# in the 1.3.0 and 1.5.5 jars — so the fallback version needs it too.
+mysql-ssl-mode: disabled
+
+# PNETLab opens a console per node and reopens it freely; refusing a duplicate
+# would make a second browser tab on the same node fail. Matches the appliance.
+mysql-disallow-duplicate-connections: false
+
+# Pinned, not defaulted. includes/init.php sets SESSION = 3600 and the token
+# minted at login is stored in pnetlab_db.html5 for the life of that session.
+# If Guacamole expires the token first, consoles start 401ing mid-session with
+# no visible cause. These two numbers must move together.
+api-session-timeout: 60
+
+# guacd-hostname and guacd-port are deliberately absent. Guacamole's defaults
+# are 127.0.0.1:4822 and Ubuntu's /etc/default/guacd sets exactly that, so
+# stating them here would only create a second place to get them wrong.

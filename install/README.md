@@ -18,6 +18,8 @@ fork starts owning its own install path.
 | `sql/seed-control.sql` | Control rows that put the appliance in offline mode | as above |
 | `sql/seed-admin.sql` | Default administrator, applied only when there is none | as above |
 | `sql/schema/` | Where you drop the appliance schema dumps; empty on purpose | — |
+| `guacamole/` | `guacamole.properties` template and the Jetty loopback fragment | Verified against Jetty directly; the Apache leg is untested |
+| `vendor/guacamole/` | Where `tools/vendor-guacamole.sh` stages the Guacamole `.war` and JDBC extension. The binaries are gitignored; `SHA512SUMS` is the committed pin | — |
 | `sudoers.d/pnetlab` | Privilege policy for `www-data` | Deployable, and **not a boundary** — see below |
 
 ## Running it
@@ -36,6 +38,8 @@ Steps, in order, each independently re-runnable with `--only`:
 | `sudoers` | Validates the policy with `visudo -cf`, installs it 0440 root:root, removes `/etc/sudoers.d/unetlab`, re-validates the whole tree and rolls back if it broke |
 | `database` | Creates `pnetlab_db` and `guacdb` and their users, imports a schema if you supplied one, applies the offline seed |
 | `apache` | Modules, vhost, `configtest` **before** restart |
+| `platform` | Emulators, the `/opt` layout the code hardcodes, the `unl` group |
+| `guacamole` | HTML5 consoles: `guacd`, `jetty9`, and the Guacamole web application at `/html5`, loopback-only behind Apache. Skips cleanly if the artefacts are not staged |
 | `store` | `store/.env`: a per-installation `APP_KEY`, `APP_DEBUG=false` |
 | `verify` | Read-only. Services, layout, sudo policy, DB logins, `GET /api/auth` over the loopback |
 
@@ -72,9 +76,18 @@ time, including against a host somebody else built.
   One consequence: `store/app/Console/Commands/MysqlRecovery.php` still shells
   out to `mysql -uroot -ppnetlab` and will not work against a host installed
   this way. The installer says so.
-- **It does not install emulators, wrappers, vendor images, Guacamole or
-  systemd units.** Those are separate work. `--with-node-tools` installs the
-  host binaries the sudo policy allowlists, and nothing more.
+- **It does not install emulators, wrappers or vendor images.** Those are
+  separate work. `--with-node-tools` installs the host binaries the sudo policy
+  allowlists, and nothing more.
+- **It installs HTML5 consoles only if you stage them first.** The Guacamole
+  web application is not in any Ubuntu archive — Debian dropped the client years
+  ago and packages only `guacamole-server` — so the `.war` and the JDBC auth
+  extension are staged out of band by `tools/vendor-guacamole.sh`, pinned by
+  `install/vendor/guacamole/SHA512SUMS`, and consumed offline by the installer.
+  If they are absent the `guacamole` step **skips** and the install still
+  succeeds: consoles are a feature, not the product, and `updateUserToken()`
+  already treats an unreachable console service as a warning rather than a
+  failed login.
 - **It does not edit `/etc/sudoers`** unless you pass
   `--strip-sudoers-grants`. It does detect and warn when a surviving blanket
   `NOPASSWD:ALL` there makes the new policy decorative.

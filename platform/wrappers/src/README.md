@@ -13,12 +13,22 @@ What is here today:
 |---|---|
 | `qemu_wrapper_telnet` | implemented (`qemu_telnet.c`) |
 | `docker_wrapper` | not yet — `docker.c`, against the API below |
-| `iol_wrapper` | not yet — `iol.c`, against the API below |
+| `iol_wrapper` | implemented (`iol.c`) — **but see the caveat below: no IOL image exists to verify it against** |
 | `iol_wrapper_telnet` | not yet; it is `iol_wrapper` with the data plane deleted |
 | `qemu_wrapper`, `dynamips_wrapper` | **deliberately not implemented** — nothing invokes them; QEMU-with-VNC and dynamips each open their own console port |
 
 `nsenter` in the same appliance directory is stock util-linux, already symlinked
 by `install/lib/platform.sh`. Nothing to write.
+
+**`iol_wrapper` is implemented and tested, not verified.** IOL images are
+licensed Cisco binaries; this repository ships none and the reference appliance
+has none, so nobody here has ever seen this code drive a real IOL instance. Its
+frame layouts come from the specification, not from observation. Everything that
+can be proved without an image is proved — option parsing, `NETMAP`, the
+AF_UNIX bus, TAP and UDP forwarding, and every bounds check, against a stand-in
+IOL that binds the same socket a real one would — and the gap that remains is
+written down at the top of `iol.c`. Do not tell a user that IOL nodes work until
+somebody with a licence has run two of them.
 
 ## Provenance — read this before touching the code
 
@@ -68,6 +78,12 @@ install by hand.
   the telnet IAC state machine, command assembly and its ARG_MAX cap, and option
   parsing. Assert-based and dependency-free, so it runs anywhere, the same
   contract as `tools/run-tests.sh`.
+* `tools/integration/iol-dataplane.sh` — `iol_wrapper` end to end against a
+  stand-in IOL (`tools/integration/iol_fake.c`) that binds the same AF_UNIX
+  socket a real instance would and speaks the same 8-byte bus header. Real TAP
+  devices on a real bridge, real UDP datagrams, real unix datagram sockets; the
+  only thing simulated is IOL itself. Needs passwordless `sudo` for `ip` and
+  `fuser`, and cleans up every interface and socket it makes.
 * `tools/integration/wrapper-console.sh` — builds the wrapper, starts it the way
   `device_qemu::start()` does, and checks R1–R6 end to end: the port LISTENs,
   bytes relay in both directions, several simultaneous viewers all see the

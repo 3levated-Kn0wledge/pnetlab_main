@@ -14,9 +14,10 @@
 #
 # What it is not
 # --------------
-# It does not build an appliance. There are no emulators, no wrappers, no
-# vendor images, no Guacamole and no systemd units here — those are separate,
-# later work, and this script does not pretend to do them.
+# It does not build an appliance. There are no emulators, no wrappers and no
+# vendor images here — those are separate, later work, and this script does not
+# pretend to do them. HTML5 consoles ARE installed, but only if the Guacamole
+# artefacts have been staged first; see install/vendor/guacamole/README.md.
 #
 # It is idempotent: every step checks the state of the host before changing it,
 # and a second run should be quiet. It has NOT been run end to end on a fresh
@@ -32,6 +33,7 @@ readonly LIB_DIR="${SRC_DIR}/install/lib"
 PHP_VERSION="${PHP_VERSION:-8.4}"
 SERVER_NAME=''
 SCHEMA_DIR="${SRC_DIR}/install/sql/schema"
+GUACAMOLE_DIR="${SRC_DIR}/install/vendor/guacamole"
 PRUNE=0
 RESET_ADMIN=0
 WITH_NODE_TOOLS=0
@@ -40,7 +42,9 @@ STRIP_SUDOERS_GRANTS=0
 ONLY=''
 SKIP=''
 
-readonly ALL_STEPS='preflight packages deploy sudoers database apache platform store verify'
+# guacamole sits after apache because it needs the vhost and the proxy modules
+# in place, and after database because guacdb must already have its schema.
+readonly ALL_STEPS='preflight packages deploy sudoers database apache platform guacamole store verify'
 
 usage() {
 	cat <<'EOF'
@@ -55,6 +59,10 @@ Steps, in order:
   database    create pnetlab_db and guacdb, their users, import a schema if
               one is available, and apply the offline seed
   apache      enable the modules, render and enable the vhost, restart
+  platform    emulators, the /opt layout the code hardcodes, the unl group
+  guacamole   HTML5 consoles: guacd, jetty9, the Guacamole web app at /html5.
+              Skipped, without failing the install, if the artefacts have not
+              been staged by tools/vendor-guacamole.sh
   store       store/.env and APP_KEY; report the Laravel situation honestly
   verify      read-only checks, including GET /api/auth over the loopback
 
@@ -65,6 +73,12 @@ Options:
   --server-name NAME       vhost ServerName (default: this host's FQDN)
   --schema-dir DIR         where to look for pnetlab_db.sql and guacdb.sql
                            (default: install/sql/schema)
+  --guacamole-dir DIR      where to look for the staged Guacamole .war and
+                           JDBC extension (default: install/vendor/guacamole)
+  --guacamole-version V    which staged version to install (default: 1.5.5).
+                           1.3.0 is the documented fallback: it is exact version
+                           parity with the guacd Ubuntu ships, and nothing else
+                           about the install changes.
   --prune                  let rsync delete files under /opt/unetlab/html that
                            are not in the source tree. Off by default because
                            it will also remove anything you put there by hand.
@@ -93,6 +107,8 @@ while [[ $# -gt 0 ]]; do
 		--php-version)          PHP_VERSION="${2:?--php-version needs a value}"; shift 2 ;;
 		--server-name)          SERVER_NAME="${2:?--server-name needs a value}"; shift 2 ;;
 		--schema-dir)           SCHEMA_DIR="${2:?--schema-dir needs a value}"; shift 2 ;;
+		--guacamole-dir)        GUACAMOLE_DIR="${2:?--guacamole-dir needs a value}"; shift 2 ;;
+		--guacamole-version)    GUAC_VERSION="${2:?--guacamole-version needs a value}"; shift 2 ;;
 		--prune)                PRUNE=1; shift ;;
 		--reset-admin)          RESET_ADMIN=1; shift ;;
 		--with-node-tools)      WITH_NODE_TOOLS=1; shift ;;
@@ -117,6 +133,8 @@ done
 . "${LIB_DIR}/database.sh"
 # shellcheck source=lib/apache.sh
 . "${LIB_DIR}/apache.sh"
+# shellcheck source=lib/guacamole.sh
+. "${LIB_DIR}/guacamole.sh"
 # shellcheck source=lib/store.sh
 . "${LIB_DIR}/store.sh"
 # shellcheck source=lib/verify.sh
@@ -191,6 +209,7 @@ step_preflight() {
 
 	dim "vhost ServerName will be ${SERVER_NAME}"
 	dim "schema dumps will be looked for in ${SCHEMA_DIR}"
+	dim "Guacamole artefacts will be looked for in ${GUACAMOLE_DIR}"
 
 	# The one thing that is genuinely non-negotiable, stated once.
 	info "BASE_DIR is ${BASE_DIR}; the web layer goes to ${WEB_ROOT}"

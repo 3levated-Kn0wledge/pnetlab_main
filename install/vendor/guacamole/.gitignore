@@ -1,0 +1,11 @@
+# The Guacamole binary artefacts are NOT committed. They are ~23 MB of
+# Apache-licensed release binaries that would sit in this repository's history
+# for ever, and they are reproducible from a URL and a checksum that ARE
+# committed (SHA512SUMS, next to this file).
+#
+# Stage them with:  bash tools/vendor-guacamole.sh
+# The installer reads this directory and never writes to it.
+*.war
+*.jar
+*.tar.gz
+*.sql
