@@ -95,7 +95,7 @@ class LoginController extends Controller
 
             return redirect($request->input('link', '/'));
         } catch (\Exception $e) {
-            return redirect('/auth/login/manager?error=' . str_limit($e->getMessage(), 500));
+            return redirect('/auth/login/manager?error=' . \Illuminate\Support\Str::limit($e->getMessage(), 500));
         }
 
     }

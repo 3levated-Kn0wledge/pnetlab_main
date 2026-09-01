@@ -2,6 +2,7 @@
 namespace App\Helpers\Token;
 use Exception;
 use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 class JWToken {
     
@@ -28,7 +29,11 @@ class JWToken {
             $option = get($option, []);
             $key = get($option['key'], config('jwt.secret'));
             $algos = get($option['algo'], [config('jwt.algo', 'HS256')]);
-            $payload = JWT::decode($jwt, $key, $algos);
+            // firebase/php-jwt 6 replaced decode($jwt, $key, $algos) with a Key
+            // object. The explicit algorithm is still the point: it is what stops
+            // an attacker choosing 'none' via the token header.
+            $alg = is_array($algos) ? reset($algos) : $algos;
+            $payload = JWT::decode($jwt, new Key($key, $alg));
             return $payload;
         } catch (\Exception $e) {
             self::$log = $e->getMessage();

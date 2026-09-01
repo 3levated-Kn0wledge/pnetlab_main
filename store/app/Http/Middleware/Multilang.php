@@ -4,7 +4,7 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Support\Facades\App;
 
-class multilang
+class Multilang
 {
     public function handle($request, Closure $next)
     {

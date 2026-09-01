@@ -258,7 +258,7 @@ class LabsController extends Controller
         $labs = \scanDirFiles(BASE_LAB.$workspace);
 
         $labs = array_map(function($item){
-            return str_replace_first(BASE_LAB, '', $item);
+            return \Illuminate\Support\Str::replaceFirst(BASE_LAB, '', $item);
         }, $labs);
 
         if($search != ''){

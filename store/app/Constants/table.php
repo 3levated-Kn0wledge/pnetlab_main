@@ -17,13 +17,13 @@ defined('FUNC_SHOW_LOADING') or define('FUNC_SHOW_LOADING', 'func_show_loading')
 defined('FUNC_HIDE_LOADING') or define('FUNC_HIDE_LOADING', 'func_hide_loading');
 defined('FUNC_FILTER') or define('FUNC_FILTER', 'func_filter');
 
-define('PROP_TABLE', 'prop_table');
-define('PROP_NAME', 'prop_name');
-define('PROP_NULL', 'prop_null');
-define('PROP_REGEX', 'prop_regex');
-define('PROP_FILTER_RETURN', 'prop_filter_return');
-define('PROP_SELECT_DECORATOR', 'prop_select_decorator');
-define('PROP_DEFAULT', 'prop_default');
+defined('PROP_TABLE') || define('PROP_TABLE', 'prop_table');
+defined('PROP_NAME') || define('PROP_NAME', 'prop_name');
+defined('PROP_NULL') || define('PROP_NULL', 'prop_null');
+defined('PROP_REGEX') || define('PROP_REGEX', 'prop_regex');
+defined('PROP_FILTER_RETURN') || define('PROP_FILTER_RETURN', 'prop_filter_return');
+defined('PROP_SELECT_DECORATOR') || define('PROP_SELECT_DECORATOR', 'prop_select_decorator');
+defined('PROP_DEFAULT') || define('PROP_DEFAULT', 'prop_default');
 /*==============*/
 
 ?>
