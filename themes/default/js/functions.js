@@ -897,7 +897,8 @@ function logger(severity, message) {
 function logoutUser() {
     var deferred = $.Deferred();
     var url = '/api/auth/logout';
-    var type = 'GET';
+    // POST, not GET: this mutates, and a Lax cookie rides a top-level GET.
+    var type = 'POST';
     $.ajax({
         cache: false,
 

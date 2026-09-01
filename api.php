@@ -10,6 +10,7 @@ require_once(BASE_DIR . '/html/includes/api_folders.php');
 require_once(BASE_DIR . '/html/includes/api_labs.php');
 require_once(BASE_DIR . '/html/includes/api_networks.php');
 require_once(BASE_DIR . '/html/includes/api_nodes.php');
+require_once(BASE_DIR . '/html/includes/api_origin_guard.php');
 require_once(BASE_DIR . '/html/includes/api_pictures.php');
 require_once(BASE_DIR . '/html/includes/api_status.php');
 require_once(BASE_DIR . '/html/includes/api_textobjects.php');
@@ -40,6 +41,17 @@ $app->response->headers->set('Cache-Control', 'no-store, no-cache, must-revalida
 $app->response->headers->set('Cache-Control', 'post-check=0, pre-check=0');
 $app->response->headers->set('Pragma', 'no-cache');
 
+// CSRF. /api/* is rewritten here by the root .htaccess and never enters
+// Laravel's kernel, so VerifyCsrfToken cannot reach any of the eighteen routes
+// below; they authenticate from the `token` cookie and nothing else. This is
+// their own defence, hooked in once ahead of the router rather than repeated in
+// eighteen handlers, so a route added later is covered by default. It refuses a
+// mutating request whose Origin or Referer names another host, and one whose
+// body encoding is not something these handlers read. A request with no Origin
+// and no Referer -- curl, a script, tools/integration/lab-functional.sh -- is
+// NOT a CSRF signal and is allowed through. See includes/api_origin_guard.php.
+apiRegisterOriginGuard($app);
+
 $app->notFound(function () use ($app) {
 	$output['code'] = 404;
 	$output['status'] = 'fail';
@@ -57,7 +69,13 @@ $forbidden = array(
 	'message' => $GLOBALS['messages']['90032']
 );
 
-$app->get('/api/auth/logout', function () use ($app) {
+// POST, not GET. SameSite=Lax is sent on a top-level GET navigation, so while
+// this was a GET any page on the internet could log the user out with a link or
+// a redirect. It mutates -- apiLogout() invalidates the server-side session --
+// so it belongs on a verb the guard above polices. Callers updated:
+// store/resources/react/components/menu/Logout.js, its two built bundles under
+// store/public/react/js, and logoutUser() in themes/default/js/functions.js.
+$app->post('/api/auth/logout', function () use ($app) {
 	// Logout (DELETE request does not work with cookies)
 	$cookie = $app->getCookie('token');
 	$app->deleteCookie('token');
