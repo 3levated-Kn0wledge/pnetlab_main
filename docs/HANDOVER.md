@@ -1,7 +1,12 @@
 # Handover
 
 **State at end of session, 2026-09-01.** Branch `phase-02-shell-hardening`,
-50 commits ahead of `main`, none pushed. Nothing uncommitted.
+53 commits ahead of `main`, none pushed. Nothing uncommitted.
+
+The last three commits close out Phase 02's two remaining items: tenant
+accounts are reaped, and VPCS and QEMU nodes run as the tenant rather than as
+root. Read "Tenant accounts, and running nodes unprivileged" below before
+touching the node start path.
 
 The previous handover is the commit before this one, if you want to see what
 changed and why.
@@ -14,20 +19,25 @@ The fork **deploys to a brand-new Ubuntu 24.04 server on PHP 8.4, runs labs, and
 no longer needs anything from the upstream appliance image.** The installer
 compiles the console wrappers from source as one of its steps.
 
-Last verified run, from a clean `git archive` of HEAD onto a provisioned host:
+Last verified run. The installer line is from the previous session's clean
+`git archive` onto a provisioned host and has NOT been re-run end to end since;
+the suite numbers below are from this session, on the reference VM, after
+`--only deploy,platform,sudoers` and from a host with zero pre-existing tenant
+accounts. A full clean install is still owed before the merge.
 
 ```
 sudo bash install/install.sh --server-name pnetlab.test
-→ INSTALLER-EXIT=0, every step, all verification checks green
+→ INSTALLER-EXIT=0, every step, all verification checks green   (previous session)
 
-bash tools/integration/lab-functional.sh   → 49 shell assertions, 8 data-plane checks, 0 failed
-bash tools/integration/node-types.sh       → 28 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/lab-functional.sh   → 55 shell assertions, 8 data-plane checks, 0 failed
+bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
 bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
 bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
+bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
 make -C platform/wrappers/src test         → 248 unit assertions, 0 failed
-tools/run-tests.sh                         → 865 assertions across 22 files, 0 failed
-tools/php-lint.sh (8.4 and 7.4)            → 340 files, 0 failed
+tools/run-tests.sh                         → 983 assertions across 24 files, 0 failed
+tools/php-lint.sh (8.4 and 7.4)            → 343 files, 0 failed
 ```
 
 ---
@@ -38,10 +48,10 @@ tools/php-lint.sh (8.4 and 7.4)            → 340 files, 0 failed
 |---|---|
 | Legacy API (18 routes) | works |
 | Laravel 10 admin UI on PHP 8.4 | works |
-| VPCS nodes | works, end to end |
+| VPCS nodes | works, end to end — and run as the tenant, not root |
 | QEMU nodes, VNC console | works |
-| QEMU nodes, **telnet** console | works — reimplemented wrapper |
-| **Docker**-backed nodes | works — reimplemented wrapper, unix socket |
+| QEMU nodes, **telnet** console | works — reimplemented wrapper; run as the tenant |
+| **Docker**-backed nodes | works — reimplemented wrapper, unix socket. Still root, unavoidably |
 | Guacamole **HTML5 consoles** | works, for real nodes, through Apache |
 | **IOL** nodes | **implemented, never run** — see below |
 
@@ -89,10 +99,11 @@ appliance; and the vendor licence check is simply absent.
 
 ---
 
-## The five non-obvious things
+## The non-obvious things
 
-Unchanged from the last handover, because they are still true and still cost
-time. Items 1–3 are as before; 4 and 5 have moved.
+Items 1–5 are unchanged from the last handover, because they are still true and
+still cost time. 6, 7 and 8 are new, and each of them cost an hour or more this
+session because none of them announces itself.
 
 1. **PHP-FPM systemd confinement blocks the platform layer.** `ProtectSystem=full`
    mounts `/etc` read-only, so `useradd` cannot take its lock and *no node can
@@ -120,13 +131,35 @@ time. Items 1–3 are as before; 4 and 5 have moved.
    a convincing "the bug is not real" result during this session. Wait out the
    window before concluding a change had no effect.
 
+6. **A tap's group decides whether its owner can open it.** The kernel's
+   `tun_not_capable()` denies `TUNSETIFF` unless the caller is BOTH the tap's
+   owner AND in the tap's group. `tunctl -u unl<N> -g root` therefore left the
+   owning tenant locked out of its own interface, with a bare `EPERM` and no
+   diagnostic: the node started, the console answered, and no frame moved.
+   `addTap()` uses `-g unl` now, which does not widen access to other tenants —
+   the owner clause still binds them, and that was measured both ways.
+
+7. **A QEMU node's real error message is destroyed a second after it is
+   written.** `command()` sends QEMU's output to `wrapper.txt`, and
+   `device_qemu::start()` then points `qemu_wrapper_telnet` at the same file and
+   truncates it. Any QEMU startup failure presents as "the node does not start"
+   with an empty log. This is not fixed; if you are debugging a QEMU node, run
+   the command line out of `unl_wrapper.txt` by hand as `unl<session>`.
+
+8. **`--only deploy` used to break the app it had just deployed.** `deploy.sh`
+   does `chown -R root:root $WEB_ROOT`, which reaches `store/.env` even though
+   rsync excludes it; Laravel then cannot read `APP_KEY` and every request 500s
+   as "No application encryption key has been specified", which the API reports
+   as a session timeout on every call. Fixed, but the shape is worth
+   remembering: a permissions problem here does not look like one.
+
 ---
 
 ## Security work in this session
 
-**The sudo policy is down from 42 grants to 26.** Retired: `nproc`, `top`,
+**The sudo policy is down from 42 grants to 25.** Retired: `nproc`, `top`,
 `docker`, `dos2unix`, `php`, `perl`, `kill`, `cp`, `mv`, `mkdir`, `link`,
-`chown`, `chmod`, `touch`, `tee`, `echo`. `tests/Security/SudoersPolicyTest.php`
+`chown`, `chmod`, `touch`, `tee`, `echo`, `useradd`. `tests/Security/SudoersPolicyTest.php`
 enforces drift in **both** directions, so a grant cannot return without a call
 site and a call site cannot return without a grant.
 
@@ -134,7 +167,10 @@ It is still **not a privilege boundary**. `rm` remains (four `rm -rf` sites on
 escaped workspace paths), and `www-data` is in the `docker` group, which is
 root-equivalent by design — anyone who can talk to the daemon can bind-mount
 `/` into a container. What changed is that the surface is countable and the
-remaining items each have a named reason in the policy file.
+remaining items each have a named reason in the policy file. There is now also
+a boundary below it that did not exist: VPCS and QEMU nodes run as their own
+tenant account, so a bug in an emulator or in a template's option string no
+longer starts from uid 0.
 
 Four root-code-execution paths were closed:
 
@@ -163,6 +199,50 @@ GET navigation, so `location = '.../admin/status/apiSetKsm?state=0'` ran as the
 logged-in admin. The router now defaults to POST-only, with 23 GET-reachable
 actions listed in `store/config/readonly_actions.php`, each justified from a
 caller.
+
+---
+
+## Tenant accounts, and running nodes unprivileged
+
+These are the two items Phase 02 still owed, and they interact, so read them
+together.
+
+**Node start manufactured a Unix account per node session and nothing ever
+removed one.** There was no `userdel`, no `deluser` and no expiry anywhere in
+the tree; a login-shell account and a home directory accumulated for every node
+ever started. It is also a correctness bug: `createNodeSession()` allocates ids
+modulo 30000 and skips ids present in `node_sessions`, so an id is reused once
+its row is deleted, while the account and its home directory survive.
+
+The fix is `unl_wrapper -a reap-tenant -S <session>` (or `--scope all`), in
+`platform/wrappers/actions/UnlTenantAccount.php`, which also owns creation so
+the two halves cannot disagree about the name, uid or group. **A fixed pool was
+considered and rejected**, and the reason is worth keeping: the uid is
+load-bearing per session. Taps are handed to the account by name so one node's
+tenant cannot open another's, and `iol.c` derives its AF_UNIX bus directory
+from the running uid (`/tmp/netio<uid>`). A pool preserving that would have to
+be 30000 accounts wide.
+
+The reaper refuses rather than trusting its caller: no process running as the
+uid, no surviving `vunl<N>_*` tap, and no node session reporting status 2 or 3.
+Four places end a session and all four reap — `device::stop()`,
+`destroyBrokenLabSession()` (which never calls `stop()`), `-a delete` and
+`-a stopall`. `useradd` retired from the sudo policy with it: its one caller is
+only ever reached inside `unl_wrapper`, which is already root.
+
+**VPCS and QEMU now run as `unl<session>`.** `device::spawnAsTenant()` forks,
+drops in the child and execs, so the wrapper stays root — unlike the old IOL
+drop, which called `posix_setuid()` in the wrapper's own process and is why the
+start-all loop postpones IOL nodes.
+
+**Docker does not drop and cannot**: there is no emulator process (the daemon
+runs the container), and the host-side work left over needs CAP_NET_ADMIN and
+CAP_SYS_ADMIN. **Dynamips is not flipped** although it looks identical to VPCS,
+because there is no IOS image on the reference host to prove it with. **IOL is
+untouched**, still dropping in-process; moving it would also delete a latent bug
+(a second IOL node in one start-all cannot create its account), but no IOL node
+has ever run here and `iol-dataplane.sh` drives `iol_wrapper` directly rather
+than `device_iol`, so nothing would have caught a mistake.
 
 ---
 
@@ -198,7 +278,7 @@ review and several had been shipping for years.
 
 ## Suggested next steps, in order
 
-1. **Review and merge.** 50 commits is a lot, but each is individually scoped
+1. **Review and merge.** 53 commits is a lot, but each is individually scoped
    and its message explains the reasoning. Note that two commits carry files
    they do not describe: `iol.c` landed inside the Guacamole commit `dfc1764`
    because parallel work shared one index. `8707cbc` is an empty commit
@@ -210,11 +290,23 @@ review and several had been shipping for years.
    and `tests/Security/SudoersPolicyTest.php` makes each step checkable.
 4. **The template option strings** (item 4 above) — the last documented
    argument-injection surface, and a design decision rather than a bug fix.
-5. **Phase 05, severing the upstream dependency.** `License::keepalive()` still
+   Cheaper now than it was: the shell that expands them runs as `unl<session>`
+   for VPCS and QEMU, so the blast radius is a tenant rather than the host.
+5. **Dynamips unprivileged**, which needs one licensed IOS image and nothing
+   else. It is the same shape as VPCS — a tap handed to the tenant, a
+   workspace, a console port from `-T` — and the only reason it is still root
+   is that the claim could not be measured here. `runsAsTenant()` in
+   `devices/dynamips/device_dynamips.php` is a one-line change; the work is
+   running `node-types.sh` against a real image afterwards.
+6. **Tighten `/opt/unetlab/tmp`**, the last untouched item in Phase 02's
+   privilege-model list. Node workspaces are `root:unl 0775`, so every tenant
+   can write every other tenant's workspace. Now that emulators run as their
+   tenant, this is the seam that decides whether that isolation means anything.
+7. **Phase 05, severing the upstream dependency.** `License::keepalive()` still
    relicenses against pnetlab.com and `Query::boxCenter()` still ships an
    encrypted machine UUID upstream. The signed-package work makes this cheaper
    than it was.
-6. **Backup and restore** (`unl_wrapper backupdb`/`restoredb`) is a shipped
+8. **Backup and restore** (`unl_wrapper backupdb`/`restoredb`) is a shipped
    feature no plan has ever priced, and it moves with the `guacdb` schema.
 
 ---

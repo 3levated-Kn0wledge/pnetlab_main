@@ -20,14 +20,15 @@
 # The %unl grant is the worse of the two. Node start runs
 #     useradd -c "Unified Networking Lab TID=N" -g unl -M -s /bin/bash unlN
 # so every node session manufactures a Unix account with a login shell in a group
-# holding unconditional root, and those accounts are never removed. Nothing runs
-# under those accounts via sudo — they exist to own tap interfaces — so the grant
-# has no legitimate use and is simply dropped.
+# holding unconditional root. Nothing runs under those accounts via sudo — they
+# exist to own tap interfaces — so the grant has no legitimate use and is simply
+# dropped. The accounts themselves were also never removed, by anything; that is
+# now `unl_wrapper -a reap-tenant`, and the useradd grant went with it.
 #
 # ---------------------------------------------------------------------------
 # What this policy is, and is not
 # ---------------------------------------------------------------------------
-# It is an allowlist of the 26 binaries the web layer actually invokes, derived
+# It is an allowlist of the 25 binaries the web layer actually invokes, derived
 # from the tree and kept honest by tests/Security/SudoersPolicyTest.php, which
 # fails if the code and this file drift apart.
 #
@@ -35,8 +36,8 @@
 # At least a dozen entries below are root-equivalent no matter how they are
 # scoped — php and perl execute arbitrary code; tee, cp, mv, rm, chmod and chown
 # write or take ownership of arbitrary paths; docker mounts the host filesystem;
-# nohup and service launch arbitrary processes; useradd can create a second uid 0
-# account. Anyone who can influence the arguments to those can still become root.
+# nohup and service launch arbitrary processes. Anyone who can influence the
+# arguments to those can still become root.
 #
 # What it does buy, today:
 #   - removes the %unl group grant entirely
@@ -173,7 +174,21 @@ www-data ALL=(root) NOPASSWD: /usr/bin/qemu-img          # reads/writes any path
 # (`sudo qemu-img info --backing-chain`), which is a read that needs no
 # privilege at all. That file belongs to the CSRF work in flight; when its sudo
 # goes, this line goes with it and SudoersPolicyTest will say so.
-www-data ALL=(root) NOPASSWD: /usr/sbin/useradd          # can create a uid 0 account
+# useradd is gone. It had exactly one caller, checkUsername() in
+# includes/cli.php:
+#     sudo /usr/sbin/useradd -c "Unified Networking Lab TID=N" -d /opt/unetlab/users/N
+#          -g unl -M -s /bin/bash -u <32768+N> unlN
+# and that sudo was never buying anything: checkUsername() is reached only from a
+# device's prepare(), which is reached only from `unl_wrapper -a start`, which is
+# already root. It was root running sudo to become root, and the cost of it was a
+# standing grant on a binary that can create a second uid 0 account.
+#
+# Account creation is now UnlTenantAccount::create(), which execs useradd with an
+# argv array from inside the wrapper. Removal — which did not exist at all, in
+# any form, anywhere in the tree — is `unl_wrapper -a reap-tenant -S <session>`
+# or `--scope all`. The caller sends a session id or the word 'all' and never a
+# name; the account must be unl<digits>, must hold exactly uid 32768+session, and
+# must have `unl` as its primary group.
 
 # --- Deliberately ABSENT. Do not reinstate. --------------------------------
 #   www-data ALL=(ALL) NOPASSWD:ALL

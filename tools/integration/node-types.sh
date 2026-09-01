@@ -42,6 +42,13 @@ has()  { case "$2" in *"$3"*) ok "$1";; *) bad "$1" "'$3' not in: $(echo "$2" | 
 
 DOCKER="docker -H=unix:///var/run/docker.sock"
 
+# Recorded before anything runs, for the same reason lab-functional.sh records
+# it: a host that has run these suites before may still be carrying the tenant
+# accounts they leaked, and the reaper must not be credited with removing
+# accounts it never saw.
+BASE_ACCOUNTS=$(getent passwd | grep -c '^unl[0-9]' || true)
+printf "  note tenant accounts on this host before the run: %s\n" "$BASE_ACCOUNTS"
+
 echo "=============== WRAPPERS ==============="
 # Not a skip if these are missing. install/lib/platform.sh builds them from
 # platform/wrappers/src as part of the platform step; absence means the install
@@ -284,6 +291,19 @@ print(d.get('$QID',{}).get('status',''))" 2>/dev/null)
 			bad "qemu_wrapper_telnet is the process serving the console" \
 				"no such process; the node may be running without a telnet console"
 		fi
+
+		# The emulator must not be root. QEMU is the node type where the drop is
+		# worth the most and where it was hardest to get right: it needs
+		# /dev/kvm through a supplementary group, a tap it can attach to, and a
+		# disk it can write. Two of those three failed silently on the first
+		# attempt, because command() sends QEMU's output to wrapper.txt and
+		# qemu_wrapper_telnet truncates the same file a second later.
+		QU=$(ps -eo user=,args= | grep '[q]emu-system' | awk '{print $1}' | sort -u | tr '\n' ' ')
+		case "$QU" in
+			*root*) bad "no qemu-system process runs as root" "users: $QU" ;;
+			*unl*)  ok  "qemu-system runs as the tenant account (users: $QU)" ;;
+			*)      bad "qemu-system runs as the tenant account" "no qemu-system process found" ;;
+		esac
 		has "stop it" "$(A -X POST $S/nodes/stop -d "{\"id\":\"$QID\"}")" "80051"
 	fi
 fi
@@ -324,6 +344,17 @@ if [ "$DOCKER_OK" = "1" ]; then
 	fi
 fi
 ok "lab removed"
+
+# The same regression lab-functional.sh guards, asked of the node types that go
+# through the Docker and QEMU stop paths rather than the VPCS one. Both override
+# device::stop(); both must still reach the reap at the end of it.
+END_ACCOUNTS=$(getent passwd | grep -c '^unl[0-9]' || true)
+if [ "$END_ACCOUNTS" = "0" ]; then
+	ok "a completed session leaves no tenant accounts behind"
+else
+	bad "a completed session leaves no tenant accounts behind" \
+		"$END_ACCOUNTS left (this run started with $BASE_ACCOUNTS): $(getent passwd | grep '^unl[0-9]' | cut -d: -f1 | tr '\n' ' ')"
+fi
 
 echo
 echo "============================================"
