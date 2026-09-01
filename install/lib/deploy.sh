@@ -96,6 +96,21 @@ step_deploy() {
 	# because the Laravel half does not run.
 	run chown -R root:root "$WEB_ROOT"
 
+	# ...including store/.env, which the recursive chown above reaches even
+	# though rsync excludes it. It has to stay root:www-data 0640 or Laravel
+	# cannot read the APP_KEY, and every request 500s with "No application
+	# encryption key has been specified" — which presents as "the login page is
+	# broken" and, through the API, as a session timeout on every call.
+	#
+	# A full install does not notice, because the store step re-applies the mode
+	# afterwards. `--only deploy` does, and that is the invocation anyone
+	# iterating uses. Restore it here rather than making the store step a
+	# prerequisite of the deploy step.
+	if [[ -f "${WEB_ROOT}/store/.env" ]]; then
+		run chown "root:${WEB_GROUP}" "${WEB_ROOT}/store/.env"
+		run chmod 0640 "${WEB_ROOT}/store/.env"
+	fi
+
 	# Laravel needs these two writable whether or not it currently boots.
 	ensure_dir "${WEB_ROOT}/store/storage"                    "${WEB_USER}:${WEB_GROUP}" 0755
 	ensure_dir "${WEB_ROOT}/store/storage/framework"          "${WEB_USER}:${WEB_GROUP}" 0755
