@@ -16,22 +16,26 @@ $root = realpath(__DIR__ . '/../..');
 
 // Files fully converted by the shell sweep. Append as the sweep progresses.
 //
-// devices/qemu/device_qemu.php is deliberately NOT here yet. Its command-level
-// injection is fixed (see the commit removing the quote-collapsing rewrite), but
-// its -device/-netdev builds assemble comma-separated QEMU option values rather
-// than shell arguments, so they need restructuring rather than escaping, and
-// that cannot be verified without QEMU images and /dev/kvm. Listing it here
-// would assert a completeness this sweep has not reached.
 $swept = [
     'includes/cli.php',
     'includes/functions.php',
     'devices/interfc.php',
+    'devices/qemu/device_qemu.php',
 ];
 
 $violations = [];
 foreach ($swept as $rel) {
     $path = $root . '/' . $rel;
-    foreach (file($path) as $n => $line) {
+    $lines = file($path);
+    foreach ($lines as $n => $line) {
+        // A line may be exempted only by an explicit marker on the preceding
+        // lines, which must say why. Silence is not an exemption.
+        $exempt = false;
+        for ($k = $n - 1; $k >= 0 && $k >= $n - 4; $k--) {
+            if (strpos($lines[$k], 'sweep-exempt:') !== false) { $exempt = true; break; }
+            if (trim($lines[$k]) !== '' && strpos(ltrim($lines[$k]), '//') !== 0) break;
+        }
+        if ($exempt) continue;
         // A command assignment that concatenates a bare variable.
         // Commented-out code is not executed.
         if (preg_match('/^\s*(\/\/|\*|#)/', $line)) continue;

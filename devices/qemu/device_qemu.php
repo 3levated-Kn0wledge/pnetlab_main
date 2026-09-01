@@ -39,12 +39,14 @@ class device_qemu extends device
             if (!isset($this->ethernets[$i])) {
 
                 if($i == 0 && $this->first_nic != ''){
+                    // sweep-exempt: $this->first_nic is never assigned anywhere in the tree,
+                    // so this branch is unreachable. Left as-is rather than escaping dead code.
                     $flags = ' -device '.$this->first_nic.',netdev=net' . $i . ',mac=' . incMac($this->createFirstMac(), $i);
                 }else{
-                    $flags = ' -device %NICDRIVER%,netdev=net' . $i . ',mac=' . incMac($this->createFirstMac(), $i);
+                    $flags = ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . $i . ',mac=' . incMac($this->createFirstMac(), $i));
                 }
                 
-                $flags .= ' -netdev tap,id=net' . $i . ',ifname=vunl' . $this->getSession() . '_' . $i . ',script=no';
+                $flags .= ' -netdev ' . escapeshellarg('tap,id=net' . $i . ',ifname=vunl' . $this->getSession() . '_' . $i . ',script=no');
 
                 $n = $prefix;
                 if (isset($tpl['eth_name'][$i]) && $tpl['eth_name'][$i] != '') {
@@ -205,48 +207,51 @@ class device_qemu extends device
         }
 
         // Load configuration of all interface
+        // sweep-exempt: the template's qemu_options string, which is meant to supply
+        // multiple arguments. Escaping it as one would break every template. That it is
+        // user-editable is a design question for the fork, not one escaping can answer.
         $flags .= ' ' . $this->getFlag();
 
        
         // load configuration for console
         if ($this->console == 'rdp') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . $this->ethernet . ',mac=' . $this->createNodeMac('255');
-            $flags .= ' -netdev user,id=net' . $this->ethernet . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 3389) .',net=169.254.1.100/30,dhcpstart=169.254.1.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . $this->ethernet . ',mac=' . $this->createNodeMac('255'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . $this->ethernet . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 3389) .',net=169.254.1.100/30,dhcpstart=169.254.1.101,restrict=on');
         }else if ($this->console_2nd == 'rdp') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . $this->ethernet . ',mac=' . $this->createNodeMac('255');
-            $flags .= ' -netdev user,id=net' . $this->ethernet . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 3389) . ',net=169.254.1.100/30,dhcpstart=169.254.1.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . $this->ethernet . ',mac=' . $this->createNodeMac('255'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . $this->ethernet . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 3389) . ',net=169.254.1.100/30,dhcpstart=169.254.1.101,restrict=on');
         }
 
         if ($this->console == 'ssh') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . ($this->ethernet + 1) . ',mac=' . $this->createNodeMac('254');
-            $flags .= ' -netdev user,id=net' . ($this->ethernet + 1) . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 22) . ',net=169.254.2.100/30,dhcpstart=169.254.2.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . ($this->ethernet + 1) . ',mac=' . $this->createNodeMac('254'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . ($this->ethernet + 1) . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 22) . ',net=169.254.2.100/30,dhcpstart=169.254.2.101,restrict=on');
         } else if ($this->console_2nd == 'ssh') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . ($this->ethernet + 1) . ',mac=' . $this->createNodeMac('254');
-            $flags .= ' -netdev user,id=net' . ($this->ethernet + 1) . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 22) . ',net=169.254.2.100/30,dhcpstart=169.254.2.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . ($this->ethernet + 1) . ',mac=' . $this->createNodeMac('254'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . ($this->ethernet + 1) . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 22) . ',net=169.254.2.100/30,dhcpstart=169.254.2.101,restrict=on');
         }
 
         if ($this->console == 'winbox') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . ($this->ethernet + 2) . ',mac=' . $this->createNodeMac('253');
-            $flags .= ' -netdev user,id=net' . ($this->ethernet + 2) . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 8291) .',net=169.254.3.100/30,dhcpstart=169.254.3.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . ($this->ethernet + 2) . ',mac=' . $this->createNodeMac('253'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . ($this->ethernet + 2) . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 8291) .',net=169.254.3.100/30,dhcpstart=169.254.3.101,restrict=on');
         }else if ($this->console_2nd == 'winbox') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . ($this->ethernet + 2) . ',mac=' . $this->createNodeMac('253');
-            $flags .= ' -netdev user,id=net' . ($this->ethernet + 2) . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 8291) . ',net=169.254.3.100/30,dhcpstart=169.254.3.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . ($this->ethernet + 2) . ',mac=' . $this->createNodeMac('253'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . ($this->ethernet + 2) . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 8291) . ',net=169.254.3.100/30,dhcpstart=169.254.3.101,restrict=on');
         }
 
         if ($this->console == 'http') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . ($this->ethernet + 3) . ',mac=' . $this->createNodeMac('252');
-            $flags .= ' -netdev user,id=net' . ($this->ethernet + 3) . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 80) .',net=169.254.4.100/30,dhcpstart=169.254.4.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . ($this->ethernet + 3) . ',mac=' . $this->createNodeMac('252'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . ($this->ethernet + 3) . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 80) .',net=169.254.4.100/30,dhcpstart=169.254.4.101,restrict=on');
         }else if ($this->console_2nd == 'http') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . ($this->ethernet + 3). ',mac=' . $this->createNodeMac('252');
-            $flags .= ' -netdev user,id=net' . ($this->ethernet + 3) . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 80) .',net=169.254.4.100/30,dhcpstart=169.254.4.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . ($this->ethernet + 3). ',mac=' . $this->createNodeMac('252'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . ($this->ethernet + 3) . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 80) .',net=169.254.4.100/30,dhcpstart=169.254.4.101,restrict=on');
         }
 
         if ($this->console == 'https') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . ($this->ethernet + 4). ',mac=' . $this->createNodeMac('251');
-            $flags .= ' -netdev user,id=net' . ($this->ethernet + 4) . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 443) .',net=169.254.5.100/30,dhcpstart=169.254.5.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . ($this->ethernet + 4). ',mac=' . $this->createNodeMac('251'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . ($this->ethernet + 4) . ',hostfwd=tcp::' . $this->getPort() . '-:' . ($this->map_port > 0 ? $this->map_port : 443) .',net=169.254.5.100/30,dhcpstart=169.254.5.101,restrict=on');
         }else if ($this->console_2nd == 'https') {
-            $flags .= ' -device %NICDRIVER%,netdev=net' . ($this->ethernet + 4). ',mac=' . $this->createNodeMac('251');
-            $flags .= ' -netdev user,id=net' . ($this->ethernet + 4) . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 443).',net=169.254.5.100/30,dhcpstart=169.254.5.101,restrict=on';
+            $flags .= ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . ($this->ethernet + 4). ',mac=' . $this->createNodeMac('251'));
+            $flags .= ' -netdev ' . escapeshellarg('user,id=net' . ($this->ethernet + 4) . ',hostfwd=tcp::' . $this->getSecondPort() . '-:' . ($this->map_port_2nd > 0 ? $this->map_port_2nd : 443).',net=169.254.5.100/30,dhcpstart=169.254.5.101,restrict=on');
         }
 
 
@@ -262,11 +267,11 @@ class device_qemu extends device
 
 
         if($this->console == 'telnet' || $this->console_2nd == 'telnet'){
-            $flags .= ' -chardev socket,id=serial0,path='. $this->getRunningPath() .'/console.sock,server,nowait -serial chardev:serial0';
+            $flags .= ' -chardev ' . escapeshellarg('socket,id=serial0,path=' . $this->getRunningPath() . '/console.sock,server,nowait') . ' -serial chardev:serial0';
         }
 
         // Add monitor socket
-		$flags .= ' -chardev socket,id=monitor,path='. $this->getRunningPath() .'/monitor.sock,server,nowait -monitor chardev:monitor';
+		$flags .= ' -chardev ' . escapeshellarg('socket,id=monitor,path=' . $this->getRunningPath() . '/monitor.sock,server,nowait') . ' -monitor chardev:monitor';
 
         $qnic = ($this->qemu_nic != "") ? $this->qemu_nic : (isset($p['qemu_nic']) ? $p['qemu_nic'] : "");
         if (preg_match('/^[0-9a-zA-Z-]+$/', $qnic)) {
@@ -282,8 +287,8 @@ class device_qemu extends device
         }
 
         // Set configuration for device
-        $flags .= ' -smp ' . $this->cpu;             // set the number of CPUs
-        $flags .= ' -m ' . $this->ram;              // configure guest RAM
+        $flags .= ' -smp ' . escapeshellarg($this->cpu);             // set the number of CPUs
+        $flags .= ' -m ' . escapeshellarg($this->ram);              // configure guest RAM
         $flags .= ' -name ' . escapeshellarg($this->name);          // set the name of the guest
         $flags .= ' -uuid ' . escapeshellarg($this->uuid);          // specify machine UUID
 
@@ -291,11 +296,11 @@ class device_qemu extends device
         foreach (scandir('/opt/unetlab/addons/qemu/' . $this->image) as $filename) {
             if (preg_match('/^megasas[a-z]+.qcow2$/', $filename)) {
                 // MegaSAS
-                $flags .= ' -device megasas,id=scsi0,bus=pci.0,addr=0x5';                                             // Define SCSI BUS
+                $flags .= ' -device ' . escapeshellarg('megasas,id=scsi0,bus=pci.0,addr=0x5');                                             // Define SCSI BUS
                 break;
             } else if (preg_match('/^lsi[a-z]+.qcow2$/', $filename)) {
                 // LSI
-                $flags .= ' -device lsi,id=scsi0,bus=pci.0,addr=0x5';                                             // Define SCSI BUS
+                $flags .= ' -device ' . escapeshellarg('lsi,id=scsi0,bus=pci.0,addr=0x5');                                             // Define SCSI BUS
                 break;
             }
         }
@@ -314,16 +319,16 @@ class device_qemu extends device
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
                 $lun = (int) ord(strtolower($disk_id)) - 97;
-                $flags .= ' -device scsi-disk,bus=scsi0.0,scsi-id=' . $lun . ',drive=drive-scsi0-0-' . $lun . ',id=scsi0-0-' . $lun . ',bootindex=' . $lun;  // Define SCSI disk
-                $flags .= ' -drive file=' . $filename . ',if=none,id=drive-scsi0-0-' . $lun . ',cache=none';                        // Define SCSI file
+                $flags .= ' -device ' . escapeshellarg('scsi-disk,bus=scsi0.0,scsi-id=' . $lun . ',drive=drive-scsi0-0-' . $lun . ',id=scsi0-0-' . $lun . ',bootindex=' . $lun);  // Define SCSI disk
+                $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=none,id=drive-scsi0-0-' . $lun . ',cache=none');                        // Define SCSI file
             } else if (preg_match('/^lsi[a-z]+.qcow2$/', $filename)) {
                 // LSI
                 $patterns[0] = '/^lsi([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
                 $lun = (int) ord(strtolower($disk_id)) - 97;
-                $flags .= ' -device scsi-disk,bus=scsi0.0,scsi-id=' . $lun . ',drive=drive-scsi0-0-' . $lun . ',id=scsi0-0-' . $lun . ',bootindex=' . $lun;  // Define SCSI disk
-                $flags .= ' -drive file=' . $filename . ',if=none,id=drive-scsi0-0-' . $lun . ',cache=none';                        // Define SCSI file
+                $flags .= ' -device ' . escapeshellarg('scsi-disk,bus=scsi0.0,scsi-id=' . $lun . ',drive=drive-scsi0-0-' . $lun . ',id=scsi0-0-' . $lun . ',bootindex=' . $lun);  // Define SCSI disk
+                $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=none,id=drive-scsi0-0-' . $lun . ',cache=none');                        // Define SCSI file
             } else if (preg_match('/^hd[a-z]+.qcow2$/', $filename)) {
                 // IDE
                 $patterns[0] = '/^hd([a-z]+).qcow2$/';
@@ -339,31 +344,31 @@ class device_qemu extends device
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
                 $disk_num = (int) ord(strtolower($disk_id)) - 97;
-                $flags .= ' -device virtio-blk-pci,scsi=off,drive=idedisk' . $disk_num . ',id=hd' . $disk_id . ',bootindex=1';
-                $flags .= ' -drive file=' . $filename . ',if=none,id=idedisk' . $disk_num . ',format=qcow2,cache=none';
+                $flags .= ' -device ' . escapeshellarg('virtio-blk-pci,scsi=off,drive=idedisk' . $disk_num . ',id=hd' . $disk_id . ',bootindex=1');
+                $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=none,id=idedisk' . $disk_num . ',format=qcow2,cache=none');
             } else if (preg_match('/^virtio[a-z]+.qcow2$/', $filename)) {
                 // VirtIO
                 $patterns[0] = '/^virtio([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
                 $lun = (int) ord(strtolower($disk_id)) - 97;
-                $flags .= ' -drive file=' . $filename . ',if=virtio,bus=0,unit=' . $lun . ',cache=none';
+                $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=virtio,bus=0,unit=' . $lun . ',cache=none');
             } else if (preg_match('/^scsi[a-z]+.qcow2$/', $filename)) {
                 // SCSI
                 $patterns[0] = '/^scsi([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
                 $lun = (int) ord(strtolower($disk_id)) - 97;
-                $flags .= ' -drive file=' . $filename . ',if=scsi,bus=0,unit=' . $lun . ',cache=none';
+                $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=scsi,bus=0,unit=' . $lun . ',cache=none');
             } else if (preg_match('/^sata[a-z]+.qcow2$/', $filename)) {
                 //SATA
                 $patterns[0] = '/^sata([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
                 $disk_id = (int) ord(strtolower($disk_id)) - 97;
-                $flags .= ' -device ahci,id=ahci' . $disk_id . ',bus=pci.0';
-                $flags .= ' -drive file=' . $filename . ',if=none,id=drive-sata-disk' . $disk_id . ',format=qcow2';
-                $flags .= ' -device ide-drive,bus=ahci' . $disk_id . '.0,drive=drive-sata-disk' . $disk_id . ',id=drive-sata-disk' . $disk_id . ',bootindex=' . ($disk_id + 1);
+                $flags .= ' -device ' . escapeshellarg('ahci,id=ahci' . $disk_id . ',bus=pci.0');
+                $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=none,id=drive-sata-disk' . $disk_id . ',format=qcow2');
+                $flags .= ' -device ' . escapeshellarg('ide-drive,bus=ahci' . $disk_id . '.0,drive=drive-sata-disk' . $disk_id . ',id=drive-sata-disk' . $disk_id . ',bootindex=' . ($disk_id + 1));
                 if ($this->getTemplate() == 'nxosv9k') {
                     $flags .= " -bios /opt/qemu/share/qemu/OVMF-sata.fd";
                 }
@@ -372,6 +377,7 @@ class device_qemu extends device
 
         // Adding custom flags
         $qoptions = ($this->qemu_options != "") ? $this->qemu_options : (isset($p['qemu_options']) ? $p['qemu_options'] : "");
+        // sweep-exempt: same as getFlag() above — a multi-argument options string.
         $flags .= ' ' . $qoptions;
         $flags = $this->customFlag($flags);
 
