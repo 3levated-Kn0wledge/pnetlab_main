@@ -25,7 +25,12 @@ HARDEN   = -fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2
 # glibc hide every POSIX declaration this code is built out of — sigaction,
 # kill, nanosleep, gmtime_r. The alternative is a _POSIX_C_SOURCE define at the
 # top of every file, which is the same thing spelled five times.
-CFLAGS  += -std=gnu11 -O2 $(WARN) $(HARDEN)
+# -MMD -MP makes the compiler emit its own header dependencies into *.d, which
+# is why there is no hand-written dependency list at the foot of this file any
+# more. Three people are adding front-ends here in parallel; a list everyone has
+# to remember to edit is a merge conflict waiting to happen, and a stale entry
+# fails silently as a stale object file.
+CFLAGS  += -std=gnu11 -O2 $(WARN) $(HARDEN) -MMD -MP
 LDFLAGS +=
 
 PREFIX     ?= /opt/unetlab
@@ -34,19 +39,34 @@ WRAPPERDIR ?= $(PREFIX)/wrappers
 CORE_SRC = console.c child.c loop.c log.c cmdline.c
 CORE_OBJ = $(CORE_SRC:.c=.o)
 
-WRAPPERS = qemu_wrapper_telnet
+# Front-ends appear as their source files land. The $(wildcard) guards mean an
+# incomplete tree still builds and still passes `make test`, so nobody is
+# blocked on anybody else's file existing.
+WRAPPERS = qemu_wrapper_telnet \
+           $(if $(wildcard docker.c),docker_wrapper) \
+           $(if $(wildcard iol.c),iol_wrapper)
+
+TEST_NOMAIN = qemu_telnet_nomain.o \
+              $(if $(wildcard docker.c),docker_nomain.o) \
+              $(if $(wildcard iol.c),iol_nomain.o)
 
 all: $(WRAPPERS)
 
 qemu_wrapper_telnet: qemu_telnet.o $(CORE_OBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
-# The front-end is compiled a second time with its main() suppressed, so the
-# test binary can call qt_parse() directly.
-qemu_telnet_nomain.o: qemu_telnet.c
+docker_wrapper: docker.o $(CORE_OBJ)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+iol_wrapper: iol.o $(CORE_OBJ)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+# Each front-end is compiled a second time with its main() suppressed, so the
+# test binary can call its option parser directly.
+%_nomain.o: %.c
 	$(CC) $(CFLAGS) -DWRAPPER_NO_MAIN -c -o $@ $<
 
-wrapper_test: wrapper_test.o qemu_telnet_nomain.o $(CORE_OBJ)
+wrapper_test: wrapper_test.o $(TEST_NOMAIN) $(CORE_OBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 test: wrapper_test
@@ -60,15 +80,8 @@ install: all
 	install -m 0755 $(WRAPPERS) $(DESTDIR)$(WRAPPERDIR)/
 
 clean:
-	rm -f $(WRAPPERS) wrapper_test *.o
+	rm -f $(WRAPPERS) wrapper_test *.o *.d
 
 .PHONY: all test install clean
 
-console.o:      console.c console.h log.h
-child.o:        child.c child.h log.h
-loop.o:         loop.c loop.h console.h child.h log.h
-log.o:          log.c log.h
-cmdline.o:      cmdline.c cmdline.h log.h
-qemu_telnet.o:  qemu_telnet.c qemu_telnet.h console.h child.h cmdline.h log.h loop.h version.h
-qemu_telnet_nomain.o: qemu_telnet.h console.h child.h cmdline.h log.h loop.h version.h
-wrapper_test.o: wrapper_test.c console.h cmdline.h qemu_telnet.h log.h
+-include $(wildcard *.d)
