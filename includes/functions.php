@@ -495,12 +495,33 @@ function updateUserToken($username, $password, $pod)
 			'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
 			'method'  => 'POST',
 			'content' => http_build_query($data),
+			// Without this the request inherits default_socket_timeout and can
+			// stall a web worker. The console service is local, so a short bound
+			// is generous.
+			'timeout' => 5,
+			'ignore_errors' => true,
 		)
 	);
 
 	$context  = stream_context_create($options);
-	$result = (array) json_decode(file_get_contents($url, false, $context));
-	
+
+	// The HTML5 console service is optional. It may not be installed, may not be
+	// running, or may be mid-restart. None of those are a reason to fail a login:
+	// the caller queues the session cookie *after* this returns, so throwing here
+	// locked every user out of an appliance whose consoles happened to be down.
+	// See docs/OFFLINE-FIRST.md — an absent service degrades, it does not block.
+	$body = @file_get_contents($url, false, $context);
+	if ($body === false) {
+		error_log(date('M d H:i:s ') . 'WARNING: HTML5 console service unreachable at ' . $url . '; console access will be unavailable for this session');
+		return false;
+	}
+
+	$result = (array) json_decode($body);
+	if (!isset($result['authToken'])) {
+		error_log(date('M d H:i:s ') . 'WARNING: HTML5 console service returned no authToken; console access will be unavailable for this session');
+		return false;
+	}
+
 	$db = checkDatabase();
 	$token = $result['authToken'];
 	// $username arrives from the login form.
@@ -1804,7 +1825,7 @@ function checkRunningNodeLimit($pod){
 	
 	$hostLab = getUserByPod($pod);
 	if(!$hostLab) throw new ResponseException('User not exist');
-	if($hostLab[USER_ROLE] == 0) return true;
+	if (!$hostLab || ($hostLab[USER_ROLE] ?? 0) == 0) return true;
 
 	$checkMaxNode = false;
 	if(isset($hostLab[USER_MAX_NODE]) && $hostLab[USER_MAX_NODE] > 0){
@@ -1829,13 +1850,13 @@ function checkRunningNodeLimit($pod){
 	$totalRunningNode = $result['total_running_node'];
 
 	if($checkMaxNode){
-		if($totalRunningNode >= $hostLab[USER_MAX_NODE]){
+		if ($hostLab[USER_MAX_NODE] !== null && $totalRunningNode >= $hostLab[USER_MAX_NODE]) {
 			throw new ResponseException('max_running_node_limit', ['data' => $hostLab[USER_MAX_NODE]]);
 		}
 	}
 
 	if($checkMaxNodeLab){
-		if($totalRunningNode >= $hostLab[USER_MAX_NODELAB]){
+		if ($hostLab[USER_MAX_NODELAB] !== null && $totalRunningNode >= $hostLab[USER_MAX_NODELAB]) {
 			throw new ResponseException('max_running_nodelab_limit', ['data' => $hostLab[USER_MAX_NODELAB]]);
 		}
 	}
@@ -1848,9 +1869,13 @@ function checkLimit($pod)
 
 	$role = getRoleByPod($pod);
 
-	$ramLimit = $role[USER_ROLE_RAM];
-	$cpuLimit = $role[USER_ROLE_CPU];
-	$hddLimit = $role[USER_ROLE_HDD];
+	// user_roles is empty on a stock installation — including the appliance —
+	// so $role is routinely null here. The '' fallbacks immediately below are
+	// what supply the defaults; null-coalescing simply restores the PHP 7
+	// behaviour those fallbacks were written against.
+	$ramLimit = $role[USER_ROLE_RAM] ?? '';
+	$cpuLimit = $role[USER_ROLE_CPU] ?? '';
+	$hddLimit = $role[USER_ROLE_HDD] ?? '';
 
 	if ($ramLimit == '' || $ramLimit > 95) $ramLimit = 95;
 	if ($cpuLimit == '' || $cpuLimit > 95) $cpuLimit = 95;
@@ -1888,7 +1913,7 @@ function getPermission()
 	if ($GLOBALS['permission'] != null) return $GLOBALS['permission'];
 	$role = getRole();
 	if (!$role) return null;
-	$roleId = $role[USER_ROLE_ID];
+	$roleId = $role[USER_ROLE_ID] ?? null;
 	$db = checkDatabase();
 	$query = 'SELECT * FROM ' . USER_PERMISSION_TABLE . ' WHERE ' . USER_PER_ROLE . ' = :role_id';
 	$statement = $db->prepare($query);
@@ -1991,7 +2016,7 @@ function getWorkspace()
 
 	$role = getRole();
 	if ($role == 'null') throw new Exception('You do not have permission');
-	$workspace = $role['user_role_workspace'];
+	$workspace = $role['user_role_workspace'] ?? '';
 
 	$user = getUser();
 	if ($user[USER_WORKSPACE] != null && $user[USER_WORKSPACE] != '') {
