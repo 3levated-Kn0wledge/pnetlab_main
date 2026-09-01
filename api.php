@@ -21,7 +21,16 @@ require_once(BASE_DIR . '/html/includes/api_uusers.php');
 
 $app = new \Slim\Slim(array(
 	'mode' => 'production',
-	'debug' => True,					// Change to False for production
+	// Slim 2.6's debug handler renders an uncaught exception as a full HTML
+	// page: the message, the stack trace, and the absolute path of every file
+	// on it. Shipped as True under 'mode' => 'production', with a comment
+	// telling the reader to change it — which nobody did in three years. The
+	// API answers unauthenticated requests, so this leaked the install layout
+	// to anyone who could provoke an error.
+	//
+	// Off unless PNETLAB_API_DEBUG=1 is in the environment, so turning it on
+	// for development no longer means editing a file you might commit.
+	'debug' => getenv('PNETLAB_API_DEBUG') === '1',
 	'log.level' => \Slim\Log::WARN,		// Change to WARN for production, DEBUG to develop
 	'log.enabled' => True,
 	'log.writer' => new \Slim\LogWriter(fopen('/opt/unetlab/data/Logs/api.txt', 'a'))
