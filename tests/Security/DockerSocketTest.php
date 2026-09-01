@@ -134,17 +134,16 @@ foreach ($badEndpoint as $b) echo "        unexpected endpoint: $b\n";
 |--------------------------------------------------------------------------
 | 3. sudo is no longer how the web layer reaches Docker
 |--------------------------------------------------------------------------
-| One call site remains: api.php's Wireshark image check. It is listed here by
-| name so that this test records the debt rather than hiding it, and so that a
-| NEW sudo docker call fails the assertion. When api.php is converted, delete
-| the exception here and the /usr/bin/docker line from install/sudoers.d/pnetlab
-| — tests/Security/SudoersPolicyTest.php will then insist on it.
+| There are none left. api.php's Wireshark image check was the last one, and
+| with it converted the /usr/bin/docker line is gone from install/sudoers.d/pnetlab
+| — SudoersPolicyTest fails on a grant the code no longer invokes, so that
+| deletion is now enforced from both directions and cannot quietly come back.
+|
+| Reaching the daemon is a group-membership question now, not a sudo question.
 */
-assert_same(['api.php'], $sudoDocker,
-    'api.php is the only remaining sudo-docker call site');
-foreach ($sudoDocker as $f) {
-    if ($f !== 'api.php') echo "        new sudo docker call site: $f\n";
-}
+assert_same([], $sudoDocker,
+    'no call site reaches Docker through sudo');
+foreach ($sudoDocker as $f) echo "        sudo docker call site: $f\n";
 
 /*
 |--------------------------------------------------------------------------

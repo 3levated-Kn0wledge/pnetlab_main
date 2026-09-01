@@ -1485,7 +1485,7 @@ $app->post('/api/labs/session/(:object)/(:action)', function ($object, $action) 
 				} else if ($action == 'capture') {
 					$interface_id = get($p['interface_id'], '');
 					$node_id = get($p['node_id'], '');
-					$checkExistLog = exec('sudo docker images pnetlab/pnet-wireshark:latest | grep pnetlab/pnet-wireshark');
+					$checkExistLog = exec('docker -H=unix:///var/run/docker.sock images pnetlab/pnet-wireshark:latest | grep pnetlab/pnet-wireshark');
 					if ($checkExistLog == '') throw new Exception('You have not installed Wireshark for the HTML Console. Go to the Devices tab and get the Wireshark node then try to capture again.');
 					$output = addWiresharkSystem($lab, $node_id, $interface_id);
 				} else if ($action == 'delete') {
