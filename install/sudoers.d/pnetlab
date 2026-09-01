@@ -116,7 +116,6 @@ www-data ALL=(root) NOPASSWD: /usr/bin/chown             # arbitrary ownership
 www-data ALL=(root) NOPASSWD: /usr/bin/mkdir
 www-data ALL=(root) NOPASSWD: /usr/bin/touch
 www-data ALL=(root) NOPASSWD: /usr/bin/link
-www-data ALL=(root) NOPASSWD: /usr/bin/dos2unix
 www-data ALL=(root) NOPASSWD: /usr/bin/qemu-img          # reads/writes any path
 www-data ALL=(root) NOPASSWD: /usr/sbin/useradd          # can create a uid 0 account
 

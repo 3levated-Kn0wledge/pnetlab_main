@@ -172,9 +172,13 @@ includes/functions.php $cmd
 # --- 9. The Laravel half, which the original sweep never reached at all ---
 #
 # None of these files was on the old 16-file list. Node_sessionsController runs
-# sudo mkdir/cp/mv/rm/chown on paths built from request input; DevicesController
-# runs `sudo <file>` on a template name; Query.php interpolates Guacamole proxy
-# credentials into a command line.
+# sudo mkdir/cp/mv/rm/chown on paths built from request input; Query.php
+# interpolates Guacamole proxy credentials into a command line.
+#
+# DevicesController's two entries are GONE, and they are the first to go: it ran
+# `sudo <file>` on a script downloaded from upstream, and decoded that script
+# with htmlspecialchars_decode() on the way. Signed packages replaced it, so
+# there is no longer a shell there to escape into.
 store/app/Http/Controllers/Admin/Node_sessionsController.php $request->input()
 store/app/Http/Controllers/Admin/Node_sessionsController.php $qcowFile
 store/app/Http/Controllers/Admin/Node_sessionsController.php $qcowTree[]
@@ -186,8 +190,6 @@ store/app/Http/Controllers/Admin/Node_sessionsController.php $nodeSession->{}
 store/app/Http/Controllers/Admin/Node_sessionsController.php basename()
 store/app/Http/Controllers/Admin/Node_sessionsController.php dirname()
 store/app/Http/Controllers/Admin/Node_sessionsController.php preg_replace()
-store/app/Http/Controllers/Admin/DevicesController.php $request->input()
-store/app/Http/Controllers/Admin/DevicesController.php htmlspecialchars_decode()
 store/app/Helpers/Request/Query.php $p['proxy_ip']
 store/app/Helpers/Request/Query.php $p['proxy_port']
 store/app/Helpers/Request/Query.php $p['proxy_username']

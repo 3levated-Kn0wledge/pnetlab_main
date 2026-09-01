@@ -613,7 +613,9 @@ foreach (file($baselineFile, FILE_IGNORE_NEW_LINES) as $l) {
 // It is a count rather than a strict set comparison so that an unrelated edit
 // shifting a line number cannot fail the build — a genuinely new violation
 // still does, because it is not in the file.
-const SWEEP_BASELINE_MAX = 93;
+// Ratchet. It has only ever moved downwards: 93 when the sweep was first made
+// honest, 91 once signed packages removed DevicesController's two.
+const SWEEP_BASELINE_MAX = 91;
 assert_true(count($baseline) <= SWEEP_BASELINE_MAX,
     sprintf('the known-unfixed baseline has not grown (%d of %d)', count($baseline), SWEEP_BASELINE_MAX));
 

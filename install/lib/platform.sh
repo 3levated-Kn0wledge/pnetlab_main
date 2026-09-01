@@ -185,16 +185,67 @@ step_platform() {
 		ok "nsenter wired to util-linux"
 	fi
 
+	# --- console wrappers, built from source ----------------------------
+	# These used to be the fork's last dependency on the upstream appliance
+	# image: compiled binaries published nowhere, without which QEMU telnet
+	# consoles, Docker nodes and IOL nodes could not start. They are now
+	# reimplemented in platform/wrappers/src and compiled here, so a clean
+	# download builds a complete system.
+	#
+	# Not built: iol_wrapper_telnet, because nothing calls it — the only
+	# reference in the tree is commented out. qemu_wrapper and
+	# dynamips_wrapper are not built either and are not missing: QEMU's own
+	# -vnc is the console listener, dynamips has -T, and neither has a live
+	# call site. See platform/wrappers/src/README.md.
+	local csrc="${SRC_DIR}/platform/wrappers/src"
+	if [[ -d "$csrc" ]]; then
+		if have cc || have gcc; then
+			if run make -C "$csrc" clean && run make -C "$csrc" all; then
+				run make -C "$csrc" install WRAPPERDIR=/opt/unetlab/wrappers
+				ok "console wrappers built and installed from source"
+			else
+				die "the console wrappers failed to build; see the output above"
+			fi
+		else
+			die "no C compiler found: install build-essential, or the console wrappers cannot be built"
+		fi
+	else
+		die "platform/wrappers/src is missing from the source tree"
+	fi
+
 	local missing=()
-	for w in qemu_wrapper_telnet docker_wrapper iol_wrapper iol_wrapper_telnet; do
-		[[ -e "/opt/unetlab/wrappers/$w" ]] || missing+=("$w")
+	for w in qemu_wrapper_telnet docker_wrapper iol_wrapper; do
+		[[ -x "/opt/unetlab/wrappers/$w" ]] || missing+=("$w")
 	done
 	if (( ${#missing[@]} )); then
-		note "not present: ${missing[*]}"
-		note "         These are compiled binaries that ship only in the upstream"
-		note "         appliance. Without them: QEMU nodes with a *telnet* console,"
-		note "         Docker-backed nodes and IOL nodes will not start. VPCS nodes"
-		note "         and QEMU nodes with a VNC console are unaffected."
+		die "wrappers missing after build: ${missing[*]}"
+	fi
+	ok "qemu_wrapper_telnet, docker_wrapper and iol_wrapper are in place"
+
+	# --- signed package machinery ---------------------------------------
+	# unl_wrapper looks for the applier at ../packages/ relative to itself.
+	# This is what replaced running a shell script downloaded from upstream
+	# as root; see docs/PACKAGES.md.
+	local psrc="${SRC_DIR}/platform/packages"
+	if [[ -d "$psrc" ]]; then
+		run install -d -m 0755 -o root -g root /opt/unetlab/packages
+		run install -m 0644 -o root -g root "${psrc}/PnetPackage.php"        /opt/unetlab/packages/
+		run install -m 0644 -o root -g root "${psrc}/PnetPackageApplier.php" /opt/unetlab/packages/
+		run install -d -m 0755 -o root -g root /opt/unetlab/data/packages/trusted.d
+		run install -d -m 0755 -o root -g root /opt/unetlab/data/Logs/packages
+		run install -d -m 0755 -o www-data -g www-data /opt/unetlab/data/packages/incoming
+		ok "package applier and trust store installed"
+	else
+		die "platform/packages is missing from the source tree"
+	fi
+
+	# ext-sodium carries the Ed25519 verification. Ubuntu enables it by
+	# default, so its absence means someone disabled it deliberately — and
+	# without it no package can be verified at all.
+	if "php${PHP_VERSION}" -r 'exit(extension_loaded("sodium") ? 0 : 1);' 2>/dev/null; then
+		ok "ext-sodium present; package signatures can be verified"
+	else
+		die "ext-sodium is missing; signed packages cannot be verified without it"
 	fi
 
 	# --- Docker, and the socket the web layer talks to it over -----------
