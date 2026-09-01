@@ -12,7 +12,94 @@ fork starts owning its own install path.
 
 | Path | Purpose | Status |
 |---|---|---|
+| `install.sh` | The installer. Clean Ubuntu 24.04 → serving web layer | Written, **not yet run end to end on a fresh machine** |
+| `lib/*.sh` | One file per step, sourced by `install.sh` | as above |
+| `apache/pnetlab.conf.in` | Virtual host template (FPM, `AllowOverride All`) | as above |
+| `sql/seed-control.sql` | Control rows that put the appliance in offline mode | as above |
+| `sql/seed-admin.sql` | Default administrator, applied only when there is none | as above |
+| `sql/schema/` | Where you drop the appliance schema dumps; empty on purpose | — |
 | `sudoers.d/pnetlab` | Privilege policy for `www-data` | Deployable, and **not a boundary** — see below |
+
+## Running it
+
+```bash
+sudo ./install/install.sh
+```
+
+Steps, in order, each independently re-runnable with `--only`:
+
+| Step | What it does |
+|---|---|
+| `preflight` | Checks the host, and checks that `BASE_DIR` and the database credentials in the source still match what the installer assumes |
+| `packages` | `apache2`, `mariadb-server`, PHP 8.4 from `ppa:ondrej/php` under **FPM** |
+| `deploy` | Creates `/opt/unetlab/{labs,tmp,addons,scripts,wrappers,data/Logs,data/Exports}` and rsyncs the web layer to `/opt/unetlab/html` |
+| `sudoers` | Validates the policy with `visudo -cf`, installs it 0440 root:root, removes `/etc/sudoers.d/unetlab`, re-validates the whole tree and rolls back if it broke |
+| `database` | Creates `pnetlab_db` and `guacdb` and their users, imports a schema if you supplied one, applies the offline seed |
+| `apache` | Modules, vhost, `configtest` **before** restart |
+| `store` | `store/.env`: a per-installation `APP_KEY`, `APP_DEBUG=false` |
+| `verify` | Read-only. Services, layout, sudo policy, DB logins, `GET /api/auth` over the loopback |
+
+Useful flags: `--only`/`--skip` a step list, `--schema-dir DIR`, `--reset-admin`,
+`--prune` (let rsync delete files under the docroot that are not in the source
+tree), `--with-node-tools`, `--strip-sudoers-grants`, `--with-store-vendor`.
+`--help` documents all of them.
+
+`sudo ./install/install.sh --only verify` changes nothing and can be run at any
+time, including against a host somebody else built.
+
+## What it deliberately does not do
+
+- **It does not create the database schema.** The schema is not in this
+  repository; it shipped inside the appliance image. The installer creates the
+  databases and the users, then either imports a dump from
+  `install/sql/schema/` or tells you the tables are missing and that the
+  application will fail on every query. It does not invent a schema and it does
+  not report success over an empty database.
+- **It does not make the Laravel admin UI work.** It cannot. `store/` is
+  Laravel 5.5; `composer install` fails outright on PHP 8.4, and forcing it with
+  `--ignore-platform-reqs --no-plugins --no-scripts` produces a `vendor/` that
+  then fatals at runtime (`ReflectionParameter::getClass()`,
+  `Collection::offsetExists()`). `--with-store-vendor` will run that forced
+  install if you ask, and says plainly that it buys a different error rather
+  than a working UI. What does work after an install is the legacy API, the
+  themes, and the platform layer.
+- **It does not build the frontend.** `npm run production` must run from the
+  repository root before deploying (`docs/BUILD.md`); the installer warns if the
+  bundle is absent rather than running npm itself.
+- **It does not set a MariaDB root password.** Administration goes through the
+  stock unix_socket root account. The appliance set root's password to
+  `pnetlab`, which handed database access to every local account on the box.
+  One consequence: `store/app/Console/Commands/MysqlRecovery.php` still shells
+  out to `mysql -uroot -ppnetlab` and will not work against a host installed
+  this way. The installer says so.
+- **It does not install emulators, wrappers, vendor images, Guacamole or
+  systemd units.** Those are separate work. `--with-node-tools` installs the
+  host binaries the sudo policy allowlists, and nothing more.
+- **It does not edit `/etc/sudoers`** unless you pass
+  `--strip-sudoers-grants`. It does detect and warn when a surviving blanket
+  `NOPASSWD:ALL` there makes the new policy decorative.
+
+## What has not been verified
+
+**The script has not been run end to end on a fresh machine.** It is
+syntax-checked, its rsync exclusion set was validated with `rsync --dry-run`
+against this tree, its Apache template renders, and `visudo -cf` accepts the
+policy — but no clean Ubuntu 24.04 host has been taken from nothing to a
+serving install by it. Every step was derived from the manual procedure in
+`docs/REFERENCE-ENVIRONMENT.md`, which was performed by hand and does work.
+Treat the first run on a disposable VM as the test it has not had, and read the
+`verify` output rather than the exit status.
+
+Two specifics that a first run should settle:
+
+- the exact database default character set. The installer creates both schemas
+  as `utf8mb4`; the appliance's own dumps may specify something else per table,
+  in which case the import decides and this does not matter.
+- whether anything in the tree writes into the document root at runtime. The
+  installer makes `/opt/unetlab/html` root-owned and not writable by
+  `www-data` — deliberately, given the shell interpolation still in the tree —
+  with only `data`, `labs`, `tmp`, `store/storage` and `store/bootstrap/cache`
+  writable. The appliance let the web user own its own code.
 
 ## The sudo problem
 
@@ -72,13 +159,17 @@ of the host.**
 
 ## Not yet written
 
-- A scripted, reproducible install tested on a clean target image.
-- Per-installation `APP_KEY` generation (see `docs/OFFLINE-FIRST.md`).
-- Rotation of the hardcoded MySQL `root` / `pnetlab` credential, which currently
-  grants database access to **any** local account, not just the web user.
+- **Testing the installer on a clean target image.** The script exists; the
+  clean-image run does not. That is the single largest gap in this directory.
+- Rotation of the hardcoded `pnetlab` / `guacuser` application credentials.
+  They are in `includes/functions.php` and cannot be chosen at install time
+  without a code change, so the installer reads them out of the source and
+  fails preflight if they drift rather than pretending they are configurable.
 - Tenant-account lifecycle: node start creates `unlN` Unix accounts with login
   shells that are never removed, and a failed start additionally leaks its tap
   interface.
 - systemd units, currently hand-placed in `/etc/systemd/system`.
+- HTTPS. The vhost is plain `*:80`; TLS is a deployment decision the installer
+  does not make for you.
 - AppArmor profile. Upstream's answer to AppArmor was `apparmor=0` on the kernel
   command line; a profile carrying a `userns,` rule is new work, not a port.

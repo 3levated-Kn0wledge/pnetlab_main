@@ -1,0 +1,18 @@
+Put schema dumps here.
+
+The PNETLab database schema is not in this repository. It shipped inside the
+appliance image and was never published, so the installer cannot create it and
+will not invent one.
+
+Expected filenames (plain or gzipped):
+
+    pnetlab_db.sql      ~11 tables
+    guacdb.sql          ~23 tables   (the Guacamole JDBC schema)
+
+Produce them from a working appliance with, e.g.:
+
+    mysqldump --no-create-db pnetlab_db > pnetlab_db.sql
+    mysqldump --no-create-db guacdb     > guacdb.sql
+
+The installer imports a dump only into a database that has no tables, so
+dropping a file in here and re-running with --only database is safe.

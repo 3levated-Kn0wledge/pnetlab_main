@@ -1,0 +1,60 @@
+# PNETLab virtual host. Rendered by install/lib/apache.sh — edit the template,
+# not /etc/apache2/sites-available/pnetlab.conf, or the next install run will
+# overwrite your changes.
+#
+# Placeholders of the form NAME wrapped in at-signs (PHP_VERSION, FPM_SOCKET,
+# WEB_ROOT, SERVER_NAME) are substituted at install time by render_template.
+
+<VirtualHost *:80>
+	ServerName @SERVER_NAME@
+	DocumentRoot @WEB_ROOT@
+
+	# AllowOverride All is required, not stylistic: the application's entire
+	# routing table lives in @WEB_ROOT@/.htaccess (/api -> api.php,
+	# /auth -> auth.php, everything else -> store/public). With overrides off,
+	# Apache serves the directory listing and nothing works.
+	<Directory @WEB_ROOT@>
+		Options -Indexes +FollowSymLinks
+		AllowOverride All
+		Require all granted
+	</Directory>
+
+	# PHP runs under FPM. mod_php does not exist on a current LTS, and the
+	# php_value directives in .htaccess are guarded by <IfModule mod_php.c>
+	# precisely because they are a fatal error here. The equivalent settings
+	# live in @WEB_ROOT@/.user.ini, which FPM reads per directory.
+	<FilesMatch "\.php$">
+		SetHandler "proxy:unix:@FPM_SOCKET@|fcgi://localhost"
+	</FilesMatch>
+
+	# Nothing beginning with a dot is ever a page: .env (which this repository
+	# still ships with a live APP_KEY), .user.ini, .htaccess, editor droppings.
+	# The rewrite rules only redirect requests that are NOT real files, so
+	# without this a request for /store/.env is served as plain text.
+	<FilesMatch "^\.">
+		Require all denied
+	</FilesMatch>
+
+	# The Laravel application's source tree sits under the document root
+	# because .htaccess rewrites into store/public. Only store/public is meant
+	# to be reachable; the rest is code, configuration, sessions and logs.
+	#
+	# Note for later: if anything ever runs `php artisan storage:link`, the
+	# symlink resolves into store/storage and will be denied by this block.
+	# Serve those assets from store/public instead.
+	<DirectoryMatch "^@WEB_ROOT@/store/(app|bootstrap|config|database|resources|routes|storage|tests|vendor)(/|$)">
+		Require all denied
+	</DirectoryMatch>
+
+	<Directory @WEB_ROOT@/store>
+		<FilesMatch "^(artisan|composer\.(json|lock)|phpunit\.xml|server\.php|laravel\.php|readme\.md)$">
+			Require all denied
+		</FilesMatch>
+	</Directory>
+
+	# Large lab and image uploads; matches post_max_size in .user.ini.
+	LimitRequestBody 209715200
+
+	ErrorLog  ${APACHE_LOG_DIR}/pnetlab-error.log
+	CustomLog ${APACHE_LOG_DIR}/pnetlab-access.log combined
+</VirtualHost>

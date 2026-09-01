@@ -382,6 +382,73 @@ function unl_password_needs_rehash($stored)
 }
 
 /**
+ * Hash a lab-level password for storage in the .unl file.
+ *
+ * Lab passwords were stored as a bare, unsalted md5() digest and compared with
+ * ==, which is loose comparison on two strings. PHP still juggles two numeric
+ * strings to numbers there, so the classic "magic hash" collision applies: any
+ * two passwords whose md5 digests both match /^0e[0-9]+$/ compare equal, and
+ * md5('240610708') and md5('QNKCDZO') are the textbook pair. Unsalted md5 is
+ * also trivially reversed by rainbow table.
+ *
+ * These are kept separate from unl_password_hash()/unl_password_verify()
+ * deliberately. Those accept a 64-hex legacy digest for user accounts; teaching
+ * them to also accept a 32-hex md5 would widen the accepted legacy formats for
+ * user login, which is the higher-value target. Lab passwords carry their own
+ * legacy format, so they get their own pair.
+ *
+ * @param   string  $plain              Plaintext lab password
+ * @return  string                      Hash suitable for the lab password attribute
+ */
+function unl_lab_password_hash($plain)
+{
+	return password_hash($plain, PASSWORD_DEFAULT);
+}
+
+/**
+ * Verify a lab password against the stored value, accepting the legacy format.
+ *
+ * Labs already on disk hold md5 digests and their owners are not necessarily
+ * around to re-set them, so a legacy digest must still open the lab. The
+ * comparison is hash_equals() rather than ==: constant time, no type juggling,
+ * so the magic-hash collision is gone even for the legacy path.
+ *
+ * @param   string  $plain              Plaintext password as supplied
+ * @param   string  $stored             Value of the lab's password attribute
+ * @return  bool                        True if the password matches
+ */
+function unl_lab_password_verify($plain, $stored)
+{
+	if (!is_string($stored) || $stored === '') return false;
+	if (!is_string($plain)) return false;
+
+	// Legacy: a bare md5 digest, 32 hex characters and nothing else.
+	if (preg_match('/^[0-9a-f]{32}$/i', $stored)) {
+		return hash_equals(strtolower($stored), md5($plain));
+	}
+
+	return password_verify($plain, $stored);
+}
+
+/**
+ * Is this stored lab password still in the legacy md5 format?
+ *
+ * Nothing rewrites the lab file automatically on a successful unlock — saving a
+ * lab rewrites the whole .unl document, which is not something an unlock should
+ * do to a lab that may be running. The upgrade happens when the password is next
+ * set. This is here so a caller that does own the file can ask.
+ *
+ * @param   string  $stored             Value of the lab's password attribute
+ * @return  bool                        True if it should be re-hashed
+ */
+function unl_lab_password_needs_rehash($stored)
+{
+	if (!is_string($stored) || $stored === '') return true;
+	if (preg_match('/^[0-9a-f]{32}$/i', $stored)) return true;
+	return password_needs_rehash($stored, PASSWORD_DEFAULT);
+}
+
+/**
  * The credential PNETLab presents to Guacamole on a user's behalf.
  *
  * Guacamole needs a password it can store and check, and PNETLab previously gave

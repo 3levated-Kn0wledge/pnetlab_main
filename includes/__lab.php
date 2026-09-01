@@ -1431,7 +1431,11 @@ class Lab
     public function lockLab($pass = null)
     {
         if ($pass != null) {
-            $this->password = md5($pass);
+            // Was md5($pass): unsalted, and compared with == in unlockLab(), which
+            // let the 0e... magic-hash collision open any lab whose password
+            // happened to digest that way. unl_lab_password_hash() is salted and
+            // unl_lab_password_verify() compares with hash_equals().
+            $this->password = unl_lab_password_hash($pass);
             $rc = $this->save();
         }
         if (session_status() == PHP_SESSION_NONE) session_start();
@@ -1447,7 +1451,10 @@ class Lab
     public function unlockLab($pass, $clearpass = false)
     {
         if (!isset($this->password) || $this->password == '') return 0;
-        if (md5($pass) == $this->password) {
+        // unl_lab_password_verify() still accepts the bare md5 digests that
+        // existing labs hold, so those keep opening; it just does it in constant
+        // time and without loose comparison.
+        if (unl_lab_password_verify($pass, $this->password)) {
             if ($clearpass) {
                 $this->password = '';
                 $rc = $this->save();
