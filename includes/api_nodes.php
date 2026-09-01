@@ -103,10 +103,10 @@ function apiDeleteLabNode($lab, $id, $tenant)
 
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a delete';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
 	secureCmd($cmd);
 	exec($cmd, $o, $rc);
@@ -212,10 +212,10 @@ function apiExportLabNode($lab, $id, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a export';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
 	secureCmd($cmd);
 	exec($cmd, $o, $rc);
@@ -245,9 +245,9 @@ function apiExportLabNodes($lab, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a export';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
 	secureCmd($cmd);
 	exec($cmd, $o, $rc);
@@ -612,10 +612,10 @@ function apiStartLabNode($lab, $id, $tenant)
 	set_time_limit(0);
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a start';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
 	secureCmd($cmd);
 	exec($cmd, $o, $rc);
@@ -679,10 +679,10 @@ function apiStopLabNode($lab, $id, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a stop';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
 	secureCmd($cmd);
 	exec($cmd, $o, $rc);
@@ -744,10 +744,10 @@ function apiWipeLabNode($lab, $id, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a wipe';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
 	secureCmd($cmd);
 	exec($cmd, $o, $rc);
@@ -777,9 +777,9 @@ function apiWipeLabNodes($lab, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a wipe';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
 	secureCmd($cmd);
 	exec($cmd, $o, $rc);

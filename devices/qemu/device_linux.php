@@ -26,12 +26,13 @@ class device_linux extends device_qemu
                 $n = 'e' . $i;                // Interface name
                 
                 if($i == 0 && $this->first_nic != ''){
+                    // sweep-exempt: $this->first_nic is never assigned in the tree; branch unreachable.
                     $flags = ' -device '.$this->first_nic.',netdev=net' . $i . ',mac=' . incMac($this->createFirstMac(), $i);
                 }else{
-                    $flags = ' -device %NICDRIVER%,netdev=net' . $i . ',mac=' . incMac($this->createFirstMac(), $i);
+                    $flags = ' -device ' . escapeshellarg('%NICDRIVER%,netdev=net' . $i . ',mac=' . incMac($this->createFirstMac(), $i));
                 }
 
-                $flags .= ' -netdev tap,id=net' . $i . ',ifname=vunl' . $this->getSession() . '_' . $i . ',script=no';
+                $flags .= ' -netdev ' . escapeshellarg('tap,id=net' . $i . ',ifname=vunl' . $this->getSession() . '_' . $i . ',script=no');
 
                 try {
                     $ethernets[$i] = new Interfc( $this, array('name' => $n, 'type' => 'ethernet', 'flag' => $flags), $i);

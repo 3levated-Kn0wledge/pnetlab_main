@@ -229,7 +229,8 @@ class DefaultController extends Controller
 
         $option = secureCmd(get($p['dynamips_options'], ''));
 
-        $cmd = 'sudo /opt/unetlab/html/store/app/Console/Commands/idlepc --option="'.$option.'" -f ' . $dynamipFolder. '/'. $ios;
+        $cmd = 'sudo /opt/unetlab/html/store/app/Console/Commands/idlepc --option=' . escapeshellarg($option)
+            . ' -f ' . escapeshellarg($dynamipFolder . '/' . $ios);
        
         exec($cmd, $o, $r);
 

@@ -220,7 +220,7 @@ function apiExportLabs($p)
 
 		if (is_file(BASE_LAB . $p['path'] . $relement)) {
 			// Adding a file
-			$cmd = 'zip ' . $export_file . ' ".' . $relement . '"';
+			$cmd = 'zip ' . escapeshellarg($export_file) . ' ' . escapeshellarg('.' . $relement);
 			secureCmd($cmd);
 			exec($cmd, $o, $rc);
 			if ($rc != 0) {
@@ -233,7 +233,7 @@ function apiExportLabs($p)
 
 		if (checkFolder(BASE_LAB . $p['path'] . $relement) === 0) {
 			// Adding a dir
-			$cmd = 'zip -r ' . $export_file . ' ".' . $relement . '"';
+			$cmd = 'zip -r ' . escapeshellarg($export_file) . ' ' . escapeshellarg('.' . $relement);
 			secureCmd($cmd);
 			exec($cmd, $o, $rc);
 			if ($rc != 0) {
@@ -246,7 +246,7 @@ function apiExportLabs($p)
 	}
 
 	// Now remove UUID from labs
-	$cmd = BASE_DIR . '/scripts/remove_uuid.sh "' . $export_file . '"';
+	$cmd = BASE_DIR . '/scripts/remove_uuid.sh ' . escapeshellarg($export_file);
 	secureCmd($cmd);
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
@@ -392,7 +392,8 @@ function apiImportLabs($p)
 		exec('rm -rf ' . $tmpFolder);
 		$labFolder = BASE_LAB . $p['path'];
 
-		$cmd = 'unzip -o -d "' . $tmpFolder . '" ' . $p['file'] . ' *.unl';
+		// $p['file'] is the uploaded filename, straight from the import request.
+		$cmd = 'unzip -o -d ' . escapeshellarg($tmpFolder) . ' ' . escapeshellarg($p['file']) . ' *.unl';
 		secureCmd($cmd);
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {

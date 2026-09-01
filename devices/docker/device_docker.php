@@ -131,7 +131,7 @@ class device_docker extends device
         }
 
         
-        $cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format="{{ .State.Running }}" docker' . $this->getSession();
+        $cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format="{{ .State.Running }}" ' . escapeshellarg('docker' . $this->getSession());
  	    error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
         secureCmd($cmd);
         exec($cmd, $o, $rc);
@@ -155,12 +155,20 @@ class device_docker extends device
 
             if(!isset($this->docker_options)) $this->docker_options = '';
            
-            $cmd = 'docker -H=tcp://127.0.0.1:4243 create -ti --memory ' . $this->ram . 'M ' ;
-            if($this->cpu > 0) $cmd .= ' --cpus=' . $this->cpu . ' ';
-            $cmd .= $this->docker_options . ' ' . $consoleCmd.' '.$consoleCmd2nd.' --name=docker' . $this->getSession() . ' -h "' . $this->name . '" ' . $this->image;
+            $cmd = 'docker -H=tcp://127.0.0.1:4243 create -ti --memory ' . escapeshellarg($this->ram . 'M') . ' ';
+            if($this->cpu > 0) $cmd .= ' --cpus=' . escapeshellarg($this->cpu) . ' ';
+            // sweep-exempt: $this->docker_options is a multi-argument options string
+            // supplied by the template, like qemu_options. Escaping it as one argument
+            // would break every docker template.
+            $cmd .= $this->docker_options . ' ' . $consoleCmd . ' ' . $consoleCmd2nd
+                . ' --name=' . escapeshellarg('docker' . $this->getSession())
+                . ' -h ' . escapeshellarg($this->name)
+                . ' ' . escapeshellarg($this->image);
             $cmd = preg_replace('/\s+/m', ' ', $cmd);
             error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
-            secureCmd($cmd);
+            // secureCmd($cmd) was called here as a bare statement, discarding its
+            // return value. secureCmd() does not modify by reference, so the call did
+            // nothing at all. Values are escaped individually above instead.
             exec($cmd, $o, $rc);
             
             if ($rc != 0) {
@@ -185,13 +193,13 @@ class device_docker extends device
         $result = parent::start();
         if($result != 0) return $result;
 
-        $cmd = 'docker -H=tcp://127.0.0.1:4243 start docker' . $this->getSession();
+        $cmd = 'docker -H=tcp://127.0.0.1:4243 start ' . escapeshellarg('docker' . $this->getSession());
 		error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
         exec($cmd, $o, $rc);
         sleep((int) $this->delay);
         if ($rc == 0) {
 
-            $cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format "{{ .State.Pid }}" docker' . $this->getSession();
+            $cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format "{{ .State.Pid }}" ' . escapeshellarg('docker' . $this->getSession());
             //error_log(date('M d H:i:s ').'INFO: starting '.$cmd);
             exec($cmd, $o, $rc);
             $pid = $o[1];
@@ -200,19 +208,19 @@ class device_docker extends device
                 // TODO must check each step against errors
 
                 // remove link before creating it. OK if it fails.
-                $cmd = 'ip link delete vunl' . $this->getSession() . '_' . $interface_id;
+                $cmd = 'ip link delete ' . escapeshellarg('vunl' . $this->getSession() . '_' . $interface_id);
                 error_log(date('M d H:i:s ') . 'INFO: deleting ' . $cmd);
                 exec($cmd, $o, $rc);
 
                 // ip link add docker3_4_5 type veth peer name vnet3_4_5
-                $cmd = 'ip link add docker' . $this->getSession() . '_' . $interface_id . ' type veth peer name vunl' . $this->getSession() . '_' . $interface_id;
+                $cmd = 'ip link add ' . escapeshellarg('docker' . $this->getSession() . '_' . $interface_id) . ' type veth peer name ' . escapeshellarg('vunl' . $this->getSession() . '_' . $interface_id);
                 error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
                 exec($cmd, $o, $rc);
 
                 // 26 Aug 2018 - VNET should not be added unless there is a link on a interface meaning there should be no bridge. Have to see if there is another process for links
                 // ip link set dev vnet3_4_5 up
                 
-                $cmd = 'ip link set dev vunl' . $this->getSession() . '_' . $interface_id . ' up';
+                $cmd = 'ip link set dev ' . escapeshellarg('vunl' . $this->getSession() . '_' . $interface_id) . ' up';
                 error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
                 exec($cmd, $o, $rc);
                 // brctl addif vnet0_1 vnet3_4_5
@@ -227,14 +235,14 @@ class device_docker extends device
                     $net_name = 'vnet' . $this->getLabSession() . '_' . $interface->getNetworkId();
                 }
 
-                $cmd = 'brctl addif ' . $net_name . ' vunl' . $this->getSession() . '_' . $interface_id;
+                $cmd = 'brctl addif ' . escapeshellarg($net_name) . ' ' . escapeshellarg('vunl' . $this->getSession() . '_' . $interface_id);
                 error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
                 exec($cmd, $o, $rc);
                 //
                 // PID=$(docker inspect --format '{{ .State.Pid }}' docker3_4) # Must be greater than 0
                 
                 // ip link set netns ${PID} docker3_4_5 name eth0 address 22:ce:e0:99:04:05 up
-                $cmd = 'ip link set netns ' . $pid . ' docker' . $this->getSession() . '_' . $interface_id . ' name eth' . $interface_id . ' address ' . $this->createNodeMac($interface_id) . ' up';
+                $cmd = 'ip link set netns ' . escapeshellarg($pid) . ' ' . escapeshellarg('docker' . $this->getSession() . '_' . $interface_id) . ' name ' . escapeshellarg('eth' . $interface_id) . ' address ' . escapeshellarg($this->createNodeMac($interface_id)) . ' up';
                 error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
                 exec($cmd, $o, $rc);
             }
@@ -243,7 +251,10 @@ class device_docker extends device
             
             touch($this->getRunningPath() . '/.lock');
             $configScript = ($this->config_script != "") ? $this->config_script : (isset($this->tpl['config_script']) ? $this->tpl['config_script'] : "");
-            $cmd = secureCmd('nohup /opt/unetlab/scripts/' . $configScript . ' -a put -i docker' . $this->getSession() . ' -f ' . $this->getRunningPath() . '/startup-config -t ' . ($this->delay + 300)) . ' > /dev/null 2>&1 &';
+            $cmd = 'nohup ' . escapeshellarg('/opt/unetlab/scripts/' . $configScript)
+                . ' -a put -i ' . escapeshellarg('docker' . $this->getSession())
+                . ' -f ' . escapeshellarg($this->getRunningPath() . '/startup-config')
+                . ' -t ' . escapeshellarg($this->delay + 300) . ' > /dev/null 2>&1 &';
             exec($cmd, $o, $rc);
             error_log(date('M d H:i:s ') . 'INFO: importing ' . $cmd);
             
@@ -252,35 +263,43 @@ class device_docker extends device
 
             if(preg_match('/inet[^0-9]*([0-9]+.[0-9]+.[0-9]+.[0-9]+)/', $output, $match)){
                 $docker0 = $match[1];
-                $cmd = '/opt/unetlab/wrappers/nsenter -t '.$pid.' -n route del default gw ' . $docker0;
+                $cmd = '/opt/unetlab/wrappers/nsenter -t ' . escapeshellarg($pid) . ' -n route del default gw ' . escapeshellarg($docker0);
                 exec($cmd, $o, $rc);
                 error_log(date('M d H:i:s ') . 'INFO: importing ' . $cmd);
             }
 
             if(preg_match('/([0-9]+.[0-9]+.[0-9]+.[0-9]+)\/[0-9]+/', $this->eth1_ip)){
-                $cmd = '/opt/unetlab/wrappers/nsenter -t '.$pid.' -n ifconfig eth1 ' . $this->eth1_ip;
+                $cmd = '/opt/unetlab/wrappers/nsenter -t ' . escapeshellarg($pid) . ' -n ifconfig eth1 ' . escapeshellarg($this->eth1_ip);
                 exec($cmd, $o, $rc);
                 error_log(date('M d H:i:s ') . 'INFO: importing ' . $cmd);
             }else if($this->eth1_dhcp){
-                $cmd = '/opt/unetlab/wrappers/nsenter -t '.$pid.' -n dhclient eth1';
+                $cmd = '/opt/unetlab/wrappers/nsenter -t ' . escapeshellarg($pid) . ' -n dhclient eth1';
                 exec($cmd, $o, $rc);
                 error_log(date('M d H:i:s ') . 'INFO: importing ' . $cmd);
             }
 
             $attachCmd = 'sh';
-            $cmd = 'docker -H=tcp://127.0.0.1:4243 exec -i docker'.$this->getSession().' ls /bin/bash';
+            $cmd = 'docker -H=tcp://127.0.0.1:4243 exec -i ' . escapeshellarg('docker' . $this->getSession()) . ' ls /bin/bash';
             $o = [];
             exec($cmd, $o, $rc);
             error_log(date('M d H:i:s ') . 'INFO: importing ' . $cmd);
             if(count($o) > 0) $attachCmd = '/bin/bash';
 
             if($this->console == 'telnet'){
-                $cmd = secureCmd('sudo /opt/unetlab/wrappers/docker_wrapper -P ' . $this->getPort() . ' -t "'.$this->name.'" -p ' . $this->getSession() .' -c '. $attachCmd .' > ' . $this->getRunningPath()) . '/wrapper.txt 2>&1 &';
+                $cmd = 'sudo /opt/unetlab/wrappers/docker_wrapper -P ' . escapeshellarg($this->getPort())
+                    . ' -t ' . escapeshellarg($this->name)
+                    . ' -p ' . escapeshellarg($this->getSession())
+                    . ' -c ' . $attachCmd
+                    . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt') . ' 2>&1 &';
                 exec($cmd, $o, $rc);
                 error_log(date('M d H:i:s ') . 'INFO: run ' . $cmd);
             } 
             else if($this->console_2nd == 'telnet'){
-                $cmd = secureCmd('sudo /opt/unetlab/wrappers/docker_wrapper -P ' . $this->getSecondPort() . ' -t "'.$this->name.'" -p ' . $this->getSession() .' -c '. $attachCmd .' > ' . $this->getRunningPath()) . '/wrapper.txt 2>&1 &';
+                $cmd = 'sudo /opt/unetlab/wrappers/docker_wrapper -P ' . escapeshellarg($this->getSecondPort())
+                    . ' -t ' . escapeshellarg($this->name)
+                    . ' -p ' . escapeshellarg($this->getSession())
+                    . ' -c ' . $attachCmd
+                    . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt') . ' 2>&1 &';
                 exec($cmd, $o, $rc);
                 error_log(date('M d H:i:s ') . 'INFO: run ' . $cmd);
             }
@@ -311,7 +330,7 @@ class device_docker extends device
     public function wipe()
     {
         
-        $cmd = 'sudo /usr/bin/docker -H=tcp://127.0.0.1:4243 rm docker' . $this->getSession();
+        $cmd = 'sudo /usr/bin/docker -H=tcp://127.0.0.1:4243 rm ' . escapeshellarg('docker' . $this->getSession());
         exec($cmd, $o, $rc);
 
         return parent::wipe();

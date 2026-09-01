@@ -720,23 +720,25 @@ class device
     {
         if ($this->getStatus() != 0) {
             if ($this->getNType() == 'docker') {
-                $cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop docker' . $this->getSession();
+                $cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop ' . escapeshellarg('docker' . $this->getSession());
             } else {
-                $cmd = 'sudo fuser -k -TERM ' . $this->getRunningPath();
+                $cmd = 'sudo fuser -k -TERM ' . escapeshellarg($this->getRunningPath());
             }
             error_log(date('M d H:i:s ') . 'INFO: stopping ' . $cmd);
             exec($cmd, $o, $rc);
 
             if ($this->getStatus() != 0) {
                 if ($this->command() != '') {
-                    $cmd = 'sudo pkill -term  \'' . $this->command() . '\'';
+                    $cmd = 'sudo pkill -term ' . escapeshellarg($this->command());
                     error_log(date('M d H:i:s ') . 'INFO: stopping ' . $cmd);
                     exec($cmd, $o, $rc);
                 }
             }
 
             usleep(200000); //sleep waiting for vunl free
-            $cmd = 'ip link | grep vunl' . $this->getSession() . '_ | sed \'s/.*\(vunl[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ip link set $line down; sudo tunctl -d $line; done';
+            // $line is the shell's own loop variable, not ours; only the session is interpolated.
+            $cmd = 'ip link | grep ' . escapeshellarg('vunl' . $this->getSession() . '_')
+                . ' | sed \'s/.*\(vunl[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ip link set $line down; sudo tunctl -d $line; done';
             error_log(date('M d H:i:s ') . 'ERROR: ' . $cmd);
             exec($cmd, $o, $rc);
 
@@ -772,7 +774,7 @@ class device
 
         $runningPath = $this->getRunningPath();
         if ($runningPath != null && $runningPath != '') {
-            $cmd = 'sudo rm -rf ' . $runningPath;
+            $cmd = 'sudo rm -rf ' . escapeshellarg($runningPath);
             exec($cmd, $o, $rc);
         }
 

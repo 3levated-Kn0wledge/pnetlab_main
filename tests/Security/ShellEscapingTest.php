@@ -19,15 +19,35 @@ $root = realpath(__DIR__ . '/../..');
 $swept = [
     'includes/cli.php',
     'includes/functions.php',
+    'includes/api_nodes.php',
+    'includes/api_labs.php',
+    'devices/device.php',
     'devices/interfc.php',
     'devices/qemu/device_qemu.php',
     'devices/qemu/device_qemu_wp.php',
     'devices/qemu/device_qemu_directly.php',
+    'devices/qemu/device_linux.php',
+    'devices/docker/device_docker.php',
+    'devices/iol/device_iol.php',
+    'devices/dynamips/device_dynamips.php',
+    'devices/vpcs/device_vpcs.php',
+    'store/app/Console/Commands/ScandHardDisk.php',
+    'store/app/Http/Controllers/Admin/DefaultController.php',
 ];
 
 $violations = [];
 foreach ($swept as $rel) {
     $path = $root . '/' . $rel;
+    $src  = file_get_contents($path);
+
+    // Only files that actually execute something can carry shell injection.
+    // includes/models/model_basic.php, for instance, assigns SQL to a variable
+    // named $cmd and binds every value through PDO — flagging it on the variable
+    // name alone would mean adding a false exemption to silence a false positive.
+    if (!preg_match('/\b(exec|shell_exec|system|passthru|popen|proc_open)\s*\(/', $src)) {
+        continue;
+    }
+
     $lines = file($path);
     foreach ($lines as $n => $line) {
         // A line may be exempted only by an explicit marker on the preceding

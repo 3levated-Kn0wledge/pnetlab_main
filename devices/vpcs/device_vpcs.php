@@ -42,10 +42,11 @@ class device_vpcs extends device
 
     public function command()
     {
-        $cmd = '/opt/vpcsu/bin/vpcs -m ' . $this->getSession() . ' -N ' . $this->name;
-        $flags = ' -i 1 -p ' . $this->getPort();
+        $cmd = '/opt/vpcsu/bin/vpcs -m ' . escapeshellarg($this->getSession()) . ' -N ' . escapeshellarg($this->name);
+        $flags = ' -i 1 -p ' . escapeshellarg($this->getPort());
+        // sweep-exempt: the template's flag string supplies multiple arguments.
         $flags .= ' ' . $this->getFlag();
-        $cmd .= $flags . ' > ' . $this->getRunningPath() . '/wrapper.txt';
+        $cmd .= $flags . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt');
 
         return $cmd;
     }
