@@ -19,7 +19,11 @@ if (posix_getuid() != 0) {
 umask(0002);
 
 // Parsing and checking parameters
-$options = getopt('oT:D:S:F:a:');
+// -P is the package path for `-a package`; --allow-unsigned is half of the gate
+// on installing a package nobody has signed (the other half is a root-owned
+// marker file, checked below — one switch that the web layer could ever reach
+// is not a gate).
+$options = getopt('oT:D:S:F:P:I:a:', array('allow-unsigned'));
 
 // Checking -a (action)
 if (!isset($options['a'])) {
@@ -97,6 +101,110 @@ switch ($action) {
 		usage();
 		error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][9]);
 		exit(9);
+	case 'package':
+		// Apply a signed package.
+		//
+		// This is the replacement for the two paths that used to fetch a shell
+		// script from pnetlab.com and run it as root: the marketplace device
+		// installer in DevicesController, and the self-upgrader in
+		// Helpers/Admin/Upgrade.php. Both now download a .pnetpkg as www-data,
+		// stage it somewhere root can read, and call exactly this — one action,
+		// one argument, and a path the web layer chose but cannot make the
+		// wrapper interpret as anything except a file to open.
+		//
+		// Everything that decides what happens next is inside the package's
+		// signed manifest and is checked by code we own. The web layer cannot
+		// name an operation, a destination or an argument; it can only say
+		// "apply this file", and be told whether that worked.
+		//
+		// Exit codes are 30+ so they cannot collide with the $GLOBALS['messages']
+		// indices the rest of this script exits with.
+		if (!isset($options['P']) || $options['P'] === '' || $options['P'] === false) {
+			error_log(date('M d H:i:s ') . 'ERROR: -a package needs -P <package file>');
+			exit(30);
+		}
+
+		$applierPath = __DIR__ . '/../packages/PnetPackageApplier.php';
+		if (!is_file($applierPath)) {
+			$applierPath = '/opt/unetlab/packages/PnetPackageApplier.php';
+		}
+		if (!is_file($applierPath)) {
+			error_log(date('M d H:i:s ') . 'ERROR: the package applier is not installed');
+			exit(31);
+		}
+		require_once($applierPath);
+
+		// Unsigned packages need TWO independent things to be true, because one
+		// of them is a command-line flag and the web layer is one bug away from
+		// being able to pass a command-line flag. The marker file has to exist,
+		// be a real file, be owned by root, and not be writable by anyone else —
+		// which means only someone who is already root can create it.
+		$allowUnsigned = false;
+		if (isset($options['allow-unsigned'])) {
+			$marker = '/opt/unetlab/data/packages/ALLOW_UNSIGNED';
+			if (is_file($marker) && !is_link($marker)) {
+				$stat = stat($marker);
+				if ($stat !== false && $stat['uid'] === 0 && ($stat['mode'] & 0022) === 0) {
+					$allowUnsigned = true;
+				}
+			}
+			if (!$allowUnsigned) {
+				error_log(date('M d H:i:s ') . 'ERROR: --allow-unsigned needs a root-owned, '
+					. 'non-group-writable /opt/unetlab/data/packages/ALLOW_UNSIGNED');
+				exit(32);
+			}
+		}
+
+		$applier = new PnetPackageApplier(array(
+			'allow_unsigned' => $allowUnsigned,
+			'logger' => function ($message) {
+				// stdout is what the admin UI polls: the web layer redirects it
+				// into the log file the progress dialog reads, which is how the
+				// existing screens keep working unchanged.
+				echo $message . "\n";
+				flush();
+			},
+		));
+		$packageResult = $applier->apply($options['P']);
+		echo 'PNETPKG-RESULT ' . json_encode($packageResult) . "\n";
+		if (!$packageResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: package apply failed: ' . $packageResult['error']);
+			exit(33);
+		}
+		break;
+	case 'packageremove':
+		// Undo an installed package, from the uninstall plan recorded when it
+		// was applied. Nothing is re-downloaded and no package file is involved:
+		// the plan came out of a manifest whose signature verified, was written
+		// into root-owned state, and is revalidated against the same verb table
+		// before it runs. The web layer supplies only a package id.
+		if (!isset($options['I']) || $options['I'] === '' || $options['I'] === false) {
+			error_log(date('M d H:i:s ') . 'ERROR: -a packageremove needs -I <package id>');
+			exit(34);
+		}
+		$applierPath = __DIR__ . '/../packages/PnetPackageApplier.php';
+		if (!is_file($applierPath)) {
+			$applierPath = '/opt/unetlab/packages/PnetPackageApplier.php';
+		}
+		if (!is_file($applierPath)) {
+			error_log(date('M d H:i:s ') . 'ERROR: the package applier is not installed');
+			exit(31);
+		}
+		require_once($applierPath);
+
+		$applier = new PnetPackageApplier(array(
+			'logger' => function ($message) {
+				echo $message . "\n";
+				flush();
+			},
+		));
+		$packageResult = $applier->uninstall($options['I']);
+		echo 'PNETPKG-RESULT ' . json_encode($packageResult) . "\n";
+		if (!$packageResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: package removal failed: ' . $packageResult['error']);
+			exit(35);
+		}
+		break;
 	case 'delete':
 		if (isset($node_id)) {
 			// Removing temporary files for a single node in all tenants

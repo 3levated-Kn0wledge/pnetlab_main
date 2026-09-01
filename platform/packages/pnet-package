@@ -1,0 +1,299 @@
+#!/usr/bin/env php
+<?php
+/**
+ * pnet-package — build, sign, inspect and verify .pnetpkg files.
+ *
+ * This is the publisher's side of the mechanism. It runs on any machine with
+ * PHP and ext-sodium; it needs no part of the appliance, so a release can be
+ * built and signed somewhere that is not a PNETLab host — which is the point of
+ * having a signature at all.
+ *
+ *   pnet-package keygen  --out KEYPREFIX [--comment TEXT]
+ *   pnet-package build   --source DIR --out FILE.pnetpkg [--key SECRET] [--unsigned]
+ *   pnet-package build   --source DIR --out FILE.pnetpkg --signature FILE.minisig
+ *   pnet-package inspect --package FILE.pnetpkg
+ *   pnet-package verify  --package FILE.pnetpkg --trust DIR
+ *
+ * A source directory is:
+ *
+ *   manifest.json      without a payload map — build computes it
+ *   payload/           the files the manifest's operations name as "source"
+ *
+ * SIGNING WITH A KEY THIS TOOL NEVER SEES
+ *
+ * The signature is a detached minisign signature over the exact bytes of
+ * manifest.json. `build --unsigned --out draft.pnetpkg` prints the canonical
+ * manifest to manifest.built.json beside the output; sign THAT with the stock
+ * minisign binary on an offline machine:
+ *
+ *     minisign -S -s release.key -m manifest.built.json
+ *
+ * and rebuild with `--signature manifest.built.json.minisig`. The release key
+ * then never touches the build host, which is the arrangement worth having once
+ * the fork is publishing to other people's appliances.
+ */
+
+require_once __DIR__ . '/PnetPackage.php';
+
+function fail($message)
+{
+    fwrite(STDERR, "pnet-package: " . $message . "\n");
+    exit(1);
+}
+
+function parseArgs(array $argv)
+{
+    $out = array();
+    for ($i = 2; $i < count($argv); $i++) {
+        $arg = $argv[$i];
+        if (substr($arg, 0, 2) !== '--') {
+            fail('unexpected argument: ' . $arg);
+        }
+        $name = substr($arg, 2);
+        if (in_array($name, array('unsigned', 'help'), true)) {
+            $out[$name] = true;
+            continue;
+        }
+        if ($i + 1 >= count($argv)) {
+            fail('--' . $name . ' needs a value');
+        }
+        $out[$name] = $argv[++$i];
+    }
+    return $out;
+}
+
+function need(array $args, $name)
+{
+    if (!isset($args[$name]) || $args[$name] === true) {
+        fail('--' . $name . ' is required');
+    }
+    return $args[$name];
+}
+
+/** Every regular file under $dir, as relative paths, sorted for reproducibility. */
+function listPayload($dir)
+{
+    $out = array();
+    $stack = array('');
+    while ($stack) {
+        $rel = array_pop($stack);
+        $full = $rel === '' ? $dir : $dir . '/' . $rel;
+        foreach (scandir($full) as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $childRel = $rel === '' ? $name : $rel . '/' . $name;
+            $childFull = $dir . '/' . $childRel;
+            if (is_link($childFull)) {
+                fail('payload/' . $childRel . ' is a symbolic link; packages cannot carry links');
+            }
+            if (is_dir($childFull)) {
+                $stack[] = $childRel;
+            } elseif (is_file($childFull)) {
+                $out[] = $childRel;
+            } else {
+                fail('payload/' . $childRel . ' is not a regular file');
+            }
+        }
+    }
+    sort($out);
+    return $out;
+}
+
+/**
+ * The canonical manifest bytes.
+ *
+ * Keys in a fixed order, four-space pretty printing, unescaped slashes, one
+ * trailing newline. Two builds of the same inputs produce byte-identical
+ * manifests, so the same digest, so a signature made once stays valid — and a
+ * reviewer can diff two releases' manifests without noise.
+ */
+function canonicalManifest(array $data)
+{
+    $order = array('format', 'id', 'version', 'name', 'kind', 'description',
+        'device_id', 'requires', 'provides', 'payload', 'install', 'uninstall');
+    $ordered = array();
+    foreach ($order as $key) {
+        if (array_key_exists($key, $data)) {
+            $ordered[$key] = $data[$key];
+        }
+    }
+    foreach ($data as $key => $value) {
+        if (!array_key_exists($key, $ordered)) {
+            $ordered[$key] = $value;
+        }
+    }
+    return json_encode($ordered, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+}
+
+$command = isset($argv[1]) ? $argv[1] : '';
+$args = parseArgs($argv);
+
+switch ($command) {
+
+    case 'keygen': {
+        $out = need($args, 'out');
+        $comment = isset($args['comment']) ? $args['comment'] : 'pnetlab package signing key';
+        if (file_exists($out . '.key') || file_exists($out . '.pub')) {
+            fail('refusing to overwrite an existing key at ' . $out . '.{key,pub}');
+        }
+        list($pub, $sec, $id) = PnetMinisign::keygen($comment);
+        $old = umask(0077);
+        file_put_contents($out . '.key', $sec);
+        umask($old);
+        chmod($out . '.key', 0600);
+        file_put_contents($out . '.pub', $pub);
+        chmod($out . '.pub', 0644);
+        echo "key id       : $id\n";
+        echo "public key   : {$out}.pub  (install into /opt/unetlab/data/packages/trusted.d/)\n";
+        echo "secret key   : {$out}.key  (mode 0600, unencrypted — keep it offline)\n";
+        echo "\nThe secret key is in minisign's unencrypted form, so the stock minisign\n";
+        echo "binary can sign with it too:  minisign -S -s {$out}.key -m manifest.json\n";
+        break;
+    }
+
+    case 'build': {
+        $source = rtrim(need($args, 'source'), '/');
+        $outPath = need($args, 'out');
+        $manifestPath = $source . '/manifest.json';
+        if (!is_file($manifestPath)) {
+            fail('no manifest.json in ' . $source);
+        }
+        $data = json_decode(file_get_contents($manifestPath), true);
+        if (!is_array($data)) {
+            fail('manifest.json is not valid JSON');
+        }
+
+        // --- payload map, computed rather than trusted ----------------------
+        $payloadDir = $source . '/payload';
+        $payload = array();
+        if (is_dir($payloadDir)) {
+            foreach (listPayload($payloadDir) as $rel) {
+                $full = $payloadDir . '/' . $rel;
+                $payload[$rel] = array(
+                    'sha256' => hash_file('sha256', $full),
+                    'size' => (int) filesize($full),
+                );
+            }
+        }
+        ksort($payload);
+        $data['payload'] = $payload;
+        if (!isset($data['format'])) {
+            $data['format'] = PnetManifest::FORMAT;
+        }
+
+        $manifestBytes = canonicalManifest($data);
+
+        // Parse it exactly as the appliance will, so a manifest that the
+        // applier would reject fails here on the publisher's machine instead of
+        // on somebody's box.
+        try {
+            $manifest = new PnetManifest($manifestBytes, true);
+        } catch (PnetPackageError $e) {
+            fail('manifest rejected: ' . $e->getMessage());
+        }
+
+        $builtPath = dirname($outPath) . '/manifest.built.json';
+        file_put_contents($builtPath, $manifestBytes);
+
+        // --- the signature ---------------------------------------------------
+        $signature = null;
+        if (isset($args['signature'])) {
+            $signature = file_get_contents($args['signature']);
+            if ($signature === false) {
+                fail('cannot read ' . $args['signature']);
+            }
+        } elseif (isset($args['key'])) {
+            $secret = PnetMinisign::parseSecretKey(file_get_contents($args['key']));
+            $signature = PnetMinisign::sign(
+                $manifestBytes,
+                $secret,
+                'pnetlab package ' . $manifest->id . ' ' . $manifest->version,
+                'pnetpkg ' . $manifest->id . ' ' . $manifest->version
+                    . ' sha256:' . hash('sha256', $manifestBytes)
+            );
+        } elseif (empty($args['unsigned'])) {
+            fail('give --key, or --signature, or --unsigned (which builds a package most appliances will refuse)');
+        }
+
+        $writer = new PnetTarWriter($outPath);
+        $writer->addString(PnetManifest::MANIFEST_MEMBER, $manifestBytes, 0644);
+        if ($signature !== null) {
+            $writer->addString(PnetManifest::SIGNATURE_MEMBER, $signature, 0644);
+        }
+        foreach (array_keys($payload) as $rel) {
+            $writer->addFile(PnetManifest::PAYLOAD_PREFIX . $rel, $payloadDir . '/' . $rel, 0644);
+        }
+        $writer->finish();
+
+        echo "built    : $outPath\n";
+        echo "id       : {$manifest->id} {$manifest->version} ({$manifest->kind})\n";
+        echo "manifest : sha256 " . hash('sha256', $manifestBytes) . "\n";
+        echo "payload  : " . count($payload) . " file(s)\n";
+        echo "signed   : " . ($signature === null ? 'NO — this package will be refused unless unsigned mode is on' : 'yes') . "\n";
+        echo "canonical manifest written to $builtPath\n";
+        break;
+    }
+
+    case 'inspect':
+    case 'verify': {
+        $package = need($args, 'package');
+        $reader = new PnetTarReader($package);
+        $entry = $reader->next();
+        if ($entry === null || $entry['name'] !== PnetManifest::MANIFEST_MEMBER) {
+            fail('first member is not ' . PnetManifest::MANIFEST_MEMBER);
+        }
+        $manifestBytes = $reader->readBody(PnetManifest::MAX_MANIFEST_BYTES);
+        $entry = $reader->next();
+        $signature = null;
+        if ($entry !== null && $entry['name'] === PnetManifest::SIGNATURE_MEMBER) {
+            $signature = $reader->readBody(PnetManifest::MAX_SIGNATURE_BYTES);
+        }
+
+        $signed = false;
+        if ($command === 'verify') {
+            $trust = need($args, 'trust');
+            if ($signature === null) {
+                fail('package is unsigned');
+            }
+            $keys = array();
+            foreach (glob(rtrim($trust, '/') . '/*.pub') as $path) {
+                $key = PnetMinisign::parsePublicKey(file_get_contents($path));
+                $keys[bin2hex($key['id'])] = $key['pk'];
+            }
+            try {
+                $keyId = PnetMinisign::verify($signature, $manifestBytes, $keys);
+            } catch (PnetPackageError $e) {
+                fail($e->getMessage());
+            }
+            echo "signature: valid, key $keyId\n";
+            $signed = true;
+        }
+
+        try {
+            $manifest = new PnetManifest($manifestBytes, $signed || $signature !== null);
+        } catch (PnetPackageError $e) {
+            fail('manifest rejected: ' . $e->getMessage());
+        }
+        echo "id       : {$manifest->id}\n";
+        echo "version  : {$manifest->version}\n";
+        echo "kind     : {$manifest->kind}\n";
+        echo "digest   : sha256 {$manifest->digest}\n";
+        echo "signed   : " . ($signature === null ? 'no' : 'yes') . "\n";
+        echo "payload  :\n";
+        foreach ($manifest->payload as $name => $meta) {
+            printf("  %-48s %12d  %s\n", $name, $meta['size'], substr($meta['sha256'], 0, 16));
+        }
+        echo "install  :\n";
+        foreach ($manifest->plan as $op) {
+            echo '  ' . $op['verb'] . ' ' . json_encode($op['args']) . "\n";
+        }
+        $reader->close();
+        break;
+    }
+
+    default:
+        fwrite(STDERR, "usage: pnet-package <keygen|build|inspect|verify> [options]\n");
+        fwrite(STDERR, "see the header of " . __FILE__ . " for the full form\n");
+        exit(2);
+}

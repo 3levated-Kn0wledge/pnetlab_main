@@ -9,8 +9,45 @@ use Illuminate\Support\Facades\Auth;
 use App\Helpers\Uploader\FileFunc;
 use App\Helpers\DB\Models;
 use App\Helpers\Request\Query;
+use App\Helpers\Packages\PackageClient;
 
-class DevicesController extends Controller  
+/**
+ * The marketplace device installer.
+ *
+ * WHAT THIS USED TO DO
+ *
+ * Three separate paths in this file took a string out of a JSON response from
+ * pnetlab.com and handed it to a shell:
+ *
+ *   filter()  exec($device['device_check'])                      as www-data,
+ *             once per device, on every listing of the store
+ *   get()     the same, then wrote $device['device_script'] to
+ *             /tmp/pnet_device_factory_<id>, chmod 0755, and ran
+ *             `sudo dos2unix <f>` followed by `sudo <f> > <log> 2>&1 &`
+ *   delete()  the same with $device['device_delete']
+ *
+ * The device id was interpolated into `sudo pkill -f pnet_device_factory_<id>`
+ * unescaped as well, so a request could inject a command of its own without
+ * needing the upstream server's help at all.
+ *
+ * None of the sudo parts had worked since the sudo policy was scoped —
+ * /tmp/pnet_device_factory_* is not on the allowlist and never was. So this is
+ * not a working feature being taken away. It is a broken feature being rebuilt
+ * in a shape that is safe to switch back on.
+ *
+ * WHAT IT DOES NOW
+ *
+ * A device install is a signed package. This controller downloads one, stages
+ * it, and asks the wrapper to apply it; every decision about what goes where is
+ * made by code we own, reading a manifest that can only express operations from
+ * a fixed list. See docs/PACKAGES.md.
+ *
+ * The HTTP contract is unchanged. /admin/devices/{filter,get,delete,process}
+ * take and return exactly what they did, the Process_device rows still carry
+ * the progress the dialog renders, and process() still returns the log text the
+ * dialog shows — so the admin screens need no changes.
+ */
+class DevicesController extends Controller
 {
 
     function __construct()
@@ -26,15 +63,16 @@ class DevicesController extends Controller
         if(!$result) Reply::finish(false, 'Can get data from server');
         if(!$result['result']) return $result;
 
+        // "Is this device already on the box?" is answered from the box's own
+        // record of what it has installed. It used to be answered by running a
+        // shell command the marketplace supplied, once per device, which meant
+        // rendering the store gave pnetlab.com command execution as www-data.
+        $installed = PackageClient::installed();
+
         foreach($result['data'] as $key=>$device){
-            $checkExist = htmlspecialchars_decode($device[DEVICE_CHECK], ENT_QUOTES);
-            $checkExistLog = exec($checkExist);
-           
-            if($checkExistLog == ''){
-                $result['data'][$key]['available'] = '0';
-            }else{
-                $result['data'][$key]['available'] = '1';
-            }
+            $deviceId = isset($device[DEVICE_ID]) ? (string) $device[DEVICE_ID] : '';
+            $result['data'][$key]['available'] =
+                PackageClient::isDeviceInstalled($deviceId, $installed) ? '1' : '0';
         }
 
         return $result;
@@ -42,104 +80,128 @@ class DevicesController extends Controller
 
     public function get(Request $request)
     {
-        $deviceId = $request->input(DEVICE_ID, '');
+        $deviceId = (string) $request->input(DEVICE_ID, '');
         $overwritten = $request->input('overwritten', false);
+
+        // The id becomes part of a filename and part of a database key. It is
+        // checked before either, not after.
+        if(!PackageClient::validId($deviceId)) Reply::finish(false, 'Invalid device id');
+
         $result = Query::boxCenter(APP_CENTER . '/api/offboxs/devices/read', [DEVICE_ID => $deviceId], ['dataType' => 'json']);
         if(!$result) Reply::finish(false, 'Can not get data from server');
         if(!$result['result']) return $result;
         $device = $result['data'];
 
-        if(!$overwritten){
-            $checkExist = htmlspecialchars_decode($device[DEVICE_CHECK], ENT_QUOTES);
-            $checkExistLog = exec($checkExist);
-            if($checkExistLog != '') Reply::finish(false, 'device_existed_alert', ['confirm' => true]);
+        if(!$overwritten && PackageClient::isDeviceInstalled($deviceId)){
+            Reply::finish(false, 'device_existed_alert', ['confirm' => true]);
         }
 
-        $script = htmlspecialchars_decode($device[DEVICE_SCRIPT], ENT_QUOTES);
-        $script = str_replace('{device_id}', $deviceId, $script);
-        $script = "#!/bin/bash\n".$script;
+        $url = PackageClient::deviceUrl($device, $deviceId);
+        if($url === null){
+            // Deliberately explicit rather than falling back to the old
+            // behaviour. There is no safe way to install from a shell script we
+            // cannot attribute to anyone, so the answer is "no package", not
+            // "run it anyway".
+            Reply::finish(false,
+                'This device has no signed package. The fork installs devices from signed '
+                . 'packages only; set PNET_PACKAGE_CENTER to a repository that publishes them, '
+                . 'or see docs/PACKAGES.md to build one.');
+        }
 
-        $excutefile = '/tmp/pnet_device_factory_'.$deviceId;
-        $logfile = $excutefile.'_log';
+        $this->startJob($deviceId, $device, [
+            'action' => 'install',
+            'url' => $url,
+            'sha256' => isset($device[DEVICE_PACKAGE_SHA256]) ? (string) $device[DEVICE_PACKAGE_SHA256] : '',
+        ], 'Start loading '. (isset($device[DEVICE_NAME]) ? $device[DEVICE_NAME] : $deviceId));
 
-        $result = exec('sudo pkill -f pnet_device_factory_'.$deviceId);
-
-        if(is_file($excutefile)) unlink($excutefile);
-        if(is_file($logfile)) unlink($logfile);
-
-        file_put_contents($excutefile, $script);
-        chmod($excutefile, '0755');
-
-        $processModel = Models::get('Admin/Process_device');
-        $processModel->drop([[ [PROCESS_DEVICE_ID, '=', $device[DEVICE_ID]] ]]);
-        $processModel->add([[
-            PROCESS_DEVICE_ID => $device[DEVICE_ID],
-            PROCESS_DEVICE_LOG => 'Start loading '. $device[DEVICE_NAME],
-        ]]);
-        $result = exec('sudo dos2unix '. $excutefile);
-        $result = exec('sudo '. $excutefile. ' > '. $logfile.' 2>&1 &');
         Reply::finish(true, 'success');
     }
 
     public function delete(Request $request)
     {
-        $deviceId = $request->input(DEVICE_ID, '');
-       
-        $result = Query::boxCenter(APP_CENTER . '/api/offboxs/devices/read', [DEVICE_ID => $deviceId], ['dataType' => 'json']);
-        if(!$result) Reply::finish(false, 'Can not get data from server');
-        if(!$result['result']) return $result;
-        $device = $result['data'];
+        $deviceId = (string) $request->input(DEVICE_ID, '');
+        if(!PackageClient::validId($deviceId)) Reply::finish(false, 'Invalid device id');
 
-        $script = htmlspecialchars_decode($device[DEVICE_DELETE], ENT_QUOTES);
-        $script = str_replace('{device_id}', $deviceId, $script);
-        $script = "#!/bin/bash\n".$script;
+        $installed = PackageClient::installed();
+        if(!isset($installed['device:'.$deviceId])){
+            Reply::finish(false, 'This device was not installed from a package, so there is nothing to remove');
+        }
+        $record = $installed['device:'.$deviceId];
 
-        $excutefile = '/tmp/pnet_device_factory_'.$deviceId;
-        $logfile = $excutefile.'_log';
+        // Removal runs the uninstall plan the package shipped, which was
+        // recorded by root when the signature verified. Nothing is
+        // re-downloaded and no new instructions are accepted at removal time.
+        $this->startJob($deviceId, ['device_name' => $record['name']], [
+            'action' => 'remove',
+            'package' => $record['id'],
+        ], 'Delete '. $record['name']);
 
-        $result = exec('sudo pkill -f pnet_device_factory_'.$deviceId);
-
-        if(is_file($excutefile)) unlink($excutefile);
-        if(is_file($logfile)) unlink($logfile);
-
-        file_put_contents($excutefile, $script);
-        chmod($excutefile, '0755');
-
-        $processModel = Models::get('Admin/Process_device');
-        $processModel->drop([[ [PROCESS_DEVICE_ID, '=', $device[DEVICE_ID]] ]]);
-        $processModel->add([[
-            PROCESS_DEVICE_ID => $device[DEVICE_ID],
-            PROCESS_DEVICE_LOG => 'Delete '. $device[DEVICE_NAME],
-        ]]);
-        $result = exec('sudo dos2unix '. $excutefile);
-        $result = exec('sudo '. $excutefile. ' > '. $logfile.' 2>&1 &');
         Reply::finish(true, 'success');
     }
 
+    /**
+     * Hand the work to a background worker and return at once.
+     *
+     * The UI polls process() a second later and expects a row to be there
+     * already, so the row is created here, synchronously, before the worker
+     * starts. The worker is `php artisan pnet:package-run <id>`: no sudo, and
+     * the only thing on its command line is a device id that has already been
+     * checked against a strict pattern. Everything else it needs is in a job
+     * file it reads by that id, so no URL and no supplier-controlled string
+     * ever appears in a command line.
+     */
+    private function startJob($deviceId, $device, array $job, $firstLogLine)
+    {
+        if(!PackageClient::ensureDirectories()){
+            Reply::finish(false, 'Cannot create '. PACKAGE_INCOMING_DIR);
+        }
+
+        $logfile = PackageClient::logPath($deviceId);
+        @unlink($logfile);
+        @file_put_contents(PackageClient::jobPath($deviceId), json_encode($job));
+
+        $processModel = Models::get('Admin/Process_device');
+        $processModel->drop([[ [PROCESS_DEVICE_ID, '=', $deviceId] ]]);
+        $processModel->add([[
+            PROCESS_DEVICE_ID => $deviceId,
+            PROCESS_DEVICE_LOG => $firstLogLine,
+        ]]);
+
+        $cmd = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg(base_path('artisan'))
+            . ' pnet:package-run ' . escapeshellarg($deviceId)
+            . ' >> ' . escapeshellarg($logfile) . ' 2>&1 &';
+        exec($cmd);
+    }
+
     public function process(Request $request){
-        $deviceId = $request->input(DEVICE_ID, '');
+        $deviceId = (string) $request->input(DEVICE_ID, '');
+        if(!PackageClient::validId($deviceId)) Reply::finish(false, 'Invalid device id');
+
         $processModel = Models::get('Admin/Process_device');
         $result = $processModel->read([[[PROCESS_DEVICE_ID, '=', $deviceId]]]);
 
-        $excutefile = secureCmd('/tmp/pnet_device_factory_'.$deviceId);
-        $logfile = $excutefile.'_log';
+        $logfile = PackageClient::logPath($deviceId);
 
         if(!$result['result'] || !isset($result['data'][0])){
-            $result = exec('sudo rm -f '. $excutefile);
+            // The worker drops the row when it finishes, which is what tells
+            // the dialog to close. The log is left on disk under
+            // /opt/unetlab/data/Logs/packages so a failed install can still be
+            // read afterwards; it used to be deleted with `sudo rm -f` on a
+            // path built from request input.
             Reply::finish(true, 'success', ['finish'=>true, 'data'=>null]);
         }else{
             $data = $result['data'][0];
             if(is_file($logfile)){
-                $log = file_get_contents($logfile);
-                $data->log = $log;
+                $data->log = file_get_contents($logfile);
             }
         }
         Reply::finish(true, 'success', ['finish'=>false, 'data'=>$data]);
     }
 
-    public function store() 
+    public function store()
     {
         return view($this->viewblade);
     }
-    
+
 }
