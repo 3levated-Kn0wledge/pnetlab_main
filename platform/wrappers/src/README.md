@@ -38,12 +38,20 @@ from this repository's own PHP call sites, plus Linux man pages. No upstream
 wrapper source, and no upstream wrapper binary, was read, disassembled or
 searched for while writing it.
 
-Public source for the original wrappers does exist under a permissive licence.
-Vendoring it was considered and rejected; that decision is what makes this
-directory clean-room, and it only stays clean-room if it is not contaminated
-later. **Do not consult the original sources, in any repository, fork or mirror,
-when extending this code.** If you find yourself reading prior-art C for a
-PNETLab, UNetLab or EVE-NG wrapper, stop and say so.
+Public source for the original wrappers does exist. Vendoring it was considered
+and rejected; that decision is what makes this directory clean-room, and it only
+stays clean-room if it is not contaminated later. **Do not consult the original
+sources, in any repository, fork or mirror, when extending this code.** If you
+find yourself reading prior-art C for a PNETLab, UNetLab or EVE-NG wrapper, stop
+and say so.
+
+The rejection is worth more than it looked at the time. `dainok/unetlab` carries
+the four original `.c` files under BSD-3-Clause, which would have been
+vendorable with attribution. `pnetlab/pnetlab_wrapper` — the only public source
+for `qemu_wrapper_telnet` and `iol_wrapper_telnet`, the two variants upstream
+never shipped — carries **no licence at all**. Vendoring from there would have
+put unlicensed C in the one part of this tree the project otherwise owns
+outright. See `docs/LICENSING.md` §2.5.
 
 ## Build
 

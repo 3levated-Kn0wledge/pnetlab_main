@@ -62,5 +62,13 @@ byte for byte and never repacks them, so the notices arrive intact on every
 installed host.
 
 This repository builds nothing from Guacamole source and patches nothing. The
-integration is entirely through Guacamole's own database schema and REST API,
-which is why no source-level derivative work exists here to attribute.
+integration is otherwise entirely through Guacamole's own REST API.
+
+**One Guacamole-derived file is committed, and it needs attributing too.**
+`install/sql/schema/guacdb.sql` is the stock JDBC schema published by the Apache
+Guacamole project, obtained by `mysqldump --no-data` from a 5.3.13 appliance
+rather than copied from Guacamole's own `.sql` files. The dump changes the
+formatting; it does not change who wrote the tables. It is Apache-2.0, it says
+so in its header, and it is listed in `THIRD-PARTY.md`. An earlier revision of
+this file claimed no source-level derivative work existed here to attribute;
+that was wrong, and it was wrong in the direction that costs an attribution.
