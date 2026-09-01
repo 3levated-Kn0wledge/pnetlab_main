@@ -720,7 +720,7 @@ class device
     {
         if ($this->getStatus() != 0) {
             if ($this->getNType() == 'docker') {
-                $cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop ' . escapeshellarg('docker' . $this->getSession());
+                $cmd = 'docker -H=unix:///var/run/docker.sock stop ' . escapeshellarg('docker' . $this->getSession());
             } else {
                 $cmd = 'sudo fuser -k -TERM ' . escapeshellarg($this->getRunningPath());
             }

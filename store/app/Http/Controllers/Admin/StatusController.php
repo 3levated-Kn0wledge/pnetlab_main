@@ -104,7 +104,7 @@ class StatusController extends Controller
         exec($cmd, $o_dynamips, $rc);
         $cmd = 'pgrep -f -c -P 1 qemu-system';
         exec($cmd, $o_qemu, $rc);
-        $cmd = 'docker -H=tcp://127.0.0.1:4243 ps -q | wc -l';
+        $cmd = 'docker -H=unix:///var/run/docker.sock ps -q | wc -l';
         exec($cmd, $o_docker, $rc);
         $cmd = 'pgrep -f -c -P 1 vpcs';
         exec($cmd, $o_vpcs, $rc);

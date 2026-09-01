@@ -143,26 +143,26 @@ class Node_sessionsController extends Controller
                 if (count($imageDocker) < 2) Reply::finish(false, ERROR_FORMAT, ['data' => 'Docker Image']);
                 $newName = $imageDocker[0] . ':' . $deviceName;
 
-                $result = exec('docker -H=tcp://127.0.0.1:4243 images -q ' . $newName, $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock images -q ' . $newName, $o, $r);
                 if (isset($o[0])) Reply::finish(false, 'This Name already exists');
 
-                $result = exec('docker -H=tcp://127.0.0.1:4243 commit docker' . $nodeSession->{NODE_SESSION_ID} . ' ' . $newName, $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock commit docker' . $nodeSession->{NODE_SESSION_ID} . ' ' . $newName, $o, $r);
                 if ($r != 0) Reply::finish(false, 'Docker Commit Failed');
                 Reply::finish(true, 'success', ['name' => $newName]);
             } else if ($type == 'existed') {
 
-                $result = exec('docker -H=tcp://127.0.0.1:4243 images -q ' . $node_image, $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock images -q ' . $node_image, $o, $r);
                 if (!isset($o[0])) Reply::finish(false, ERROR_UNDEFINE, ['data' => 'Docker Image']);
                 $oldId = $o[0];
 
                 $o = [];
-                $result = exec('docker -H=tcp://127.0.0.1:4243 inspect ' . $oldId . ' --format="{{.Parent}}"', $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock inspect ' . $oldId . ' --format="{{.Parent}}"', $o, $r);
                 if (!isset($o[0]) || $o[0] == '') Reply::finish(false, "docker_commit_alert");
 
-                $result = exec('docker -H=tcp://127.0.0.1:4243 commit docker' . $nodeSession->{NODE_SESSION_ID} . ' ' . $node_image, $o, $r);
+                $result = exec('docker -H=unix:///var/run/docker.sock commit docker' . $nodeSession->{NODE_SESSION_ID} . ' ' . $node_image, $o, $r);
                 if ($r != 0) Reply::finish(false, 'Docker Commit Failed', 'Docker Commit Failed');
 
-                if (isset($oldId)) $result = exec('docker -H=tcp://127.0.0.1:4243 image rm ' . $oldId, $o, $r);
+                if (isset($oldId)) $result = exec('docker -H=unix:///var/run/docker.sock image rm ' . $oldId, $o, $r);
 
                 Reply::finish(true, 'success', ['name' => '']);
             }

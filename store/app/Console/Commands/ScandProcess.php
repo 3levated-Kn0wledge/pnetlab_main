@@ -127,7 +127,7 @@ class ScandProcess extends Command
 
 
         $out = [];
-        $data = exec('docker -H=tcp://127.0.0.1:4243 stats --no-stream', $out, $rc);
+        $data = exec('docker -H=unix:///var/run/docker.sock stats --no-stream', $out, $rc);
         foreach($out as $line){
             if(preg_match('/^\w+\s+docker(\d+)\s+([\d\.]+)%\s+([\d\.]+)(\w+).*$/', $line, $matches)){
                 if($totalRam == 0) continue;

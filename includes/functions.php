@@ -812,20 +812,45 @@ function addWiresharkSystem($lab, $node_id, $interface_id)
 
 	// create wireshark docker container.
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container ls -a | grep ' . escapeshellarg($dockerName); // Check docker is exist
+	/*
+	 * -H=unix:///var/run/docker.sock, not the tcp://127.0.0.1:4243 every one of
+	 * these call sites used to name. Two reasons, and the second is the one that
+	 * made this urgent:
+	 *
+	 *   - that TCP socket is unauthenticated. Anything that can open a loopback
+	 *     connection — every PHP path here, but equally any other local user or
+	 *     any SSRF in the web layer — can POST /containers/create with
+	 *     Binds: ["/:/host"] and start a container that owns the host. www-data
+	 *     reaching it is www-data being root, whatever the sudo policy says;
+	 *   - nothing in install/ ever configured it. Docker listens on the unix
+	 *     socket out of the box and needs an explicit -H (or a systemd drop-in)
+	 *     to listen on 4243 as well, so on a clean install of this fork every
+	 *     command below failed to connect and Docker nodes could not work at all.
+	 *
+	 * The unix socket is root:docker 0660, so access is group membership rather
+	 * than a listening port: install/lib/platform.sh puts the PHP-FPM user in the
+	 * docker group, which is also why none of these need sudo any more. Group
+	 * membership is read at process start, so that step restarts php-fpm — a
+	 * running pool will not pick it up.
+	 *
+	 * The endpoint is named explicitly rather than left to the CLI default so a
+	 * stray DOCKER_HOST cannot redirect it. tests/Security/DockerSocketTest.php
+	 * fails if tcp://127.0.0.1:4243 comes back.
+	 */
+	$cmd = 'docker -H=unix:///var/run/docker.sock container ls -a | grep ' . escapeshellarg($dockerName); // Check docker is exist
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	if (count($o) == 0) {
-		$cmd = 'docker -H=tcp://127.0.0.1:4243 create --shm-size 1G --privileged -ti --net=none --name=' . escapeshellarg($dockerName)
+		$cmd = 'docker -H=unix:///var/run/docker.sock create --shm-size 1G --privileged -ti --net=none --name=' . escapeshellarg($dockerName)
 			. ' -h ' . escapeshellarg($node_name . '_' . $interface_name) . ' pnetlab/pnet-wireshark';
 		exec($cmd, $o, $rc);
 	}
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 start ' . escapeshellarg($dockerName);
+	$cmd = 'docker -H=unix:///var/run/docker.sock start ' . escapeshellarg($dockerName);
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format "{{ .State.Pid }}" ' . escapeshellarg($dockerName);
+	$cmd = 'docker -H=unix:///var/run/docker.sock inspect --format "{{ .State.Pid }}" ' . escapeshellarg($dockerName);
 	$o = [];
 	exec($cmd, $o, $rc);
 	$pid = $o[0];
@@ -992,11 +1017,11 @@ function deleteWiresharkSystem($tenant, $lab_session, $node_id, $interface_id, $
 	$o = [];
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container stop ' . escapeshellarg($dockerName);
+	$cmd = 'docker -H=unix:///var/run/docker.sock container stop ' . escapeshellarg($dockerName);
 	$o = [];
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container rm ' . escapeshellarg($dockerName) . ' &';
+	$cmd = 'docker -H=unix:///var/run/docker.sock container rm ' . escapeshellarg($dockerName) . ' &';
 	$o = [];
 	exec($cmd, $o, $rc);
 
@@ -1429,9 +1454,9 @@ function destroyBrokenLabSession($lab_session)
 		$result = $statement->fetchAll(PDO::FETCH_ASSOC);
 		foreach ($result as $node) {
 			if ($node['node_session_type'] == 'docker') {
-				$cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop ' . escapeshellarg('docker' . $node['node_session_id']);
+				$cmd = 'docker -H=unix:///var/run/docker.sock stop ' . escapeshellarg('docker' . $node['node_session_id']);
 				exec($cmd, $o, $rc);
-				$cmd = 'sudo docker -H=tcp://127.0.0.1:4243 rm ' . escapeshellarg('docker' . $node['node_session_id']);
+				$cmd = 'docker -H=unix:///var/run/docker.sock rm ' . escapeshellarg('docker' . $node['node_session_id']);
 				exec($cmd, $o, $rc);
 			} else {
 				$cmd = 'sudo fuser -k -TERM ' . escapeshellarg($node['node_session_workspace']) . ' > /dev/null 2>&1';
@@ -1575,7 +1600,7 @@ function getNodeStatus($session, $type, $running_path, $port)
 	if (!isset($session)) return 0;
 
 	if ($type == 'docker') {
-		$cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format="{{ .State.Running }}" ' . escapeshellarg('docker' . $session);
+		$cmd = 'docker -H=unix:///var/run/docker.sock inspect --format="{{ .State.Running }}" ' . escapeshellarg('docker' . $session);
 		exec($cmd, $o, $rc);
 		if ($rc == 0) {
 			if ($o[0] == 'true') {
@@ -1683,7 +1708,7 @@ function getTemplates()
 				if($templ == 'docker'){
 					$found = 1;
 				}else{
-					$cmd = 'docker -H=tcp://127.0.0.1:4243 images | grep ' . escapeshellarg($templ);
+					$cmd = 'docker -H=unix:///var/run/docker.sock images | grep ' . escapeshellarg($templ);
 					exec($cmd, $o, $r);
 					if(count($o) > 0) $found = 1;
 				}

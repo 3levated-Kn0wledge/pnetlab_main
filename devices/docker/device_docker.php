@@ -131,7 +131,16 @@ class device_docker extends device
         }
 
         
-        $cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format="{{ .State.Running }}" ' . escapeshellarg('docker' . $this->getSession());
+        /*
+         * The daemon is addressed over its unix socket, not the unauthenticated
+         * tcp://127.0.0.1:4243 this file used to name — see the long note in
+         * includes/functions.php for why, including the part where nothing in
+         * install/ ever configured the TCP socket, so these commands could never
+         * have connected on a clean install. Access comes from www-data's
+         * membership of the docker group, which is why the sudo prefixes are
+         * gone from the docker calls in this file.
+         */
+        $cmd = 'docker -H=unix:///var/run/docker.sock inspect --format="{{ .State.Running }}" ' . escapeshellarg('docker' . $this->getSession());
  	    error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
         secureCmd($cmd);
         exec($cmd, $o, $rc);
@@ -155,7 +164,7 @@ class device_docker extends device
 
             if(!isset($this->docker_options)) $this->docker_options = '';
            
-            $cmd = 'docker -H=tcp://127.0.0.1:4243 create -ti --memory ' . escapeshellarg($this->ram . 'M') . ' ';
+            $cmd = 'docker -H=unix:///var/run/docker.sock create -ti --memory ' . escapeshellarg($this->ram . 'M') . ' ';
             if($this->cpu > 0) $cmd .= ' --cpus=' . escapeshellarg($this->cpu) . ' ';
             // sweep-exempt: $this->docker_options is a multi-argument options string
             // supplied by the template, like qemu_options. Escaping it as one argument
@@ -193,13 +202,13 @@ class device_docker extends device
         $result = parent::start();
         if($result != 0) return $result;
 
-        $cmd = 'docker -H=tcp://127.0.0.1:4243 start ' . escapeshellarg('docker' . $this->getSession());
+        $cmd = 'docker -H=unix:///var/run/docker.sock start ' . escapeshellarg('docker' . $this->getSession());
 		error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
         exec($cmd, $o, $rc);
         sleep((int) $this->delay);
         if ($rc == 0) {
 
-            $cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format "{{ .State.Pid }}" ' . escapeshellarg('docker' . $this->getSession());
+            $cmd = 'docker -H=unix:///var/run/docker.sock inspect --format "{{ .State.Pid }}" ' . escapeshellarg('docker' . $this->getSession());
             //error_log(date('M d H:i:s ').'INFO: starting '.$cmd);
             exec($cmd, $o, $rc);
             $pid = $o[1];
@@ -279,7 +288,7 @@ class device_docker extends device
             }
 
             $attachCmd = 'sh';
-            $cmd = 'docker -H=tcp://127.0.0.1:4243 exec -i ' . escapeshellarg('docker' . $this->getSession()) . ' ls /bin/bash';
+            $cmd = 'docker -H=unix:///var/run/docker.sock exec -i ' . escapeshellarg('docker' . $this->getSession()) . ' ls /bin/bash';
             $o = [];
             exec($cmd, $o, $rc);
             error_log(date('M d H:i:s ') . 'INFO: importing ' . $cmd);
@@ -330,7 +339,7 @@ class device_docker extends device
     public function wipe()
     {
         
-        $cmd = 'sudo /usr/bin/docker -H=tcp://127.0.0.1:4243 rm ' . escapeshellarg('docker' . $this->getSession());
+        $cmd = 'docker -H=unix:///var/run/docker.sock rm ' . escapeshellarg('docker' . $this->getSession());
         exec($cmd, $o, $rc);
 
         return parent::wipe();

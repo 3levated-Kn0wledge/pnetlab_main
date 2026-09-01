@@ -31,7 +31,7 @@ class SystemHelper {
 
     public static function getNodeDisk($nodeSession){
         if($nodeSession->{NODE_SESSION_TYPE} == 'docker'){
-            exec("docker -H=tcp://127.0.0.1:4243 inspect --size docker".$nodeSession->{NODE_SESSION_ID}." --format='{{.SizeRw}}'", $o, $r);
+            exec("docker -H=unix:///var/run/docker.sock inspect --size docker".$nodeSession->{NODE_SESSION_ID}." --format='{{.SizeRw}}'", $o, $r);
             if($r != 0) return null;
             $addSize = (int)$o[0];
             return $addSize;

@@ -92,6 +92,15 @@ www-data ALL=(root) NOPASSWD: /usr/bin/php               # arbitrary code
 www-data ALL=(root) NOPASSWD: /usr/bin/perl              # arbitrary code
 www-data ALL=(root) NOPASSWD: /usr/bin/nohup             # launches anything
 www-data ALL=(root) NOPASSWD: /usr/sbin/service          # launches anything
+# Down to a SINGLE remaining call site: api.php's Wireshark image check
+# (`sudo docker images pnetlab/pnet-wireshark:latest`). Every other docker
+# invocation in the tree — thirty of them, across includes/, devices/ and
+# store/ — now reaches the daemon over /var/run/docker.sock as a member of the
+# docker group and needs no sudo at all. Convert that one line and this entry
+# goes; tests/Security/SudoersPolicyTest.php is what will tell you it can.
+# Note that group membership is not a smaller privilege — anyone who can talk to
+# the daemon can bind-mount / into a container — but it is one path instead of
+# two, and it replaced an unauthenticated daemon socket on 127.0.0.1:4243.
 www-data ALL=(root) NOPASSWD: /usr/bin/docker            # -v /:/host
 www-data ALL=(root) NOPASSWD: /opt/unetlab/html/store/app/Console/Commands/idlepc
 www-data ALL=(root) NOPASSWD: /usr/bin/tee               # arbitrary file write

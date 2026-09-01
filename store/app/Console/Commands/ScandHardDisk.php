@@ -81,7 +81,7 @@ class ScandHardDisk extends Command
 
 
         $out = [];
-        exec('docker -H=tcp://127.0.0.1:4243 container ls -a --format={{.Names}}:{{.Size}}', $out, $rc);
+        exec('docker -H=unix:///var/run/docker.sock container ls -a --format={{.Names}}:{{.Size}}', $out, $rc);
         if ($rc == 0) {
             foreach ($out as $dockerName) {
                 if (preg_match('/docker(\d+):([\d\.]+)(\w+)/', $dockerName, $maches)) {
@@ -121,7 +121,7 @@ class ScandHardDisk extends Command
     private function wipe($session, $node)
     {
         if (isset($node['docker']) && $node['docker']) {
-            $cmd = 'sudo /usr/bin/docker -H=tcp://127.0.0.1:4243 rm ' . escapeshellarg('docker' . $session);
+            $cmd = 'docker -H=unix:///var/run/docker.sock rm ' . escapeshellarg('docker' . $session);
             exec($cmd, $o, $rc);
         }
         $runningPath = $node['path'];
@@ -135,7 +135,7 @@ class ScandHardDisk extends Command
     private function stop($session, $node)
     {
         if (isset($node['docker']) && $node['docker']) {
-            $cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop ' . escapeshellarg('docker' . $session);
+            $cmd = 'docker -H=unix:///var/run/docker.sock stop ' . escapeshellarg('docker' . $session);
         } else {
             $cmd = 'sudo fuser -k -TERM ' . escapeshellarg($node['path']) . ' > /dev/null 2>&1';
         }

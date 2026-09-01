@@ -16,6 +16,96 @@
 readonly PLATFORM_GROUP='unl'
 readonly PLATFORM_GID=32768
 
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
+# Container-backed nodes (devices/docker/device_docker.php) shell out to the
+# `docker` CLI about thirty times. Until now every one of those calls named
+# `-H=tcp://127.0.0.1:4243`, and NOTHING in this installer ever configured that
+# endpoint — Docker listens on /var/run/docker.sock out of the box and needs an
+# explicit -H on the daemon to listen on 4243 as well. So on a clean install
+# every docker command in the tree failed to connect, and Docker nodes could not
+# work at all, wrapper or no wrapper.
+#
+# It was also the single worst grant in the appliance. 4243 is unauthenticated:
+# `POST /containers/create` with Binds: ["/:/host"] is a root shell on the host,
+# and it is reachable by every local user and by any request the web layer can be
+# talked into making. The call sites now use the unix socket, which is
+# root:docker 0660 — access by group membership rather than by an open port —
+# and none of them use sudo any more.
+#
+# Two traps, both of which have bitten this project before:
+#
+#   1. Supplementary groups are resolved when a process starts. Adding www-data
+#      to `docker` does nothing for a php-fpm pool that is already running. This
+#      function therefore runs BEFORE the confinement drop-in below, whose
+#      `systemctl restart php<v>-fpm` is what actually picks the group up. If you
+#      reorder these, node consoles will work on a fresh boot and not after an
+#      install, which is a miserable thing to debug.
+#   2. The php-fpm unit is confined (see install/systemd/php-fpm-pnetlab.conf).
+#      A unit that cannot see a path cannot see a socket on it either. /run is
+#      not hidden by any of ProtectSystem=true, ProtectKernelTunables or
+#      PrivateDevices, and PrivateTmp only moves /tmp and /var/tmp, so the socket
+#      is visible — but the drop-in adds After/Wants=docker.service so the daemon
+#      is up (and the socket exists) before the pool that talks to it.
+step_platform_docker() {
+	if ! have docker; then
+		note "installing docker.io for container-backed nodes"
+		apt_install docker.io
+	fi
+
+	if ! have docker; then
+		warn "docker is not installed; Docker-backed nodes will not start"
+		return 0
+	fi
+	ok "docker: $(command -v docker)"
+
+	# docker.io creates this; a hand-built daemon may not have.
+	if getent group docker >/dev/null; then
+		ok "group docker exists"
+	else
+		run groupadd -r docker
+		ok "created group docker"
+	fi
+
+	if id -nG "$WEB_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+		ok "${WEB_USER} is already in the docker group"
+	else
+		run usermod -aG docker "$WEB_USER"
+		ok "${WEB_USER} added to the docker group (takes effect on the php-fpm restart below)"
+	fi
+
+	# Being in the docker group is root-equivalent by design: the daemon will
+	# happily bind-mount / into a container for anyone who can talk to it. This
+	# is not a smaller privilege than the sudo grant it replaces, it is the same
+	# privilege named honestly and reachable by one fewer path — the
+	# unauthenticated TCP port is gone. Say so rather than let it read as a win.
+	note "${WEB_USER} is in the docker group, which is root-equivalent on this host."
+	note "         It replaces a sudo grant for /usr/bin/docker and an unauthenticated"
+	note "         daemon socket on 127.0.0.1:4243, both of which were worse."
+
+	if have systemctl; then
+		if ! systemctl is-enabled --quiet docker.service 2>/dev/null; then
+			run_ok systemctl enable docker.service
+		fi
+		if ! systemctl is-active --quiet docker.service; then
+			run_ok systemctl start docker.service
+		fi
+		if systemctl is-active --quiet docker.service; then
+			ok "docker.service is running"
+		else
+			warn "docker.service is not running; Docker-backed nodes will not start"
+		fi
+	fi
+
+	if [[ -S /var/run/docker.sock ]]; then
+		ok "/var/run/docker.sock present ($(stat -c '%U:%G %a' /var/run/docker.sock))"
+	else
+		warn "/var/run/docker.sock is missing; every docker call in the web layer
+      will fail. Check 'systemctl status docker'."
+	fi
+}
+
 step_platform() {
 	step "Emulation platform"
 
@@ -106,6 +196,9 @@ step_platform() {
 		note "         Docker-backed nodes and IOL nodes will not start. VPCS nodes"
 		note "         and QEMU nodes with a VNC console are unaffected."
 	fi
+
+	# --- Docker, and the socket the web layer talks to it over -----------
+	step_platform_docker
 
 	# --- PHP-FPM confinement --------------------------------------------
 	# The appliance ran mod_php inside Apache, which is unconfined. Ubuntu's
