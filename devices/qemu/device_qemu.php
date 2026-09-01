@@ -262,11 +262,11 @@ class device_qemu extends device
 
 
         if($this->console == 'telnet' || $this->console_2nd == 'telnet'){
-            $flags .= ' -chardev socket,id=serial0,path='.$this->getRunningPath().'/console.sock,server,nowait -serial chardev:serial0';
+            $flags .= ' -chardev socket,id=serial0,path='. $this->getRunningPath() .'/console.sock,server,nowait -serial chardev:serial0';
         }
 
         // Add monitor socket
-		$flags .= ' -chardev socket,id=monitor,path='.$this->getRunningPath().'/monitor.sock,server,nowait -monitor chardev:monitor';
+		$flags .= ' -chardev socket,id=monitor,path='. $this->getRunningPath() .'/monitor.sock,server,nowait -monitor chardev:monitor';
 
         $qnic = ($this->qemu_nic != "") ? $this->qemu_nic : (isset($p['qemu_nic']) ? $p['qemu_nic'] : "");
         if (preg_match('/^[0-9a-zA-Z-]+$/', $qnic)) {
@@ -284,8 +284,8 @@ class device_qemu extends device
         // Set configuration for device
         $flags .= ' -smp ' . $this->cpu;             // set the number of CPUs
         $flags .= ' -m ' . $this->ram;              // configure guest RAM
-        $flags .= ' -name "' . $this->name . '"';          // set the name of the guest
-        $flags .= ' -uuid ' . $this->uuid;          // specify machine UUID
+        $flags .= ' -name ' . escapeshellarg($this->name);          // set the name of the guest
+        $flags .= ' -uuid ' . escapeshellarg($this->uuid);          // specify machine UUID
 
         // Adding controller
         foreach (scandir('/opt/unetlab/addons/qemu/' . $this->image) as $filename) {
@@ -304,10 +304,10 @@ class device_qemu extends device
         foreach (scandir('/opt/unetlab/addons/qemu/' . $this->image) as $filename) {
             if ($filename == 'cdrom.iso') {
                 // CDROM
-                $flags .= ' -cdrom /opt/unetlab/addons/qemu/' . $this->image . '/cdrom.iso';
+                $flags .= ' -cdrom ' . escapeshellarg('/opt/unetlab/addons/qemu/' . $this->image . '/cdrom.iso');
             } else if ($filename == 'kernel.img') {
                 // Custom Kernel
-                $flags .= ' -kernel /opt/unetlab/addons/qemu/' . $this->image . '/kernel.img';
+                $flags .= ' -kernel ' . escapeshellarg('/opt/unetlab/addons/qemu/' . $this->image . '/kernel.img');
             } else if (preg_match('/^megasas[a-z]+.qcow2$/', $filename)) {
                 // MegaSAS
                 $patterns[0] = '/^megasas([a-z]+).qcow2$/';
@@ -329,7 +329,7 @@ class device_qemu extends device
                 $patterns[0] = '/^hd([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
-                $flags .= ' -hd' . $disk_id . ' ' . $filename;
+                $flags .= ' -hd' . $disk_id . ' ' . escapeshellarg($filename);
                 if ($this->getTemplate() == 'nxosv9k') {
                     $flags .= ' -bios /opt/qemu/share/qemu/OVMF.fd -drive file=hda.qcow2,if=ide,index=2';
                 }
@@ -382,10 +382,15 @@ class device_qemu extends device
         //     $cmd .= ' -x';
         // }
 
-        $cmd = $bin . $flags . ' > ' . $this->getRunningPath() . '/wrapper.txt';
+        $cmd = $bin . $flags . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt');
 
-        $re = '/\'|"|\\\\"|\\\\\'/m';
-        $cmd = preg_replace($re, "'", $cmd);
+        // Previously the finished command was passed through
+        //     preg_replace('/\'|"|\\\\"|\\\\\'/m', "'", $cmd)
+        // which collapsed every quote to a bare single quote. A node named
+        //     a'; touch /tmp/x; '
+        // therefore produced  -name 'a'; touch /tmp/x; ''  and the shell read a
+        // command separator. It also destroyed any escapeshellarg() output,
+        // whose quoting it mangled. Values are escaped individually instead.
 
         return $cmd;
     }
@@ -415,73 +420,73 @@ class device_qemu extends device
         $user = 'unl' . $this->getSession();
 
         if ($this->console == 'rdp') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.1.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.1.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.1.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.1.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'rdp') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.1.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.1.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.1.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.1.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console == 'ssh') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.2.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.2.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.2.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.2.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'ssh') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.2.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.2.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.2.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.2.102';
             exec($cmd, $o, $rc);
         }
 
 
         if ($this->console == 'winbox') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.3.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.3.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.3.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.3.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'winbox') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.3.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.3.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.3.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.3.102';
             exec($cmd, $o, $rc);
         }
 		
 		if ($this->console == 'http') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.4.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.4.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.4.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.4.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'http') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.4.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.4.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.4.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.4.102';
             exec($cmd, $o, $rc);
         }
 		
 		if ($this->console == 'https') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.5.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.5.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.5.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.5.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'https') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.5.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.5.102';
             exec($cmd, $o, $rc);
-            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.5.102';
+            $cmd = 'iptables -t nat -I INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.5.102';
             exec($cmd, $o, $rc);
         }
 
@@ -535,7 +540,8 @@ class device_qemu extends device
             foreach (scandir($image) as $filename) {
                 if (preg_match('/^[a-zA-Z0-9]+.qcow2$/', $filename)) {
                     // TODO should check if file exists
-                    $cmd = '/opt/qemu/bin/qemu-img create -b "' . $image . '/' . $filename . '" -f qcow2 "' . $this->getRunningPath() . '/' . $filename . '"';
+                    $cmd = '/opt/qemu/bin/qemu-img create -b ' . escapeshellarg($image . '/' . $filename)
+                        . ' -f qcow2 ' . escapeshellarg($this->getRunningPath() . '/' . $filename);
                     exec($cmd, $o, $rc);
                     if ($rc !== 0) {
                         // Cannot make linked clone
@@ -544,7 +550,7 @@ class device_qemu extends device
                         return 80045;
                     }
                 }else{
-                    $cmd = 'sudo link ' . $image . '/' . $filename . ' ' . $this->getRunningPath() . '/' . $filename;
+                    $cmd = 'sudo link ' . escapeshellarg($image . '/' . $filename) . ' ' . escapeshellarg($this->getRunningPath() . '/' . $filename);
                 }
             }
 
@@ -594,13 +600,17 @@ class device_qemu extends device
 					error_log(date('M d H:i:s ') . 'INFO: ' . $socketFile);
 					if($this->console == 'telnet'){
 						$port = $this->getPort();
-						$cmd = '/opt/unetlab/wrappers/qemu_wrapper_telnet -P ' . $port . ' -t "' . $this->name . '" -- nc -U ' . $socketFile . ' > ' . $this->getRunningPath() . '/wrapper.txt 2>&1 &';
+						$cmd = '/opt/unetlab/wrappers/qemu_wrapper_telnet -P ' . escapeshellarg($port)
+                            . ' -t ' . escapeshellarg($this->name) . ' -- nc -U ' . escapeshellarg($socketFile)
+                            . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt') . ' 2>&1 &';
 						error_log(date('M d H:i:s ') . 'INFO: ' . $cmd);
 						exec($cmd, $o, $rc);
 						
 					}else if($this->console_2nd == 'telnet'){
 						$port = $this->getSecondPort();
-						$cmd = '/opt/unetlab/wrappers/qemu_wrapper_telnet -P ' . $port . ' -t "' . $this->name . '" -- nc -U ' . $socketFile . ' > ' . $this->getRunningPath() . '/wrapper.txt 2>&1 &';
+						$cmd = '/opt/unetlab/wrappers/qemu_wrapper_telnet -P ' . escapeshellarg($port)
+                            . ' -t ' . escapeshellarg($this->name) . ' -- nc -U ' . escapeshellarg($socketFile)
+                            . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt') . ' 2>&1 &';
 						error_log(date('M d H:i:s ') . 'INFO: ' . $cmd);
 						exec($cmd, $o, $rc);
 					}
@@ -620,7 +630,11 @@ class device_qemu extends device
 
                 if($configScript != '' && is_file('/opt/unetlab/scripts/' . $configScript)){
                     touch($this->getRunningPath() . '/.lock');
-                    $cmd = 'sudo nohup /opt/unetlab/scripts/' . $configScript . ' -a put -p ' . $this->getPort() . ' -f ' . $this->getRunningPath() . '/startup-config -t ' . ($this->delay + $this->getScriptTimeout()) . ' > '.$this->getRunningPath() . '/startup_config.log 2>&1 &';
+                    $cmd = 'sudo nohup ' . escapeshellarg('/opt/unetlab/scripts/' . $configScript)
+                        . ' -a put -p ' . escapeshellarg($this->getPort())
+                        . ' -f ' . escapeshellarg($this->getRunningPath() . '/startup-config')
+                        . ' -t ' . escapeshellarg($this->delay + $this->getScriptTimeout())
+                        . ' > ' . escapeshellarg($this->getRunningPath() . '/startup_config.log') . ' 2>&1 &';
                     exec($cmd, $o, $rc);
                     error_log(date('M d H:i:s ') . 'INFO: importing ' . $cmd);
                 }else{
@@ -646,53 +660,53 @@ class device_qemu extends device
         // DELETE SNAT RULE RDP,SSH,WINBOX if needed
         $result = parent::stop();
         if ($this->console == 'rdp') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.1.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.1.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'rdp') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.1.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.1.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console == 'ssh') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.2.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.2.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'ssh') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.2.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.2.102';
             exec($cmd, $o, $rc);
         }
 
 
         if ($this->console == 'winbox') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.3.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.3.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'winbox') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.3.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.3.102';
             exec($cmd, $o, $rc);
         }
 		
 		if ($this->console == 'http') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.4.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.4.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'http') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.4.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.4.102';
             exec($cmd, $o, $rc);
         }
 		
 		if ($this->console == 'https') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getPort() . ' -j SNAT --to 169.254.5.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getPort()) . ' -j SNAT --to 169.254.5.102';
             exec($cmd, $o, $rc);
         }
 
         if ($this->console_2nd == 'https') {
-            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . $this->getSecondPort() . ' -j SNAT --to 169.254.5.102';
+            $cmd = 'iptables -t nat -D INPUT -p tcp --dport ' . escapeshellarg($this->getSecondPort()) . ' -j SNAT --to 169.254.5.102';
             exec($cmd, $o, $rc);
         }
         return $result;
@@ -721,7 +735,7 @@ class device_qemu extends device
             }
 
             $configScript = ($this->config_script != "") ? $this->config_script : (isset($this->tpl['config_script']) ? $this->tpl['config_script'] : "");
-            $cmd = '/opt/unetlab/scripts/' . $configScript . ' -a get -p ' . $this->getPort() . ' -f ' . $tmp . ' -t ' . $timeout;
+            $cmd = escapeshellarg('/opt/unetlab/scripts/' . $configScript) . ' -a get -p ' . escapeshellarg($this->getPort()) . ' -f ' . escapeshellarg($tmp) . ' -t ' . escapeshellarg($timeout);
             exec($cmd, $o, $rc);
             error_log(date('M d H:i:s ') . 'INFO: exporting ' . $cmd);
             if ($rc != 0) {

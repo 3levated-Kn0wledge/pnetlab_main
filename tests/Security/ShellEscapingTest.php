@@ -14,7 +14,14 @@ require_once __DIR__ . '/../bootstrap.php';
 
 $root = realpath(__DIR__ . '/../..');
 
-// Files converted by the shell sweep. Append as the sweep progresses.
+// Files fully converted by the shell sweep. Append as the sweep progresses.
+//
+// devices/qemu/device_qemu.php is deliberately NOT here yet. Its command-level
+// injection is fixed (see the commit removing the quote-collapsing rewrite), but
+// its -device/-netdev builds assemble comma-separated QEMU option values rather
+// than shell arguments, so they need restructuring rather than escaping, and
+// that cannot be verified without QEMU images and /dev/kvm. Listing it here
+// would assert a completeness this sweep has not reached.
 $swept = [
     'includes/cli.php',
     'includes/functions.php',
