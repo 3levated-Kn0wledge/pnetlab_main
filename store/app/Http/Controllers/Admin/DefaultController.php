@@ -199,7 +199,7 @@ class DefaultController extends Controller
 
     public function updateGuacToken()
     {
-        \updateUserToken(Auth::user()->{USER_USERNAME}, Auth::user()->{USER_PASSWORD}, Auth::user()->{USER_POD});
+        \updateUserToken(Auth::user()->{USER_USERNAME}, \unl_guacamole_secret(Auth::user()->{USER_USERNAME}), Auth::user()->{USER_POD});
         Reply::finish(true, 'success', '');
     }
 

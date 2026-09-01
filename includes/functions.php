@@ -323,6 +323,101 @@ function html5AddSession($db, $name, $type, $port, $userid, $hostname = null, $s
 	$statement->execute($params);
 }
 
+/**
+ * Hash a user password for storage.
+ *
+ * Passwords were previously stored as unsalted, single-round hash('sha256', $p).
+ * That is reversible by rainbow table and brute-forceable at billions of guesses
+ * per second on commodity hardware; the default admin password's digest matches
+ * `echo -n pnet | sha256sum` exactly.
+ *
+ * @param   string  $plain              Plaintext password
+ * @return  string                      Hash suitable for the users.password column
+ */
+function unl_password_hash($plain)
+{
+	return password_hash($plain, PASSWORD_DEFAULT);
+}
+
+/**
+ * Verify a password against a stored hash, accepting the legacy format.
+ *
+ * Existing installations hold sha256 digests, and users cannot be asked to reset
+ * passwords they cannot log in to change. So a legacy digest still verifies, and
+ * the caller is told to re-hash it — see unl_password_needs_rehash().
+ *
+ * hash_equals() is used for the legacy comparison because the original code used
+ * != on two strings, which is not constant time.
+ *
+ * @param   string  $plain              Plaintext password as supplied
+ * @param   string  $stored             Value from the users.password column
+ * @return  bool                        True if the password matches
+ */
+function unl_password_verify($plain, $stored)
+{
+	if (!is_string($stored) || $stored === '') return false;
+
+	// Legacy: 64 hex characters and nothing else.
+	if (preg_match('/^[0-9a-f]{64}$/i', $stored)) {
+		return hash_equals(strtolower($stored), hash('sha256', $plain));
+	}
+
+	return password_verify($plain, $stored);
+}
+
+/**
+ * Should this stored hash be replaced after a successful login?
+ *
+ * True for any legacy sha256 digest, and for a modern hash whose cost or
+ * algorithm has since moved on.
+ *
+ * @param   string  $stored             Value from the users.password column
+ * @return  bool                        True if it should be re-hashed
+ */
+function unl_password_needs_rehash($stored)
+{
+	if (!is_string($stored) || $stored === '') return true;
+	if (preg_match('/^[0-9a-f]{64}$/i', $stored)) return true;
+	return password_needs_rehash($stored, PASSWORD_DEFAULT);
+}
+
+/**
+ * The credential PNETLab presents to Guacamole on a user's behalf.
+ *
+ * Guacamole needs a password it can store and check, and PNETLab previously gave
+ * it the sha256 digest of the user's own password — which meant the guacdb
+ * database held material derived directly from user credentials, and meant the
+ * digest had to remain derivable, which is incompatible with storing a proper
+ * password hash.
+ *
+ * This derives a stable per-user value from an installation secret instead, so
+ * Guacamole holds nothing related to the user's password. The value is
+ * deterministic, so both the login path and the console path can compute it
+ * without storing anything extra.
+ *
+ * @param   string  $username           PNETLab username
+ * @return  string                      Credential to present to Guacamole
+ */
+function unl_guacamole_secret($username)
+{
+	static $installSecret = null;
+
+	if ($installSecret === null) {
+		$path = '/opt/unetlab/data/.guacamole_secret';
+		if (is_readable($path)) {
+			$installSecret = trim(file_get_contents($path));
+		}
+		if (!$installSecret) {
+			$installSecret = bin2hex(random_bytes(32));
+			// Written 0600 so only the web user can read it.
+			@file_put_contents($path, $installSecret, LOCK_EX);
+			@chmod($path, 0600);
+		}
+	}
+
+	return hash_hmac('sha256', (string) $username, $installSecret);
+}
+
 function updateUserToken($username, $password, $pod)
 {
 	$url = 'http://127.0.0.1/html5/api/tokens';

@@ -78,7 +78,7 @@ class LoginController extends Controller
             $localPass = uniqid("pnetlab");
 
             $userData = [
-                USER_PASSWORD => hash('sha256', $localPass),
+                USER_PASSWORD => \unl_password_hash($localPass),
                 USER_ROLE => null,
                 USER_HTML5 => $html,
                 USER_LICENSE => $license,
@@ -141,9 +141,24 @@ class LoginController extends Controller
         if (!$user['result'] || !isset($user['data'][0])) throw new Exception('Username is not existed');
         $user = $user['data'][0];
 
-        $hashPass = hash('sha256', $password);
+        if (!\unl_password_verify($password, $user->{USER_PASSWORD})) {
+            throw new Exception('Password is Wrong');
+        }
 
-        if ($user->{USER_PASSWORD} != $hashPass) throw new Exception('Password is Wrong');
+        // Upgrade the stored hash in place. Existing installations hold unsalted
+        // sha256 digests and users cannot be asked to reset a password they
+        // cannot log in to change, so the migration happens on the one occasion
+        // the plaintext is legitimately available.
+        if (\unl_password_needs_rehash($user->{USER_PASSWORD})) {
+            $userModel->edit([
+                DATA_KEY => [[[USER_POD, '=', $user->{USER_POD}]]],
+                DATA_EDITOR => [USER_PASSWORD => \unl_password_hash($password)],
+            ]);
+        }
+
+        // Guacamole is given a per-installation derived credential, not anything
+        // related to the user's password. See unl_guacamole_secret().
+        $hashPass = \unl_guacamole_secret($username);
 
         $userModel->edit([
             DATA_KEY => [[[USER_POD, '=', $user->{USER_POD}]]],
@@ -248,7 +263,7 @@ class LoginController extends Controller
 
             $result = $userModel->add([[
                 USER_USERNAME => 'admin',
-                USER_PASSWORD => hash('sha256', LOCAL_PASS),
+                USER_PASSWORD => \unl_password_hash(LOCAL_PASS),
                 USER_ROLE => '0',
                 USER_OFFLINE => '1',
                 USER_ONLINE_TIME => time(),

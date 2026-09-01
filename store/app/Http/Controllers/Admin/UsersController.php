@@ -295,7 +295,7 @@ class UsersController extends Controller
         }
 
         if(isset($data[USER_PASSWORD])){
-            $data[USER_PASSWORD] = hash('sha256', $data[USER_PASSWORD]);
+            $data[USER_PASSWORD] = \unl_password_hash($data[USER_PASSWORD]);
         }else{
             Reply::finish(false, 'Password can not be empty');
         }
@@ -365,7 +365,7 @@ class UsersController extends Controller
         }
 
         if(isset($datas[DATA_EDITOR][USER_PASSWORD]) && $datas[DATA_EDITOR][USER_PASSWORD] != ''){
-            $datas[DATA_EDITOR][USER_PASSWORD] = hash('sha256', $datas[DATA_EDITOR][USER_PASSWORD]);
+            $datas[DATA_EDITOR][USER_PASSWORD] = \unl_password_hash($datas[DATA_EDITOR][USER_PASSWORD]);
         }else{
             unset($datas[DATA_EDITOR][USER_PASSWORD]);
         }

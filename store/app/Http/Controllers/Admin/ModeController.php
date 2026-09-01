@@ -93,7 +93,7 @@ class ModeController extends Controller
 
                 $result = $userModel->add([[
                     USER_USERNAME => 'admin',
-                    USER_PASSWORD => hash('sha256', LOCAL_PASS),
+                    USER_PASSWORD => \unl_password_hash(LOCAL_PASS),
                     USER_ROLE => '0',
                     USER_OFFLINE => '1',
                     USER_STATUS => USER_STATUS_ACTIVE,
