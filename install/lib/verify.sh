@@ -64,6 +64,78 @@ http_code() {
 	curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1$1" 2>/dev/null
 }
 
+
+# --- HTML5 consoles --------------------------------------------------------
+#
+# The step is optional, so every check here has to know the difference between
+# "installed and broken" (a failure) and "never installed" (information). The
+# oracle is the deployed war: if /var/lib/jetty9/webapps/html5.war exists,
+# somebody asked for consoles and they are expected to work.
+_guac_installed()      { [[ -f /var/lib/jetty9/webapps/html5.war ]]; }
+_guacd_active()        { systemctl is-active --quiet guacd; }
+_guacd_listens()       { ss -ltnH 2>/dev/null | grep -q '127\.0\.0\.1:4822'; }
+_jetty_active()        { systemctl is-active --quiet jetty9; }
+_jetty_listens()       { ss -ltnH 2>/dev/null | grep -qE '(127\.0\.0\.1|\[::ffff:127\.0\.0\.1\]):8080'; }
+# The one that matters more than "is it up": Jetty's shipped default is
+# 0.0.0.0:8080, which is a second unauthenticated front door to the same
+# application. The appliance still has Tomcat exposed that way.
+_jetty_loopback_only() { ! ss -ltnH 2>/dev/null | grep -qE '(0\.0\.0\.0|\*|\[::\]):8080'; }
+_guac_war_served()     { curl -sf -o /dev/null --max-time 10 http://127.0.0.1:8080/html5/; }
+_guac_jdbc_driver()    { [[ -e /etc/guacamole/lib/mariadb-java-client.jar ]]; }
+_guac_props_mode()     { [[ "$(stat -c '%a %U %G' /etc/guacamole/guacamole.properties)" == '640 root jetty' ]]; }
+
+# Exactly one. Two versions of guacamole-auth-jdbc-mysql in the extensions
+# directory is a startup failure whose log message does not obviously say so.
+_guac_one_extension() {
+	local n
+	n="$(find /etc/guacamole/extensions -maxdepth 1 -name 'guacamole-auth-jdbc-mysql-*.jar' 2>/dev/null | wc -l)"
+	[[ "$n" == 1 ]]
+}
+
+# The extension version and the war version are a version-locked pair
+# (guacamole-ext is not API-stable across releases). Compare the extension's
+# filename against the war's own pom.properties rather than trusting the
+# installer variable, which is what would be wrong if anything is.
+_guac_versions_match() {
+	local ext war_v
+	ext="$(find /etc/guacamole/extensions -maxdepth 1 -name 'guacamole-auth-jdbc-mysql-*.jar' -printf '%f\n' 2>/dev/null | head -1)"
+	ext="${ext#guacamole-auth-jdbc-mysql-}"; ext="${ext%.jar}"
+	war_v="$(unzip -p /var/lib/jetty9/webapps/html5.war 'META-INF/maven/org.apache.guacamole/guacamole/pom.properties' 2>/dev/null |
+		sed -n 's/^version=//p' | tr -d '\r')"
+	[[ -n "$ext" && -n "$war_v" && "$ext" == "$war_v" ]]
+}
+
+# Apache's half. This is the URL includes/functions.php actually posts to.
+_guac_proxied()        { [[ "$(http_code /html5/)" == 200 ]]; }
+
+verify_guacamole() {
+	info "html5 consoles"
+
+	if ! _guac_installed; then
+		printf '    %s[info]%s HTML5 consoles are not installed (no %s).\n' \
+			"$C_YELLOW" "$C_RESET" '/var/lib/jetty9/webapps/html5.war'
+		printf '           Stage the artefacts with tools/vendor-guacamole.sh and re-run\n'
+		printf '           with --only guacamole. Everything else works without them.\n'
+		return 0
+	fi
+
+	check      "guacd is running"                        _guacd_active
+	check      "guacd listens on 127.0.0.1:4822"         _guacd_listens
+	check      "jetty9 is running"                       _jetty_active
+	check      "jetty listens on 127.0.0.1:8080"         _jetty_listens
+	check      "jetty is NOT listening on 0.0.0.0:8080"  _jetty_loopback_only
+	check      "the /html5 web application is deployed"  _guac_war_served
+	check      "exactly one JDBC auth extension"         _guac_one_extension
+	check      "the JDBC driver is in /etc/guacamole/lib" _guac_jdbc_driver
+	check      "guacamole.properties is 0640 root:jetty" _guac_props_mode
+	check_soft "the extension and the .war are the same version" _guac_versions_match
+	check      "Apache proxies /html5/ to Jetty"         _guac_proxied
+
+	# Nothing above proves a console can actually connect. That takes a real
+	# token and a real tunnel, which needs a lab: see
+	# tools/integration/guacamole-console.sh.
+}
+
 step_verify() {
 	step "Verification"
 
@@ -107,6 +179,7 @@ step_verify() {
 	fi
 
 	verify_http
+	verify_guacamole
 	verify_php_settings
 
 	if [[ $VERIFY_FAILURES -gt 0 ]]; then
