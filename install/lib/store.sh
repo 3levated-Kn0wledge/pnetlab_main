@@ -54,13 +54,21 @@ step_store() {
 # The deployed .env is excluded from rsync, so a re-run does not clobber the
 # generated key.
 prepare_store_env() {
-	local src="${SRC_DIR}/store/.env"
+	# store/.env.example, not store/.env. The real file was tracked in the
+	# repository — with a live APP_KEY, APP_DEBUG=true and APP_LOG_LEVEL=debug —
+	# until it was replaced by the template. .gitignore had listed .env from the
+	# first commit, which does nothing for a file that is already tracked.
+	#
+	# The old path is still accepted so that an existing checkout that still has
+	# an untracked store/.env keeps working.
+	local src="${SRC_DIR}/store/.env.example"
+	[[ -f "${SRC_DIR}/store/.env" ]] && src="${SRC_DIR}/store/.env"
 	local dst="${WEB_ROOT}/store/.env"
 
 	if [[ ! -f "$dst" ]]; then
-		[[ -f "$src" ]] || { warn "no store/.env in the source tree and none deployed"; return 0; }
+		[[ -f "$src" ]] || { warn "no store/.env.example in the source tree and nothing deployed"; return 0; }
 		install -o root -g "$WEB_GROUP" -m 0640 "$src" "$dst"
-		info "created ${dst} from the source tree"
+		info "created ${dst} from $(basename "$src")"
 	else
 		dim "keeping the existing ${dst}"
 	fi
