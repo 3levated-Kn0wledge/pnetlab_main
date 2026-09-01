@@ -151,7 +151,37 @@ function sweep_tokenize($src, &$markers)
  * T_DOLLAR_OPEN_CURLY_BRACES are the `{` of "{$a}" and "${a}": they close with a
  * plain '}' and would otherwise pop a scope that was never pushed.
  */
-function sweep_scopes($toks)
+/**
+ * Names of the parameters a function declares as `array`, given the index of its
+ * T_FUNCTION token. Used only to recognise an argv array handed to proc_open.
+ */
+function sweep_array_params($toks, $fnTok)
+{
+    $n = count($toks);
+    $open = -1;
+    for ($i = $fnTok; $i < $n; $i++) {
+        if ($toks[$i]['id'] === '(') { $open = $i; break; }
+        if ($toks[$i]['id'] === '{' || $toks[$i]['id'] === ';') return [];
+    }
+    if ($open < 0) return [];
+    $close = sweep_match($toks, $open);
+    $out = [];
+    for ($i = $open + 1; $i < $close; $i++) {
+        if ($toks[$i]['id'] !== T_ARRAY) continue;
+        // `array $x`, `array &$x`, `array ...$x` — skip the by-reference and
+        // variadic markers, but stop at anything else so `array $x = array()`
+        // in a later parameter cannot be misread.
+        for ($j = $i + 1; $j < $close; $j++) {
+            $id = $toks[$j]['id'];
+            if ($id === '&' || $id === T_ELLIPSIS) continue;
+            if ($id === T_VARIABLE) $out[$toks[$j]['t']] = true;
+            break;
+        }
+    }
+    return $out;
+}
+
+function sweep_scopes($toks, &$arrayParams = null)
 {
     $n = count($toks);
     $scope = array_fill(0, $n, 0);
@@ -159,13 +189,19 @@ function sweep_scopes($toks)
     $braces = [];
     $next = 1;
     $pendingFn = false;
+    $fnTok = -1;
+    if ($arrayParams === null) $arrayParams = [];
     for ($i = 0; $i < $n; $i++) {
         $id = $toks[$i]['id'];
-        if ($id === T_FUNCTION || (defined('T_FN') && $id === T_FN)) $pendingFn = true;
+        if ($id === T_FUNCTION || (defined('T_FN') && $id === T_FN)) { $pendingFn = true; $fnTok = $i; }
         elseif ($id === ';') $pendingFn = false;   // an abstract/interface declaration has no body
         elseif ($id === T_CURLY_OPEN || $id === T_DOLLAR_OPEN_CURLY_BRACES) $braces[] = null;
         elseif ($id === '{') {
-            if ($pendingFn) { $stack[] = $next; $braces[] = $next; $next++; $pendingFn = false; }
+            if ($pendingFn) {
+                $stack[] = $next; $braces[] = $next;
+                $arrayParams[$next] = $fnTok >= 0 ? sweep_array_params($toks, $fnTok) : [];
+                $next++; $pendingFn = false;
+            }
             else $braces[] = null;
         } elseif ($id === '}') {
             $opened = array_pop($braces);
@@ -413,9 +449,11 @@ function sweep_index($sources)
     $ix = ['ctx' => [], 'methods' => []];
     foreach ($sources as $rel => $src) {
         $toks  = sweep_tokenize($src, $markers);
-        $scope = sweep_scopes($toks);
+        $arrayParams = [];
+        $scope = sweep_scopes($toks, $arrayParams);
         $ix['ctx'][$rel] = [
             'rel' => $rel, 'toks' => $toks, 'scope' => $scope, 'markers' => $markers,
+            'arrayParams' => $arrayParams,
             'lines' => explode("\n", $src),
             'returns' => sweep_returns($toks, $scope, $ix['methods'], $rel),
             'assign' => sweep_assignments($toks, $scope),
@@ -463,7 +501,32 @@ function sweep_run($ix)
                 elseif ($t === ',' && $d === 0) { $argEnd = $j - 1; break; }
             }
             $sites++;
-            if ($argEnd >= $i + 2) { $seen = []; sweep_expr($ix, $rel, $ctx['scope'][$i], $i + 2, $argEnd, 0, $seen, $out); }
+
+            // proc_open() is the one exec-family function whose first argument
+            // is not necessarily a shell command. Given an array it execs the
+            // program directly with that argv and no shell is involved, so
+            // nothing in it can be parsed as syntax and escaping it would be
+            // wrong -- escapeshellarg() on an argv element corrupts the
+            // argument while making the code look safer. Recognise the array
+            // form so the sweep does not push new code towards a string.
+            //
+            // Only two shapes count: a literal, and a variable the enclosing
+            // function declares as `array`. A bare variable of unknown type is
+            // still reported, because a string built elsewhere and passed in
+            // here is exactly the case that must not slip through.
+            $isArgvArray = false;
+            if (strtolower($toks[$i]['t']) === 'proc_open' && $argEnd >= $i + 2) {
+                $first = $toks[$i + 2]['id'];
+                if ($first === T_ARRAY || $first === '[') {
+                    $isArgvArray = true;
+                } elseif ($first === T_VARIABLE && $argEnd === $i + 2) {
+                    $params = isset($ctx['arrayParams'][$ctx['scope'][$i]])
+                        ? $ctx['arrayParams'][$ctx['scope'][$i]] : [];
+                    $isArgvArray = isset($params[$toks[$i + 2]['t']]);
+                }
+            }
+
+            if (!$isArgvArray && $argEnd >= $i + 2) { $seen = []; sweep_expr($ix, $rel, $ctx['scope'][$i], $i + 2, $argEnd, 0, $seen, $out); }
             $i = $close;
         }
         if ($sites > $before) $files++;
@@ -492,6 +555,14 @@ $fixtures = [
     'scoped.php'    => '<?php function a(){ $c = "safe"; } function b($y){ exec($c . $y); }',
     'exempt.php'    => "<?php function j(\$x){\n // sweep-exempt: \$x supplies several arguments by design.\n exec('q ' . \$x);\n}",
     'exempt_sibling.php' => "<?php function k(\$x, \$z){\n // sweep-exempt: \$x supplies several arguments by design.\n exec('q ' . \$x . ' ' . \$z);\n}",
+
+    // proc_open() given an array execs directly with no shell, so these three
+    // fix the boundary: the two array forms are safe, and a string handed to
+    // the same function is not.
+    'argv_literal.php' => '<?php function l($x){ proc_open(["/bin/q", $x], $d, $p); }',
+    'argv_param.php'   => '<?php function m(array $argv){ proc_open($argv, $d, $p); }',
+    'argv_string.php'  => '<?php function n($x){ proc_open("/bin/q " . $x, $d, $p); }',
+    'argv_untyped.php' => '<?php function o($argv){ proc_open($argv, $d, $p); }',
 ];
 [$fv] = sweep_run(sweep_index($fixtures));
 $fset = [];
@@ -509,6 +580,14 @@ assert_true(isset($fset['scoped.php']),    'does not borrow an assignment from a
 assert_true(!isset($fset['exempt.php']),   'honours a sweep-exempt marker that names the value');
 assert_true(isset($fset['exempt_sibling.php']),
     'a sweep-exempt marker does not cover a sibling it does not name');
+assert_true(!isset($fset['argv_literal.php']),
+    'accepts proc_open() with a literal argv array, which spawns no shell');
+assert_true(!isset($fset['argv_param.php']),
+    'accepts proc_open() with an array-typed parameter');
+assert_true(isset($fset['argv_string.php']),
+    'still flags proc_open() given a built string');
+assert_true(isset($fset['argv_untyped.php']),
+    'still flags proc_open() given a variable of unknown type');
 
 // ------------------------------------------------------------------ the real sweep
 
