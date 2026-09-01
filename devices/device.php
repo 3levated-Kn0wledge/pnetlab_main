@@ -728,8 +728,15 @@ class device
             exec($cmd, $o, $rc);
 
             if ($this->getStatus() != 0) {
-                if ($this->command() != '') {
-                    $cmd = 'sudo pkill -term ' . escapeshellarg($this->command());
+                // command() reports its own failures by returning
+                // array(False, False) -- see device_qemu::command(), which does
+                // that when the arch or the binary cannot be resolved. Passing
+                // that to escapeshellarg() is a fatal TypeError on PHP 8, so a
+                // node that failed to start took the whole stop request down
+                // with it and could never be cleaned up.
+                $pkillTarget = $this->command();
+                if (is_string($pkillTarget) && $pkillTarget !== '') {
+                    $cmd = 'sudo pkill -term ' . escapeshellarg($pkillTarget);
                     error_log(date('M d H:i:s ') . 'INFO: stopping ' . $cmd);
                     exec($cmd, $o, $rc);
                 }

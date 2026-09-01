@@ -193,8 +193,24 @@ class device_qemu extends device
         $qversion = ($this->qemu_version != "") ? $this->qemu_version : (isset($p['qemu_version']) ? $p['qemu_version'] : "");
         if ($qversion != "") {
 
-            $bin .= '/opt/qemu-' . $qversion . '/bin/qemu-system-' . $qarch;
-            error_log(date('M d H:i:s ') . 'ERROR: ' . $bin);
+            // Templates pin a QEMU version and the appliance shipped a tree per
+            // version under /opt/qemu-<version>. A package-managed host has one
+            // QEMU, which install/lib/platform.sh wires to /opt/qemu/bin, so the
+            // versioned path does not exist and every such template failed with
+            // 80016 "QEMU not found" -- linux.yml asks for 2.12.0, and Ubuntu
+            // 24.04 has 8.2.
+            //
+            // Prefer the pinned version when it is genuinely installed, so an
+            // appliance-style host keeps its per-version behaviour, and fall
+            // back to the one QEMU this host has rather than failing.
+            $versioned = '/opt/qemu-' . $qversion . '/bin/qemu-system-' . $qarch;
+            if (is_executable($versioned)) {
+                $bin .= $versioned;
+            } else {
+                $bin .= '/opt/qemu/bin/qemu-system-' . $qarch;
+                error_log(date('M d H:i:s ') . 'INFO: qemu ' . $qversion
+                    . ' is not installed; using the host QEMU at ' . $bin);
+            }
         } else {
             $bin .= '/opt/qemu/bin/qemu-system-' . $qarch;
             error_log(date('M d H:i:s ') . 'ERROR: ' . $bin);
@@ -546,8 +562,14 @@ class device_qemu extends device
             foreach (scandir($image) as $filename) {
                 if (preg_match('/^[a-zA-Z0-9]+.qcow2$/', $filename)) {
                     // TODO should check if file exists
+                    // -F is not optional any more. qemu-img refuses `-b` without
+                    // a backing format from 5.0 onwards ("Backing file specified
+                    // without backing format"), and Ubuntu 24.04 ships 8.2, so
+                    // every linked clone failed with 80045 and no QEMU node could
+                    // start. The regex above only matches *.qcow2, so the backing
+                    // format is known rather than guessed.
                     $cmd = '/opt/qemu/bin/qemu-img create -b ' . escapeshellarg($image . '/' . $filename)
-                        . ' -f qcow2 ' . escapeshellarg($this->getRunningPath() . '/' . $filename);
+                        . ' -F qcow2 -f qcow2 ' . escapeshellarg($this->getRunningPath() . '/' . $filename);
                     exec($cmd, $o, $rc);
                     if ($rc !== 0) {
                         // Cannot make linked clone
