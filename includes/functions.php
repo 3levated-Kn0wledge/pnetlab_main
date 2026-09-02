@@ -2501,6 +2501,179 @@ function secure_line_parse($cmd)
 	}
 }
 
+/**
+ * Split a command line into an argv array and its redirection, so the caller
+ * can exec the program directly instead of handing the line to /bin/sh.
+ *
+ * WHY THIS EXISTS
+ *
+ * The emulator command lines are assembled as strings, and most values in them
+ * are escapeshellarg()'d individually. Four are not, deliberately: qemu_options,
+ * dynamips_options, iol_options and the per-interface flags getFlag()
+ * concatenates. Those are multi-argument by design -- a template's
+ * `-machine type=pc,accel=kvm -vga std` has to become four words -- so escaping
+ * them as one argument would break every template that uses one, and they are
+ * the last entries in tests/Security/shell-escaping-baseline.txt for that
+ * reason.
+ *
+ * secureCmd($cmd, SECURE_LINE) proves such a line cannot spawn a SECOND
+ * command. It does not prove the arguments are the intended ones, and it
+ * permits `>` because the call sites build their own redirection. So a value
+ * interpolated raw could still add arguments, and could still redirect a file.
+ *
+ * Tokenising removes the shell from the picture entirely. Word splitting is
+ * preserved, which is what the option strings need, but there is no process
+ * that would interpret anything afterwards: the caller execs argv[0] with the
+ * rest as arguments. An option string can still say `-drive file=...`, because
+ * that is the feature; it can no longer say anything a shell would act on,
+ * because no shell runs.
+ *
+ * ACCEPTS EXACTLY WHAT secure_line_parse() ACCEPTS, and throws on anything
+ * else. It is deliberately not more permissive: the two functions describe the
+ * same grammar, one refusing and one splitting, and a line that passes the
+ * first must not surprise the second. Callers run secureCmd() first; this
+ * throwing after that means the two have drifted apart, which is a bug.
+ *
+ * SHELL SEMANTICS THAT MATTER HERE
+ *
+ *   - Adjacent runs with no whitespace between them are ONE word:
+ *     `file='a b'` is the single argument `file=a b`, not two. Getting this
+ *     wrong would split every escapeshellarg()'d value that contains a space.
+ *   - escapeshellarg() emits an embedded apostrophe as '\'' -- close, escaped
+ *     quote, reopen -- so a backslash-quote outside quotes is one literal
+ *     apostrophe joining the runs either side of it.
+ *   - `2>&1` is recognised only at the start of a word, never inside one.
+ *
+ * @param   string  $cmd    a line that has already passed SECURE_LINE
+ * @return  array           ['argv' => string[], 'stdout' => string|null,
+ *                           'append' => bool, 'stderr_to_stdout' => bool]
+ * @throws  Exception       on anything it cannot tokenise
+ */
+function unl_command_argv($cmd)
+{
+	if (!is_string($cmd)) {
+		throw new Exception('unl_command_argv() needs a string');
+	}
+
+	$n      = strlen($cmd);
+	$argv   = array();
+	$word   = '';
+	$has    = false;          // a word is open, even if it is the empty string ''
+	$stdout = null;
+	$append = false;
+	$err2out = false;
+	$expect  = null;          // 'stdout' when the next word is a redirect target
+	$nredir  = 0;             // how many were seen; a call site builds exactly one
+
+	// Close the word in progress and file it, either as an argument or as the
+	// target of a redirection we have just seen.
+	$flush = function () use (&$argv, &$word, &$has, &$expect, &$stdout) {
+		if (!$has) return;
+		if ($expect === 'stdout') {
+			$stdout = $word;
+			$expect = null;
+		} else {
+			$argv[] = $word;
+		}
+		$word = '';
+		$has  = false;
+	};
+
+	for ($i = 0; $i < $n; $i++) {
+		$c = $cmd[$i];
+
+		if ($c === ' ' || $c === "\t") {
+			$flush();
+			continue;
+		}
+
+		// `2>&1`, and only at the start of a word: inside one it is literal
+		// text, which is what a shell does too.
+		if (!$has && $c === '2' && substr($cmd, $i, 4) === '2>&1') {
+			$err2out = true;
+			$i += 3;
+			continue;
+		}
+
+		if ($c === '>') {
+			$flush();
+			$append = false;
+			if ($i + 1 < $n && $cmd[$i + 1] === '>') { $append = true; $i++; }
+			$expect = 'stdout';
+			$nredir++;
+			continue;
+		}
+
+		if ($c === "'") {
+			$end = strpos($cmd, "'", $i + 1);
+			if ($end === false) {
+				throw new Exception('unterminated single quote: ' . json_encode($cmd));
+			}
+			$word .= substr($cmd, $i + 1, $end - $i - 1);
+			$has = true;
+			$i = $end;
+			continue;
+		}
+
+		if ($c === '"') {
+			$j = $i + 1;
+			for (; $j < $n && $cmd[$j] !== '"'; $j++) {
+				if ($cmd[$j] === '$' || $cmd[$j] === '`' || $cmd[$j] === '\\') {
+					throw new Exception('expansion inside double quotes: ' . json_encode($cmd));
+				}
+			}
+			if ($j >= $n) {
+				throw new Exception('unterminated double quote: ' . json_encode($cmd));
+			}
+			$word .= substr($cmd, $i + 1, $j - $i - 1);
+			$has = true;
+			$i = $j;
+			continue;
+		}
+
+		// The '\'' splice, and nowhere else -- same rule secure_line_parse has.
+		if ($c === '\\') {
+			if ($i + 1 < $n && $cmd[$i + 1] === "'") {
+				$word .= "'";
+				$has = true;
+				$i++;
+				continue;
+			}
+			throw new Exception('backslash outside an escaped quote: ' . json_encode($cmd));
+		}
+
+		if ($c === '&') {
+			throw new Exception('& is a command separator here: ' . json_encode($cmd));
+		}
+
+		// High bytes are literal, exactly as secure_line_parse() treats them.
+		if (ord($c) >= 0x80 || strpos(SECURE_LINE_PLAIN, $c) !== false) {
+			$word .= $c;
+			$has = true;
+			continue;
+		}
+
+		throw new Exception('not permitted in a command line: ' . json_encode($c)
+			. ' in ' . json_encode($cmd));
+	}
+	$flush();
+
+	if ($expect !== null) {
+		throw new Exception('redirection with no target: ' . json_encode($cmd));
+	}
+	if (!count($argv)) {
+		throw new Exception('no program in command line: ' . json_encode($cmd));
+	}
+
+	// Only the last redirection is reported, which is what a shell's fd would
+	// end up pointing at -- but a shell also OPENS the earlier ones, truncating
+	// each. Dropping them silently would be safer than a shell and still wrong:
+	// a line with two redirections is not one any call site here builds, so the
+	// count is returned and the caller refuses on it.
+	return array('argv' => $argv, 'stdout' => $stdout, 'append' => $append,
+	             'stderr_to_stdout' => $err2out, 'redirects' => $nredir);
+}
+
 
 
 /** ========EVE_STORE ==================*/

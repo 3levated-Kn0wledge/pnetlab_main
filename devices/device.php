@@ -731,8 +731,20 @@ class device
         // devices/qemu/). An unquoted space is still a word separator here.
         //
         // So this is defence in depth over a surface the fork has decided to
-        // keep. The containment that matters is device::spawnAsTenant(): for
-        // VPCS and QEMU the line runs as unl<session>, not root.
+        // keep. Two things contain it, and they are different in kind:
+        //
+        //   - device::spawnAsTenant() no longer runs a shell at all. It splits
+        //     this line with unl_command_argv() and execs the program directly,
+        //     so for VPCS and QEMU the option strings can add ARGUMENTS, which
+        //     is the feature, and nothing else -- there is no interpreter left
+        //     to act on a `;` or a `>` even if one reached here.
+        //   - and that exec runs as unl<session>, not as root.
+        //
+        // The types that do NOT run as the tenant -- dynamips and IOL -- still
+        // reach the `exec($cmd . ' &')` below, and for those this check is
+        // still the only thing standing between an option string and a shell.
+        // Converting them needs the background-and-reap that `&` currently
+        // provides, and a licensed image to verify against; see ROADMAP-STATUS.
         try {
             $cmd = secureCmd($cmd, SECURE_LINE);
         } catch (Exception $e) {
@@ -869,12 +881,19 @@ class device
      * accel=kvm is in most of the shipped templates. stdio is replaced last, so
      * a redirect the command carries lands as the tenant and not as root.
      *
-     * A SHELL IS STILL USED, deliberately. The command string is assembled by
-     * command() and carries its own redirection, and the template option strings
-     * are argument injection by design (docs/HANDOVER.md, item 4). Handing it an
-     * argv array here would break every template and would not close that
-     * surface — what closes it is that the shell now runs as unl<N> and not as
-     * root, which is the whole point of this method.
+     * NO SHELL IS USED. An earlier revision of this method said one was, and
+     * said an argv array "would break every template" — which was true of the
+     * obvious approach, escaping the option strings as single arguments, and
+     * false of the one taken. unl_command_argv() splits the assembled line the
+     * way a shell would, so `-machine type=pc,accel=kvm -vga std` still becomes
+     * four arguments, and then the program is exec'd directly.
+     *
+     * That distinction is the whole change. The template option strings remain
+     * multi-argument, because that is the feature. What they lose is everything
+     * a shell would have done afterwards: no redirection, and no second command
+     * even if secureCmd()'s SECURE_LINE check were ever weakened or bypassed.
+     * The line's own `> wrapper.txt 2>&1` is applied by the child below rather
+     * than by an interpreter.
      *
      * @param   string  $cmd                The full command line
      * @return  int                         0 if the child was forked
@@ -906,6 +925,40 @@ class device
         $gid = (int) $entry['gid'];
         $cwd = $this->getRunningPath();
 
+        // Tokenised BEFORE the fork, so a line this cannot split is an error
+        // the caller sees rather than a silent exit(127) inside a child whose
+        // stdio has already been replaced. There is deliberately no fallback
+        // to /bin/sh: falling back would reinstate exactly the shell this is
+        // here to remove, on the one input that confused the tokeniser.
+        try {
+            $parsed = unl_command_argv($cmd);
+        } catch (Exception $e) {
+            error_log(date('M d H:i:s ') . 'ERROR: cannot split the emulator command line into '
+                . 'an argv array: ' . $e->getMessage());
+            return 80046;
+        }
+
+        // SECURE_LINE permits `>`, because the call sites build their own
+        // redirection -- so a template option string containing one passes the
+        // guard, and tokenising alone would faithfully honour it. Both tenant
+        // node types redirect to exactly one file inside the node's running
+        // directory, so that is the rule, and anything else refuses to start.
+        //
+        // Without this, an operator-supplied qemu_options of `> /path` would
+        // still choose where the emulator's stdout landed, as the tenant. The
+        // tokeniser reports the count as well as the target because a shell
+        // opens and TRUNCATES every redirection in a line, not just the last.
+        if ($parsed['redirects'] > 1) {
+            error_log(date('M d H:i:s ') . 'ERROR: the emulator command line carries '
+                . $parsed['redirects'] . ' redirections; a call site builds one');
+            return 80046;
+        }
+        if ($parsed['stdout'] !== null && strpos($parsed['stdout'], $cwd . '/') !== 0) {
+            error_log(date('M d H:i:s ') . 'ERROR: the emulator command line redirects to '
+                . $parsed['stdout'] . ', which is outside the node running directory');
+            return 80046;
+        }
+
         $pid = pcntl_fork();
         if ($pid < 0) {
             error_log(date('M d H:i:s ') . 'ERROR: fork failed; not starting ' . $user);
@@ -924,9 +977,32 @@ class device
             fclose(STDOUT);
             fclose(STDERR);
             @fopen('/dev/null', 'r');
-            @fopen('/dev/null', 'w');
-            @fopen('/dev/null', 'w');
-            pcntl_exec('/bin/sh', array('-c', $cmd));
+
+            // The redirection the line carried, applied here instead of by a
+            // shell. Both descriptors are opened APPEND rather than duplicated:
+            // PHP has no dup2(), and two independent 'w' handles on one file do
+            // not share a file offset, so the second would overwrite the first.
+            // Appending cannot, and the file is truncated once beforehand so a
+            // restart still starts from empty. This is a log; ordering within
+            // it is not load-bearing.
+            $out = $parsed['stdout'];
+            if ($out !== null) {
+                if (!$parsed['append']) @file_put_contents($out, '');
+                if (@fopen($out, 'a') === false) @fopen('/dev/null', 'w');
+            } else {
+                @fopen('/dev/null', 'w');
+            }
+            if ($parsed['stderr_to_stdout'] && $out !== null) {
+                if (@fopen($out, 'a') === false) @fopen('/dev/null', 'w');
+            } else {
+                @fopen('/dev/null', 'w');
+            }
+
+            // The program, executed directly. No shell exists in this process
+            // tree from here on, so the template option strings can still add
+            // arguments -- which is what they are for -- and can no longer add
+            // a redirection or anything else a shell would have acted on.
+            pcntl_exec($parsed['argv'][0], array_slice($parsed['argv'], 1));
             exit(127);   // only reached if exec failed
         }
 
