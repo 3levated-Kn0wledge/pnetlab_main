@@ -92,7 +92,7 @@ Read this before claiming a deploy works.
 | | |
 |---|---|
 | **No C compiler** | `step_platform()` compiles the three console wrappers from source and died with `FATAL: no C compiler found`. Nothing in the installer had ever installed one; every host it had run on already carried gcc. **Fixed** — `build-essential` is now in the platform step's own package list. |
-| **The captcha is ON for a fresh install** | Not fixed; see below. |
+| **The captcha is ON for a fresh install** | Not fixed, and not a bug — the default is right. What was wrong was the suite comment asserting the opposite, now corrected. See below. |
 | **A stale `node_modules` silently downgraded axios** | Rebuilding the bundles against whatever `node_modules` held, rather than after `npm ci`, produced bundles carrying axios 0.19.2 against a lockfile pinning 1.20.0, reverting the CSRF hardening. `CsrfTest` caught it. **Fixed**; the lesson is that regenerating build output *is* a behavioural change and the suite has to be re-run after one. |
 | **The snapshot itself had an interrupted `dpkg`** | `apache2` was unpacked but not configured, and the preflight correctly refused to start: `FATAL: dpkg has an interrupted transaction`. One `sudo dpkg --configure -a` clears it. This is a property of the snapshot, not of this repository, so it recurs on every rollback to that snapshot until the snapshot is retaken. |
 
@@ -116,12 +116,15 @@ returns `Captcha is Wrong`, and that one fact cascades into 46 failures in
 `lab-functional.sh`, 5 in `node-types.sh` and a loud skip in
 `db-backup-restore.sh`.
 
-**`tools/integration/lab-functional.sh` states the opposite** — "Requires the
-captcha to be off, which a fresh install has" — and it is wrong. That comment
-was written against a box where someone had already run the SQL above. It is
-left uncorrected here so that this document changes and the suites do not;
-correcting it, or having the suites set the value themselves, is a decision
-someone should make on purpose.
+`tools/integration/lab-functional.sh` used to state the opposite — "Requires
+the captcha to be off, which a fresh install has" — which was written against
+a box where someone had already run the SQL above. That comment is corrected,
+and now says what the failure looks like, because the symptom points nowhere
+near the cause: 46 assertions failing with "User is not authenticated".
+
+Having the suites set the value themselves is still a decision nobody has
+made. They do not, deliberately: a test suite that reconfigures
+authentication on the host it is measuring is a different kind of tool.
 
 **3. The Guacamole artefacts.** ~23 MB of Apache binaries, deliberately not
 committed (`install/vendor/guacamole/.gitignore` says why). Staged by a
@@ -137,22 +140,28 @@ Without them the installer skips HTML5 consoles loudly and correctly, but
 `guacamole-console.sh` cannot run and six assertions across `node-types.sh`
 and `db-backup-restore.sh` fail on the missing console link.
 
-**4. A bootable QEMU image.** `node-types.sh` takes the first directory under
-`/opt/unetlab/addons/qemu/`, derives the template from the part before the
-first `-`, and needs a disk matching `hd[a-z]+.qcow2`. CirrOS 0.6.2 is what
-was used:
+**4. A bootable QEMU image.**
 
 ```bash
-sudo install -d -m 0755 /opt/unetlab/addons/qemu/linux-cirros
-sudo curl -fsSL -o /opt/unetlab/addons/qemu/linux-cirros/hda.qcow2 \
-  https://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img
-# md5 c8fc807773e5354afe61636071771906, matching the MD5SUMS cirros publishes
+sudo bash tools/vendor-qemu-test-image.sh
 ```
 
-**This one has no pin in the tree.** Guacamole has `SHA512SUMS`, committed and
-reviewed; the QEMU image has nothing, so a future download that differed would
-not be noticed. Worth closing if these images are meant to be part of
-reproducible verification.
+Stages CirrOS 0.6.2 and verifies it twice, the same shape
+`tools/vendor-guacamole.sh` uses: against the MD5SUMS cirros publishes beside
+the image, which is only a transport check because it comes from the same host
+as the bytes, and against a SHA-512 pinned in the script, which is the anchor
+because it is committed here and reviewed. It refuses a version it has no hash
+for, refuses to overwrite a file that does not match the pin, is a no-op when
+the image is already staged correctly, and confirms with `qemu-img` that what
+landed really is qcow2.
+
+The layout it produces is load-bearing at both ends, which is why the script
+owns it rather than the operator: `node-types.sh` takes the first directory
+under `/opt/unetlab/addons/qemu/` and derives the template from the part
+before the first `-`, while `device_qemu.php` matches disks against
+`hd[a-z]+.qcow2`. So `linux-cirros/hda.qcow2` means template `linux`, image
+`linux-cirros`, disk `hda`. Rename either half and the suite skips, or starts
+a node with no disk.
 
 ### What a repeat deploy will and will not hit
 
