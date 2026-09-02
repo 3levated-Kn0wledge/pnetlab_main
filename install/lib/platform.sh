@@ -185,6 +185,55 @@ step_platform() {
 	run install -d -m 0755 -o root -g root /opt/unetlab/addons/iol/bin /opt/unetlab/addons/iol/lib
 	ok "addons directories created (qemu, iol, dynamips, docker)"
 
+	# --- i386 multiarch, for IOL ----------------------------------------
+	# Every IOL image Cisco published is a 32-bit i386 ELF linked against
+	# /lib/ld-linux.so.2 -- both of the ones this project has been able to
+	# look at are, L2 and L3 alike:
+	#
+	#   ELF 32-bit LSB executable, Intel 80386, dynamically linked,
+	#   interpreter /lib/ld-linux.so.2
+	#     NEEDED libm.so.6, libgcc_s.so.1, libc.so.6, libdl.so.2
+	#
+	# On an amd64 host with no foreign architecture the loader is simply not
+	# there, so the image cannot exec at all -- the failure is "No such file
+	# or directory" naming a binary that plainly exists, which is one of the
+	# more misleading errors in Linux.
+	#
+	# This step already builds iol_wrapper unconditionally, so the installer
+	# has committed to IOL being startable; leaving out the one thing that
+	# makes its payload runnable would be committing to half of it. libm and
+	# libdl are part of libc6 in modern glibc, so libc6:i386 and libgcc-s1:i386
+	# cover the whole NEEDED list -- about 10 MB.
+	#
+	# It is NOT gated on an image being present. The images are licensed and
+	# arrive later, by hand, on a host that is by then already installed;
+	# gating would mean the install that finally gets an image is the one that
+	# cannot run it.
+	if [[ "$(dpkg --print-architecture)" == 'amd64' ]]; then
+		if dpkg --print-foreign-architectures | grep -qx i386; then
+			ok "i386 multiarch is already enabled"
+		else
+			run dpkg --add-architecture i386
+			# Adding an architecture invalidates the package lists: without a
+			# refresh, libc6:i386 is "unable to locate package". apt_install
+			# short-circuits on APT_UPDATED, and the guard is -n, so it has to
+			# be UNSET rather than set to 0 -- "0" is non-empty and would skip
+			# exactly the refresh this needs.
+			unset APT_UPDATED
+			run apt-get update
+			APT_UPDATED=1
+			ok "enabled i386 multiarch (IOL images are 32-bit)"
+		fi
+		if apt_install libc6:i386 libgcc-s1:i386; then
+			ok "32-bit runtime present; IOL images can be executed"
+		else
+			warn "could not install the i386 runtime; IOL nodes will not start.
+      The images are 32-bit and need libc6:i386 and libgcc-s1:i386."
+		fi
+	else
+		note "not amd64; skipping the i386 runtime that IOL images need"
+	fi
+
 	# --- the tenant group node start needs ------------------------------
 	# unl_wrapper runs useradd -g unl for every node session. Without the group
 	# that fails and no node starts.
