@@ -1689,7 +1689,13 @@ function getNodeStatus($session, $type, $running_path, $port)
 
 function createRunningPath($lab_session, $node_session)
 {
-	return BASE_TMP . '/' . $lab_session . '/' . $node_session;
+	// Both are int(11) columns — lab_sessions.lab_session_id is AUTO_INCREMENT
+	// and node_sessions.node_session_id is allocated modulo 30000 by
+	// createNodeSession(). The cast says so, and it is what makes the workspace
+	// path this returns provably free of shell syntax: it is interpolated into
+	// emulator command lines all over devices/ through getRunningPath(), and it
+	// was the last unescaped value on several of them.
+	return BASE_TMP . '/' . (int) $lab_session . '/' . (int) $node_session;
 }
 
 

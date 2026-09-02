@@ -744,7 +744,7 @@ class device
         error_log(date('M d H:i:s ') . 'INFO: CWD is ' . getcwd());
         error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
         // Clean TCP port
-        exec("fuser -k -n tcp " . ($this->getPort()));
+        exec("fuser -k -n tcp " . (int) $this->getPort());
 
         if ($this->runsAsTenant()) {
             $rcp = $this->spawnAsTenant($cmd . ' 2>&1');
