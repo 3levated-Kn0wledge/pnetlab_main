@@ -3,15 +3,19 @@
 **State at end of session, 2026-09-02.** Branch `phase-02-shell-hardening`,
 75 commits ahead of `main`, none pushed. Nothing uncommitted.
 
-**Roadmap phases 00 through 04 are done**, with two deliberate redefinitions,
-both recorded in their own documents:
+**Roadmap phases 00 through 04 are done**, with three deliberate redefinitions,
+each recorded in its own document:
 
 - the supported platform is **24.04, not 26.04** — 26.04 cannot be built or
   tested here, and `guacamole-server` is absent from it entirely
   (`docs/PLATFORM-SUPPORT.md`);
 - the licence is **adopted, not published** — BSD-3-Clause is declared and is
   now the standard, but publishing is gated on the incompatible components
-  named in `docs/LICENSING.md`.
+  named in `docs/LICENSING.md`;
+- there is **no AppArmor profile, deliberately** — AppArmor is on and nothing
+  here disables it, which is the half that matters, and `docs/APPARMOR.md` says
+  what a profile would have to cover and why `unl_wrapper` cannot usefully be
+  one of its subjects.
 
 Phase 05 (severing the upstream dependency), 06 (frontend currency) and 07
 (maintainership) are not started, though the signed-package work makes 05
@@ -33,7 +37,7 @@ which was re-run end to end rather than carried over from an earlier session.
 sudo bash install/install.sh --server-name pnetlab.test
 → INSTALLER-EXIT=0, every step, all verification checks green
 
-bash tools/integration/lab-functional.sh   → 55 shell assertions, 8 data-plane checks, 0 failed
+bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
 bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
 bash tools/integration/db-backup-restore.sh→ 67 assertions, 0 failed
 bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
@@ -41,8 +45,8 @@ bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
 bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
 make -C platform/wrappers/src test         → 248 unit assertions, 0 failed
-tools/run-tests.sh                         → 1480 assertions across 28 files, 0 failed
-tools/php-lint.sh (8.4 and 7.4)            → 349 files, 0 failed
+tools/run-tests.sh                         → 1559 assertions across 31 files, 0 failed
+tools/php-lint.sh (8.4 and 7.4)            → 352 files, 0 failed
 ```
 
 The sudo policy is at **24 grants**, down from 42.
@@ -369,6 +373,8 @@ in the repository.
 | `docs/FINDINGS-KERNEL.md` | the kernel investigation |
 | `docs/REFERENCE-ENVIRONMENT.md` | how the test host is built |
 | `docs/PLATFORM-SUPPORT.md` | what is supported, what 26.04 risks, and the checklist |
+| `docs/APPARMOR.md` | why no profile ships, what one would cover, and what stops it being disabled |
+| `docs/DOCKER-IMAGES.md` | seeding Docker images onto an offline host, and why it is not a package yet |
 | `docs/OFFLINE-FIRST.md` | the accepted architectural direction |
 | `platform/wrappers/src/README.md` | the wrapper core API and its provenance |
 | `docs/audit.html` | single-page summary of the live-box findings |
@@ -595,3 +601,164 @@ directory nothing creates — with `exec(... 2>/dev/null)` and `rm -rf`. It is
 Laravel-side, has no scheduled caller, and `install/lib/database.sh` already
 warns about it. It should be deleted or pointed at this action; it was left
 alone here so that one commit changes one thing.
+
+---
+
+## Phase 04: the five bullets that were still open
+
+Done 2026-09-02, on the reference VM, against a clean tree of this commit
+unpacked onto the provisioned host. Numbers at the foot of this section.
+
+### Memory dedup: UKSM is gone, and the toggle means less than it looks
+
+`unl_wrapper -a uksmon` wrote `/sys/kernel/mm/uksm/run`. UKSM is an out-of-tree
+patch that lived in the appliance's custom 4.15 kernel; we ship stock, that path
+does not exist on 6.8, and those verbs could only fail.
+
+**It was not, however, the silent breakage it looked like.** `apiSetKsm` already
+wrote the right path and worked — measured over HTTP before anything changed.
+The UKSM row on the status page was already inert, because `getInfo()` `cat`ted a
+path that cannot exist, got `unsupported`, and the React bundle draws a
+non-clickable toggle for that value. What *was* wrong: a live route wrote to a
+path no supported kernel has, a `cat` of it was spawned on every status poll,
+and **the off half of both setters was unreachable for any form-encoded caller** —
+`$p['state'] == true` is TRUE for the string `'false'`, so "turn it off" turned
+it on.
+
+**What the toggle now achieves, exactly.** Mainline KSM scans a mapping only if
+its owner asked with `madvise(MADV_MERGEABLE)`. Neither `smart_scan` nor the
+`advisor_mode` governor changes that — they tune how hard ksmd works on the set
+it already has. QEMU asks: `mem-merge` defaults to on, and a 512 MB guest's RAM
+mapping carries the `mg` VmFlag in `/proc/<pid>/smaps` with no configuration at
+all. Three CirrOS guests at 512 MB, `run` 0 → 1:
+
+```
+pages_sharing   0 -> 22900        (~89 MB of guest RAM collapsed)
+pages_shared    0 -> 9111
+general_profit  0 -> 85,590,848 bytes
+```
+
+**So it is a QEMU control and nothing else.** VPCS, dynamips and IOL never
+madvise; Docker nodes are the container's processes; a template whose
+`qemu_options` carry `mem-merge=off` opts that node out and the toggle cannot
+override it. `prctl(PR_SET_MEMORY_MERGE)` would cover the rest and is
+deliberately not done — a per-node memory-behaviour change made from a host-wide
+button.
+
+`run` is 0 stop, 1 run, 2 stop-and-unmerge, and it reads back what was written,
+so 2 is a state and not an edge. **Off writes 0, not 2**: unmerging N shared
+pages needs N free pages *now*, and the dense host is the only reason to have
+had KSM on. Both 0 and 2 report `disabled`, which is true of both. Writing 2 took
+`pages_sharing` 22900 → 0, measured.
+
+**One thing is not finished and cannot be here.** `getInfo()` still reports a
+`uksm` field, pinned to `'unsupported'`. Removing it needs a frontend rebuild:
+the committed bundle draws a **live** toggle for any value that is not that
+literal, an absent key included, so dropping the key turns a correctly inert row
+into a button for a control that does not exist. There is no node toolchain on
+the reference VM and building on the workstation is not allowed. The row goes
+when the frontend is next built.
+
+### The tap leak, and the account it now pins
+
+`prepare()` creates the taps first, so every later error return leaked one per
+interface — and nothing collected them, because `stopNode()` did all of its work
+inside `if ($this->getStatus() != 0)` and a node whose start failed reports 0.
+Stop was a no-op on exactly the node that needed it.
+
+Since the reaper landed this is worse: it refuses to remove an account while a
+`vunl<session>_*` exists, so **one orphaned tap pins one Unix account for the
+life of the host**. Fixed in `device::start()`, the single funnel every node
+type reaches through `parent::start()`: every non-success exit unwinds the taps
+and reaps the tenant. `stopNode()` releases taps outside the status guard, so an
+older orphan is collected the next time that node is stopped or deleted.
+
+**A pre-existing orphan whose lab is already deleted has no caller and stays.**
+Recovery is by hand: `sudo tunctl -d vunlN_x`, then
+`sudo unl_wrapper -a reap-tenant -S N`. That was not widened into the reaper —
+its refusal is what stops a running node losing its uid.
+
+Two other defects fell out of the same six lines. `return;` for an empty command
+conflated Docker (no emulator command — success) with
+`device_qemu::command()` returning `array(False,False)`, which never reached
+that test at all because `secureCmd()` runs first and `preg_match()`s the array
+— **a PHP 8 TypeError that took the whole request down**. And the teardown it
+replaced matched by prefix: `grep 'vunl1_'` matches `vunl12_0`, so stopping
+session 1 on a busy host tore down session 12's data plane.
+
+### AppArmor: not yet, and the fork does not disable it
+
+`/proc/cmdline` is clean, `/sys/module/apparmor/parameters/enabled` is `Y`, 119
+profiles are loaded with 24 enforcing — including `docker-default` and
+`unprivileged_userns` — and
+`kernel.apparmor_restrict_unprivileged_userns = 1`. Nothing in `install/`,
+`tools/` or `platform/` touches GRUB, the service or that sysctl. `--only verify`
+now asserts all four, softly, and a test holds the installer to it.
+
+A profile *can* be loaded without a reboot — proven: an empty complain-mode
+profile attached to a running QEMU node (`pnetlab-qemu-probe (complain)` on the
+QEMU pid) and the node still booted and passed frames. It is still not shipped.
+`unl_wrapper` cannot usefully be confined, and a QEMU profile needs
+`/opt/unetlab/tmp` tightened first or its workspace rule has to be globbed
+across tenants. `docs/APPARMOR.md` has the audit records and the order of work.
+
+### Docker images on an offline host
+
+The generic `docker` template is hardcoded selectable in `getTemplates()` —
+unlike every named docker template, it never asks the daemon — so a user on an
+image-less box adds a Docker node and it fails at start with 80083.
+`/opt/unetlab/addons/docker` plus an installer step now load `docker save`
+archives; `tools/docker-images.sh` does both halves. It has **no signature
+check**, and `docs/PACKAGES.md` now records that its own `docker_pull` verb
+cannot work offline and names `install_docker_image` as the replacement.
+
+### Numbers
+
+```
+sudo bash install/install.sh --skip packages,store --server-name pnetlab.test
+→ INSTALLER-EXIT=0, 0 [fail], all verification checks passed
+
+tools/integration/lab-functional.sh    59 shell, 8 data-plane, 0 failed  (was 55 + 8)
+tools/integration/node-types.sh        30 passed, 0 failed, 1 skipped (IOL)
+tools/integration/db-backup-restore.sh 67 passed, 0 failed
+tools/integration/guacamole-console.sh 35 passed, 0 failed
+tools/integration/wrapper-console.sh   44 passed, 0 failed
+tools/integration/wrapper-docker.sh    45 passed, 0 failed
+tools/integration/iol-dataplane.sh     75 passed, 0 failed
+make -C platform/wrappers/src test     248 unit assertions, 0 failed
+tools/run-tests.sh                     1559 assertions across 31 files, 0 failed
+                                                            (was 1480 across 28)
+tools/php-lint.sh (8.4 and 7.4)        352 files, 0 failed  (was 349)
+sudo policy                            24 grants, unchanged
+shell-escaping baseline                73 of 73, unchanged
+```
+
+The four new lab-functional assertions are the FAILED START section. Against
+`devices/device.php` at its parent commit, same suite, same host, two of them
+fail: *"the failed start left no tap behind — vunl1_0"* and *"and left no tenant
+account pinned — unl1 survives with no node running"*. That is the negative
+control; the fix is not taken on trust.
+
+### Traps this cost time to find
+
+1. **`--only deploy` does not update `/opt/unetlab/wrappers/unl_wrapper`.** That
+   is `--only platform`. A wrapper change tested after a deploy-only run is
+   testing the old wrapper, and the symptom is a fix that appears not to work.
+2. **A complain-mode AppArmor profile logs only what it would have DENIED.** A
+   probe profile granting `file, capability, network, …` at the top level grants
+   everything and produces a completely clean audit log that reads exactly like
+   a successful confinement. The body has to be empty.
+3. **Deleting a bridge does not force a node start to fail.** `unl_wrapper -a
+   start` walks the node's interfaces and calls `addNetwork()` for each one
+   before starting anything, so it rebuilds the bridge and the node starts. The
+   first version of the failed-start test passed for that reason.
+4. **Making the running directory immutable does not force it either**, because
+   `.prepared` already exists after a successful start and touching an existing
+   file is not an entry creation. The FILE has to be immutable.
+5. **`node_sessions` has no `node_id` column.** The node's id within the lab is
+   `node_session_nid`. A query using the obvious name returns nothing, silently,
+   and every path built from it is wrong in a way that looks like a passing test.
+6. **A comment that quotes the thing it removed will fail the test that checks
+   it was removed.** `code_only()` in `tests/bootstrap.php` strips comments with
+   `token_get_all()` for exactly this; the house style of writing down what went
+   away is otherwise in tension with the tests that enforce it.
