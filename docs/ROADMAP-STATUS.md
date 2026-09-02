@@ -112,18 +112,55 @@ The bullets below are assessed against what was actually built.
 | Drop the custom kernel | running mainline 6.8 |
 | Port the Guacamole console proxy | `guacamole-console.sh`, 35 assertions, plus a live tunnel to a real node in `node-types.sh` |
 | Migrate the database engine | MariaDB 10.11, against the appliance's EOL MySQL 5.7 |
+| Swap UKSM for mainline KSM | done — see the correction below |
+| Fix the tap leak on failed node start | `TapLeakTest`, plus a FAILED START section in `lab-functional.sh` that fails against the parent commit |
+| Verify Docker against cgroup v2 | `verify.sh` hard-checks `cgroup2fs`, no hybrid mounts, and `Cgroup Version: 2`; `HostHardeningTest` |
+| Solve offline Docker image seeding | `tools/docker-images.sh`, a `docker-images` installer step, `docs/DOCKER-IMAGES.md`; exercised with no registry reachable |
+| Ship an AppArmor profile | **decided against**, with the audit and ordering in `docs/APPARMOR.md` — see below |
 
 ### Open
 
 | Bullet | State |
 |---|---|
-| Swap UKSM for mainline KSM | **not done, and broken today.** `uksmon`/`uksmoff` write `/sys/kernel/mm/uksm/run`, which does not exist on 6.8; `/sys/kernel/mm/ksm/run` does. UKSM was a patch in the appliance's 4.15 kernel, which we dropped |
-| Fix the tap leak on failed node start | **not done**, and now worse than when it was written: a leaked tap also pins a tenant account, because the reaper refuses to remove an account while a `vunl*` tap exists |
-| Ship an AppArmor profile | **not done.** Recorded as a gap in `install/README.md` |
-| Verify Docker against cgroup v2 | **true but unasserted.** The box is `cgroup2fs`, Docker reports `Cgroup Version: 2` with the systemd driver, and `node-types.sh` passes |
-| Solve offline Docker image seeding | **not done** |
 | Migrate `brctl`/`tunctl`/`ifconfig` to iproute2 | **deferred** — see below |
 | Validate 32-bit IOL via i386 multiarch | **blocked.** Needs a licensed IOL image, which this project deliberately does not carry |
+
+### Correction: what was actually wrong with KSM
+
+My first audit of this bullet was wrong, and it is corrected here rather than
+quietly amended. I claimed the memory-dedup toggle in the admin UI had been
+doing nothing. It had not: `apiSetKsm` already wrote `/sys/kernel/mm/ksm/run`
+and already worked, measured over HTTP before any change was made. The UKSM row
+beside it was *inert* rather than broken — `getInfo()` cat'd the missing UKSM
+path, got `unsupported`, and the frontend draws that value as a non-clickable
+toggle.
+
+What was genuinely wrong was smaller and worse than a dead path: a live route
+still wrote a path no supported kernel has, status polling `cat`'d a file on
+every poll, and **the off half of both setters was unreachable for form-encoded
+callers**, because `'false' == true` is TRUE in PHP. Asking to turn KSM off
+turned it on.
+
+What the toggle achieves is now measured rather than assumed: **QEMU nodes
+only**. KSM scans only mappings whose owner marks them `MADV_MERGEABLE`, and
+QEMU does that by default; three CirrOS guests took `pages_sharing` from 0 to
+22,900. VPCS, dynamips, IOL and Docker get nothing from it, and a template
+setting `mem-merge=off` opts out in a way the toggle cannot override. Off writes
+`0` and not `2`, because unmerging N pages needs N free pages immediately, on
+the host that had reason to enable sharing in the first place.
+
+### Decided: no AppArmor profile
+
+Not shipped, and that is a decision rather than an omission. `unl_wrapper`
+needs `/etc/passwd`, `tunctl`, `ip`, `brctl`, the Docker socket, `mysqldump` and
+the ability to exec template-supplied command lines — a profile permitting all
+of that permits everything, and a QEMU profile needs `/opt/unetlab/tmp`
+tightened first or its workspace rule globs across tenants.
+
+What ships instead: the audit in `docs/APPARMOR.md`, the order the work has to
+happen in, and assertions in `verify.sh` and `HostHardeningTest` that nothing in
+our installer disables AppArmor — which is exactly what upstream did, with
+`apparmor=0` on the kernel command line.
 
 ### Deferred: iproute2 migration
 
