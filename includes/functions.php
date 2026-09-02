@@ -2265,8 +2265,32 @@ function unl_exec_argv(array $argv, &$output = null)
 	}
 
 	fclose($pipes[0]);
-	$out = stream_get_contents($pipes[1]);
-	$err = stream_get_contents($pipes[2]);
+
+	// Both pipes are drained together. Reading stdout to EOF and only then
+	// stderr deadlocks as soon as the child writes more than a pipe buffer
+	// (64 KiB) to stderr before finishing: it blocks on stderr, this side
+	// blocks on stdout, and the fpm worker is held until the request times
+	// out. stream_select() serves whichever pipe has data.
+	$out = '';
+	$err = '';
+	$open = array(1 => $pipes[1], 2 => $pipes[2]);
+	stream_set_blocking($pipes[1], false);
+	stream_set_blocking($pipes[2], false);
+	while (count($open)) {
+	    $r = array_values($open);
+	    $w = null;
+	    $e = null;
+	    if (@stream_select($r, $w, $e, 300) === false) break;
+	    foreach ($r as $stream) {
+	        $k = ($stream === $pipes[1]) ? 1 : 2;
+	        $chunk = fread($stream, 65536);
+	        if ($chunk !== false && $chunk !== '') {
+	            if ($k === 1) $out .= $chunk; else $err .= $chunk;
+	        } elseif (feof($stream)) {
+	            unset($open[$k]);
+	        }
+	    }
+	}
 	fclose($pipes[1]);
 	fclose($pipes[2]);
 	$rc = proc_close($proc);
