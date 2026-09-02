@@ -295,7 +295,7 @@ $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, Filesy
 foreach ($it as $f) {
     if ($f->getExtension() !== 'php') continue;
     $path = str_replace('\\', '/', $f->getPathname());
-    foreach (['/.git/', '/store/vendor/', '/node_modules/', '/tests/'] as $skip) {
+    foreach (['/.git/', '/.claude/', '/store/vendor/', '/node_modules/', '/tests/'] as $skip) {
         if (strpos($path, $skip) !== false) continue 2;
     }
     foreach (ka_live_lines($path) as $n => $line) {

@@ -434,7 +434,7 @@ $patterns = [
     'id_rsa_dy'       => 'names the blob\'s key',
     'paramiko'        => 'reaches for an SSH client library',
 ];
-$skipDirs = ['/.git', '/store/vendor', '/store/node_modules', '/node_modules',
+$skipDirs = ['/.git', '/.claude', '/store/vendor', '/store/node_modules', '/node_modules',
              '/docs', '/tests'];
 $it = new RecursiveIteratorIterator(
     new RecursiveCallbackFilterIterator(

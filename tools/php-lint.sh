@@ -26,6 +26,7 @@ while IFS= read -r f; do
     fi
 done < <(find . \
     -path ./.git -prune -o \
+    -path ./.claude -prune -o \
     -path ./store/vendor -prune -o \
     -path ./store/node_modules -prune -o \
     -type f -name '*.php' -print)

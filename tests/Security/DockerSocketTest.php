@@ -69,7 +69,7 @@ function application_php_files($root)
     foreach ($it as $file) {
         if ($file->getExtension() !== 'php') continue;
         $path = str_replace('\\', '/', $file->getPathname());
-        foreach (['/.git/', '/store/vendor/', '/store/public/', '/node_modules/',
+        foreach (['/.git/', '/.claude/', '/store/vendor/', '/store/public/', '/node_modules/',
                   '/tests/', '/tools/'] as $skip) {
             if (strpos($path, $skip) !== false) continue 2;
         }
