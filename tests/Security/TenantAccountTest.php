@@ -474,6 +474,25 @@ assert_true(substr_count($wrapper, 'reapAll()') === 2,
 assert_true(strpos($wrapper, "unl_single_option(\$options, 'S')") !== false,
     'the session arrives through unl_single_option, so a repeated -S is refused');
 
+// start() takes a Lab and a node id, and does $lab->getNodes()[$id] itself.
+// The start-all loop used to hand it a Node, which is a fatal on the first
+// non-IOL node in the lab -- invisible from the UI, because apiStartLabNode()
+// always sends -D <id> and takes the single-node path. The two loops exist at
+// all because IOL drops privileges in-process and has to be postponed, so this
+// guard belongs with the tenant work rather than off on its own.
+$wrapperSrc = code_only($root . '/platform/wrappers/unl_wrapper');
+$startCalls = [];
+if (preg_match_all('/=\s*start\(([^)]*)\)/', $wrapperSrc, $m)) {
+    $startCalls = array_map('trim', $m[1]);
+}
+assert_true(count($startCalls) >= 3, 'the wrapper still calls start() from its start action');
+$badStart = [];
+foreach ($startCalls as $args) {
+    if (strpos($args, '$lab') !== 0) $badStart[] = $args;
+}
+assert_same([], $badStart,
+    'every start() call passes the LAB first, not a Node -- $lab->getNodes()[$id] is done inside');
+
 $device = code_without_comments($root . '/devices/device.php');
 assert_true(strpos($device, 'reap-tenant') !== false,
     'device::stop() reaps the tenant account');
@@ -483,6 +502,24 @@ assert_true(strpos($device, '(int) $this->getSession()') !== false,
 $functions = code_without_comments($root . '/includes/functions.php');
 assert_true(strpos($functions, 'reap-tenant') !== false,
     'destroyBrokenLabSession() reaps too — it never calls device::stop()');
+
+// ...and in an order the reaper can accept. It refuses while a vunl<N>_* tap
+// exists or while node_sessions still reports the node as running, so the
+// taps have to be released and the rows deleted BEFORE it is called. The
+// first revision called it straight after the kill, so every call refused
+// and the leak stayed open behind a comment saying it was closed.
+$fnStart = strpos($functions, 'function destroyBrokenLabSession');
+$fnBody = substr($functions, $fnStart);
+$fnBody = substr($fnBody, 0, strpos($fnBody, "\nfunction ") ?: strlen($fnBody));
+$reapAt = strpos($fnBody, 'reap-tenant');
+$tapsAt = strpos($fnBody, 'unl_session_taps(');
+$rowsAt = strpos($fnBody, 'DELETE FROM node_sessions');
+assert_true($tapsAt !== false && $tapsAt < $reapAt,
+    'destroyBrokenLabSession() releases the taps before it reaps');
+assert_true($rowsAt !== false && $rowsAt < $reapAt,
+    'and deletes the node_sessions rows before it reaps');
+assert_true(strpos($fnBody, 'delTap(') !== false,
+    'the taps go through delTap(), the same path device::releaseTaps() uses');
 
 $cli = code_without_comments($root . '/includes/cli.php');
 assert_true(strpos($cli, 'UnlTenantAccount') !== false,

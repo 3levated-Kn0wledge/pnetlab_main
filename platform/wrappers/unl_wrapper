@@ -91,9 +91,19 @@ if (in_array($action, array('delete', 'export', 'start', 'stop', 'wipe'))) {
 }
 
 // Checking -S (Session ID)
+//
+// createNodeSession() allocates ids modulo 30000, so session 0 EXISTS as a
+// node session id, and its tenant account is unl0. The `> 0` check below is
+// the legacy one and every legacy action wants it (a session of 0 is "no
+// session" to them); reap-tenant reads -S for itself through
+// unl_single_option() and bounds it in UnlTenantAccount, whose MIN_SESSION is
+// 0 for exactly this reason -- so it is let through here, or unl0 could never
+// be removed.
 if (isset($options['S'])) {
 	if ((int) $options['S'] > 0) {
 		$session_id = (int) $options['S'];
+	} elseif (isset($options['a']) && $options['a'] === 'reap-tenant' && $options['S'] === '0') {
+		$session_id = null;
 	} else {
 		usage();
 		error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][8]);
@@ -595,7 +605,6 @@ switch ($action) {
 		$cmd = '/bin/chmod 777 /tmp > /dev/null 2>&1';
 		exec($cmd, $o, $rc);
 
-		exec($cmd, $o, $rc);
 		$cmd = 'sudo /bin/chown -R root:unl /opt/unetlab/users > /dev/null 2>&1';
 		exec($cmd, $o, $rc);
 		$cmd = 'sudo /bin/chmod -R 2775 /opt/unetlab/users > /dev/null 2>&1';
@@ -608,19 +617,43 @@ switch ($action) {
 		// Wrappers
 		$cmd = '/bin/chmod 755 /opt/unetlab/wrappers/nsenter /opt/unetlab/wrappers/*_wrapper* > /dev/null 2>&1';
 		exec($cmd, $o, $rc);
-		$cmd = 'sudo /bin/chmod -R 777 /opt/unetlab/html/store > /dev/null 2>&1';
-		exec($cmd, $o, $rc);
 		// /tmp
 		$cmd = '/bin/chown root:root /tmp 2>&1';
 		exec($cmd, $o, $rc);
 		$cmd = '/bin/chmod u=rwx,g=rwx,o=rwxt /tmp > /dev/null 2>&1';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'chown -R www-data:www-data /opt/unetlab/html > /dev/null 2>&1';
+		// The document root. This used to be
+		//
+		//     sudo chmod -R 777 /opt/unetlab/html/store
+		//     chown -R www-data:www-data /opt/unetlab/html
+		//     chmod -R 755 /opt/unetlab/html
+		//
+		// which is the appliance's layout: the web user owns its own code.
+		// install/lib/deploy.sh deliberately does the opposite -- the tree is
+		// root:root and not writable by www-data, so a file-write bug is not
+		// persistence -- and keeps exactly two exceptions, store/.env at
+		// root:www-data 0640 (it holds APP_KEY) and the two directories Laravel
+		// writes. One press of the admin UI's Fix Permissions button undid all
+		// of that, and the chmod 777 in particular left APP_KEY readable by
+		// every account on the host. The recipe below is deploy.sh's, kept in
+		// step with it by tests/Security/HostHardeningTest.php.
+		$html = '/opt/unetlab/html';
+		$cmd = '/bin/chown -R root:root ' . escapeshellarg($html) . ' > /dev/null 2>&1';
 		exec($cmd, $o, $rc);
-
-		$cmd = 'chmod -R 755 /opt/unetlab/html > /dev/null 2>&1';
+		$cmd = '/bin/chmod -R u=rwX,go=rX ' . escapeshellarg($html) . ' > /dev/null 2>&1';
 		exec($cmd, $o, $rc);
+		if (is_file($html . '/store/.env')) {
+			$cmd = '/bin/chown root:www-data ' . escapeshellarg($html . '/store/.env') . ' > /dev/null 2>&1';
+			exec($cmd, $o, $rc);
+			$cmd = '/bin/chmod 0640 ' . escapeshellarg($html . '/store/.env') . ' > /dev/null 2>&1';
+			exec($cmd, $o, $rc);
+		}
+		foreach (array($html . '/store/storage', $html . '/store/bootstrap/cache') as $writable) {
+			if (!is_dir($writable)) continue;
+			$cmd = '/bin/chown -R www-data:www-data ' . escapeshellarg($writable) . ' > /dev/null 2>&1';
+			exec($cmd, $o, $rc);
+		}
 
 		break;
 	case 'stopall':
@@ -751,7 +784,20 @@ switch ($action) {
 			foreach ($lab->getNodes() as $node_id => $node) {
 				if ($node->getNType() != 'iol') {
 					// IOL nodes drop privileges, so need to be postponed
-					$rc = start($node, $node_id, $tenant, $lab->getNetworks(), $lab->getScriptTimeout());
+					//
+					// start() takes the LAB and a node id -- it does
+					// $lab->getNodes()[$id] itself. This branch passed the NODE,
+					// plus three arguments the function does not take, and so
+					// died with "Call to undefined method Node::getNodes()" on
+					// the first non-IOL node in the lab. The IOL branch below
+					// always had it right, which is why the bug survived: the
+					// two loops are three lines apart and only one was wrong.
+					//
+					// Not reachable from the UI, which is the other reason it
+					// lasted: apiStartLabNode() always sends -D <id> and takes
+					// the single-node path above. `unl_wrapper -a start` with no
+					// -D, the operator's start-the-whole-lab, is the broken one.
+					$rc = start($lab, $node_id);
 					if ($rc !== 0) {
 						// Failed to start the node
 						error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][$rc]);
@@ -765,7 +811,7 @@ switch ($action) {
 			foreach ($lab->getNodes() as $node_id => $node) {
 				if ($node->getNType() == 'iol') {
 					// IOL nodes drop privileges, so need to be postponed
-					$rc = start($lab, $node_id, $tenant);
+					$rc = start($lab, $node_id);
 					if ($rc !== 0) {
 						// Failed to start the node
 						error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][$rc]);

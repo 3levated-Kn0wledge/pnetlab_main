@@ -665,8 +665,11 @@ int iol_sh_quote(const char *in, char *out, size_t outlen)
 	out[n++] = '\'';
 	for (; *in != '\0'; in++) {
 		if (*in == '\'') {
-			/* close, escaped quote, reopen */
-			if (n + 4 >= outlen)
+			/* close, escaped quote, reopen: four bytes, and the closing
+			 * quote and NUL still have to fit after them. n + 4 was one
+			 * short, and a quote in the last usable position wrote the
+			 * NUL at out[outlen] (found under ASan). */
+			if (n + 5 >= outlen)
 				return -1;
 			out[n++] = '\'';
 			out[n++] = '\\';

@@ -625,6 +625,47 @@ assert_true(!is_dir($state . '/staging/killed-run'),
 
 /*
 |--------------------------------------------------------------------------
+| 8b. A running operation is not mistaken for an interrupted one
+|--------------------------------------------------------------------------
+|
+| The recovery above is what makes this necessary: a second applier that found
+| the first one's live journal would "recover" it. The lock is a flock on
+| <state>/lock, so holding it from here is exactly what a concurrent run does.
+*/
+
+$prefix = $workspace . '/concurrent';
+$state = $prefix . '/opt/unetlab/data/packages';
+mkdir($state, 0700, true);
+$held = fopen($state . '/lock', 'c');
+assert_true(flock($held, LOCK_EX | LOCK_NB), 'the test holds the package lock');
+
+$path = build($workspace . '/while-locked.pnetpkg', $goodManifest, $goodPayload, $secret);
+$applier = new PnetPackageApplier(array(
+    'prefix' => $prefix, 'trust_dirs' => array($trustDir),
+    'apply_ownership' => false, 'run_commands' => false,
+));
+$result = $applier->apply($path);
+assert_true(!$result['ok'], 'apply is refused while another operation holds the lock');
+assert_true(strpos((string) $result['error'], 'another package operation') !== false,
+    'and says so: ' . $result['error']);
+assert_true(!is_file($state . '/installed/cisco-vios-fork.json'),
+    'nothing was applied');
+$staged = is_dir($state . '/staging') ? array_diff(scandir($state . '/staging'), array('.', '..')) : array();
+assert_same(array(), array_values($staged), 'and no staging directory was created or cleared');
+
+$removed = $applier->uninstall('cisco-vios-fork');
+assert_true(!$removed['ok'] && strpos((string) $removed['error'], 'another package operation') !== false,
+    'uninstall is refused under the same lock');
+
+flock($held, LOCK_UN);
+fclose($held);
+$result = $applier->apply($path);
+assert_true($result['ok'], 'the same applier succeeds once the lock is released'
+    . ($result['ok'] ? '' : ': ' . $result['error']));
+assert_true(is_file($state . '/lock'), 'the lock file lives in the state directory');
+
+/*
+|--------------------------------------------------------------------------
 | 9. Uninstall runs the recorded plan, and only the recorded plan
 |--------------------------------------------------------------------------
 */

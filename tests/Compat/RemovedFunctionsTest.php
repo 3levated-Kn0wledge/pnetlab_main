@@ -40,7 +40,7 @@ $root = realpath(__DIR__ . '/../..');
 // `[\w$>:]` but not `.`, so a JS method call reads as a call to PHP's removed
 // split(), and the suite fails pointing at a file no one wrote. Found during
 // the Laravel 11 upgrade; the residue was a boot test run, not a code change.
-$skip = ['/.git/', '/store/vendor/', '/store/node_modules/', '/node_modules/', '/tests/',
+$skip = ['/.git/', '/.claude/', '/store/vendor/', '/store/node_modules/', '/node_modules/', '/tests/',
          '/store/storage/framework/views/'];
 
 $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));

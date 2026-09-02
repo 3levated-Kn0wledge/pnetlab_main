@@ -31,13 +31,34 @@ class Query {
     
     public static function make($url, $method = 'get', $post=array(), $options=[]){
 
-        $url = preg_replace('/^https/', 'http', trim($url));
+        $url = trim($url);
+        // Inherited: every upstream call had its scheme rewritten from https
+        // to http before curl saw it, so the box has always talked to the
+        // central server in the clear, login credentials included. The rewrite
+        // is kept for the upstream calls, because removing it is Phase 05's
+        // job (severing them) and a TLS failure here would present as a login
+        // outage; it is NOT applied to a caller that asks for strict transport,
+        // which is what a package download does -- there is no reason for a
+        // signed artefact's URL to be downgraded, and the redirect chain is
+        // pinned to https as well.
+        $strict = !empty($options['strict_transport']);
+        if (!$strict) {
+            $url = preg_replace('/^https/', 'http', $url);
+        }
        
         self::$ch = curl_init();
         
         curl_setopt(self::$ch, CURLOPT_URL, $url);
         curl_setopt(self::$ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt(self::$ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt(self::$ch, CURLOPT_MAXREDIRS, 5);
+        if ($strict && stripos($url, 'https://') === 0) {
+            curl_setopt(self::$ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
+            curl_setopt(self::$ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTPS);
+        } else {
+            curl_setopt(self::$ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+            curl_setopt(self::$ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+        }
         curl_setopt(self::$ch, CURLOPT_POST, false);
 
         // Bound every upstream call. libcurl defaults to a 300s connect timeout

@@ -1,11 +1,26 @@
 # Handover
 
-**State at end of session, 2026-09-02.** Branch `phase-02-shell-hardening`,
-90 commits ahead of `main`, none pushed. Nothing uncommitted.
+**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 38
+commits ahead of `main` (which now carries the merged `phase-02-shell-hardening`),
+none pushed. Nothing uncommitted.
+
+**Everything below was measured on a host that was rolled back to its
+post-provision snapshot and built from nothing** — a clean `git archive` of the
+branch head, the installer, and two verified downloads. That is a stronger
+claim than this document has carried before, and it cost four defects to make:
+see "Deploying onto a clean host" for what a fresh host needs and what it
+caught.
+
+**The Phase 04 exit gate is clear.** `docs/PHASE-04-EXIT-FIXES.md` named fifteen
+defects found by reviewing the work that closed Phase 04, seven of them critical,
+plus fifteen secondary findings. All fifteen are fixed, one commit each, and
+verified on the reference VM through the installer; twelve of the secondary
+findings are fixed and three carry written deferrals in that file. See "Phase 04:
+the exit gate" at the foot of this document for what each fix measured and the
+two things a reviewer should know before merging.
 
 **Phase 02's dependency bullet is closed**: axios is 1.20.0 and the committed
-bundles were rebuilt against it — see "Phase 02: the axios upgrade" below. That
-was the last item standing between here and Phase 05.
+bundles were rebuilt against it — see "Phase 02: the axios upgrade" below.
 
 **Roadmap phases 00 through 04 are done**, with three deliberate redefinitions,
 each recorded in its own document:
@@ -33,28 +48,224 @@ The fork **deploys to a brand-new Ubuntu 24.04 server on PHP 8.4, runs labs, and
 no longer needs anything from the upstream appliance image.** The installer
 compiles the console wrappers from source as one of its steps.
 
-Every line below was measured on the reference VM against a clean `git archive`
-of this commit, unpacked onto the provisioned host — including the installer,
-which was re-run end to end rather than carried over from an earlier session.
+Every line below was measured **from scratch**: a VM rolled back to its
+post-provision snapshot, a clean `git archive` of this commit unpacked onto it,
+and `install/install.sh` run end to end. No step was carried over from an
+earlier session, and no state on the host predated the run except the
+preconditions listed in "Deploying onto a clean host" below.
 
 ```
 sudo bash install/install.sh --server-name pnetlab.test
-→ INSTALLER-EXIT=0, every step, all verification checks green
+→ INSTALLER-EXIT=0, every step, 0 [fail], all verification checks passed
 
 bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
 bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
-bash tools/integration/db-backup-restore.sh→ 67 assertions, 0 failed
+bash tools/integration/db-backup-restore.sh→ 67 passed, 0 failed, 0 skipped
 bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
 bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
 bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
-make -C platform/wrappers/src test         → 248 unit assertions, 0 failed
-tools/run-tests.sh                         → 1704 assertions across 31 files, 0 failed
-tools/php-lint.sh (8.4 and 7.4)            → 352 files, 0 failed
-npm run production (legacy provider)       → exit 0, bundles regenerated
+make -C platform/wrappers/src test         → 253 unit assertions, 0 failed
+tools/run-tests.sh (as root)               → 1844 assertions across 32 files, 0 failed
+tools/php-lint.sh (8.4)                    → 353 files, 0 failed
 ```
 
+**`tools/php-lint.sh` runs against 8.4 only on a clean host.** Nothing installs
+PHP 7.4; the two-version matrix in earlier revisions of this document was
+measured on a box where someone had installed it by hand. CI still covers 8.4
+and 8.5.
+
 The sudo policy is at **23 grants**, down from 42.
+
+---
+
+## Deploying onto a clean host
+
+The installer was, until this session, only ever run onto hosts that had
+already had it run on them. Doing it properly — snapshot rollback, fresh
+provision, clean `git archive`, nothing else — caught **four** defects that
+an accreted host hides, and established what a genuinely fresh host needs.
+Read this before claiming a deploy works.
+
+### What it caught
+
+| | |
+|---|---|
+| **No C compiler** | `step_platform()` compiles the three console wrappers from source and died with `FATAL: no C compiler found`. Nothing in the installer had ever installed one; every host it had run on already carried gcc. **Fixed** — `build-essential` is now in the platform step's own package list. |
+| **The captcha is ON for a fresh install** | Not fixed, and not a bug — the default is right. What was wrong was the suite comment asserting the opposite, now corrected. See below. |
+| **A stale `node_modules` silently downgraded axios** | Rebuilding the bundles against whatever `node_modules` held, rather than after `npm ci`, produced bundles carrying axios 0.19.2 against a lockfile pinning 1.20.0, reverting the CSRF hardening. `CsrfTest` caught it. **Fixed**; the lesson is that regenerating build output *is* a behavioural change and the suite has to be re-run after one. |
+| **The snapshot itself had an interrupted `dpkg`** | `apache2` was unpacked but not configured, and the preflight correctly refused to start: `FATAL: dpkg has an interrupted transaction`. One `sudo dpkg --configure -a` clears it. This is a property of the snapshot, not of this repository, so it recurs on every rollback to that snapshot until the snapshot is retaken. |
+
+### The preconditions
+
+Only the first is a product requirement; the rest are what the *verification*
+needs, and none of them was written down before.
+
+**1. A clean dpkg state.** `sudo dpkg --configure -a` if the preflight says so.
+
+**2. The captcha must be off for the suites to log in.**
+
+```sql
+REPLACE INTO control (control_name, control_value) VALUES ('ctrl_captcha','0');
+```
+
+`install/sql/seed-control.sql` seeds four rows and **not** `ctrl_captcha`, and
+`Ctrl::get(CTRL_CAPTCHA, true)` in `LoginController` defaults it to ON when the
+row is absent. So a fresh install enforces the captcha, every scripted login
+returns `Captcha is Wrong`, and that one fact cascades into 46 failures in
+`lab-functional.sh`, 5 in `node-types.sh` and a loud skip in
+`db-backup-restore.sh`.
+
+`tools/integration/lab-functional.sh` used to state the opposite — "Requires
+the captcha to be off, which a fresh install has" — which was written against
+a box where someone had already run the SQL above. That comment is corrected,
+and now says what the failure looks like, because the symptom points nowhere
+near the cause: 46 assertions failing with "User is not authenticated".
+
+Having the suites set the value themselves is still a decision nobody has
+made. They do not, deliberately: a test suite that reconfigures
+authentication on the host it is measuring is a different kind of tool.
+
+**3. The Guacamole artefacts.** ~23 MB of Apache binaries, deliberately not
+committed (`install/vendor/guacamole/.gitignore` says why). Staged by a
+maintainer on a connected host:
+
+```bash
+bash tools/vendor-guacamole.sh          # verifies twice: Apache's published
+                                        # checksum, and the committed SHA512SUMS
+sudo install/install.sh --only guacamole
+```
+
+Without them the installer skips HTML5 consoles loudly and correctly, but
+`guacamole-console.sh` cannot run and six assertions across `node-types.sh`
+and `db-backup-restore.sh` fail on the missing console link.
+
+**4. A bootable QEMU image.**
+
+```bash
+sudo bash tools/vendor-qemu-test-image.sh
+```
+
+Stages CirrOS 0.6.2 and verifies it twice, the same shape
+`tools/vendor-guacamole.sh` uses: against the MD5SUMS cirros publishes beside
+the image, which is only a transport check because it comes from the same host
+as the bytes, and against a SHA-512 pinned in the script, which is the anchor
+because it is committed here and reviewed. It refuses a version it has no hash
+for, refuses to overwrite a file that does not match the pin, is a no-op when
+the image is already staged correctly, and confirms with `qemu-img` that what
+landed really is qcow2.
+
+The layout it produces is load-bearing at both ends, which is why the script
+owns it rather than the operator: `node-types.sh` takes the first directory
+under `/opt/unetlab/addons/qemu/` and derives the template from the part
+before the first `-`, while `device_qemu.php` matches disks against
+`hd[a-z]+.qcow2`. So `linux-cirros/hda.qcow2` means template `linux`, image
+`linux-cirros`, disk `hda`. Rename either half and the suite skips, or starts
+a node with no disk.
+
+**5. IOL, if you want the one node type that has never run.** Three things
+have to be on the host, none of them in this repository and none of them
+supplied by the installer:
+
+| | |
+|---|---|
+| the image | a 32-bit IOL binary under `/opt/unetlab/addons/iol/bin/` |
+| `keepalive.pl` | `device_iol::prepare()` symlinks it into the node workspace |
+| `iourc` | the Cisco licence, keyed to the host's `hostname` and `hostid` |
+
+The installer now enables i386 multiarch and installs `libc6:i386` and
+`libgcc-s1:i386`, which it previously did not — every IOL image Cisco published
+is a 32-bit ELF, so without those the image cannot exec at all and the error
+names a binary that plainly exists. That half is done and proven: an L3 image
+staged on the reference VM loads and reaches its licence check.
+
+`CiscoIOUKeygen.py` is **not** shipped here and `refreshIolLicense()` expects it
+on the host. Note that it is Python 2 and prefers `/usr/bin/python3`, so on any
+supported host it runs under Python 3, hits a `SyntaxError` and silently
+returns false. The licence path is therefore broken on 24.04 independently of
+whether an image is present, and this project does not generate licences.
+
+### What a repeat deploy will and will not hit
+
+The compiler defect is fixed in the tree, so it will not recur. The dpkg state
+will recur on every rollback to that same snapshot. The captcha, the Guacamole
+artefacts and the QEMU image are host setup, not code, so they are needed again
+on every fresh host — a product deploy is fine without the last two, and only
+the verification suites need them.
+
+### What is still not proven from scratch
+
+**IOL**, unchanged: licensed Cisco binaries this project does not carry, so
+`node-types.sh` skips it and `iol-dataplane.sh` drives the wrapper directly
+against a stand-in. And **PHP 7.4**, which nothing installs, so the lint matrix
+on a clean host is 8.4 alone.
+
+---
+
+## The emulator no longer starts through a shell
+
+For VPCS and QEMU, `device::spawnAsTenant()` execs the emulator directly. It
+used to hand the assembled command line to `/bin/sh -c`, and the comment above
+it said an argv array "would break every template", which was true of the
+obvious approach and false of the one taken.
+
+**Why it could not simply be escaped.** Four values reach that line unescaped
+on purpose: `qemu_options`, `dynamips_options`, `iol_options`, and the
+per-interface flags `getFlag()` concatenates. They are multi-argument by
+design, so wrapping one in `escapeshellarg()` makes it a single argument and
+breaks every one of the 115 templates that carries one. That is why they sat in
+`tests/Security/shell-escaping-baseline.txt` rather than being fixed.
+
+**Why it mattered more than the baseline implied.** These are not admin-only
+template data. `__lab.php` reads every node attribute whose key appears in that
+device's `getOptions()`; `device_qemu::getOptions()` returns `qemu_options`;
+and `templates/device/qemu.yml` renders it as an editable field with no
+`show: 0`. So the value rides inside a `.unl` file and is set per node, and any
+user who could author or import a lab could put words in it.
+
+**What was done.** `unl_command_argv()` in `includes/functions.php` splits the
+line the way a shell would — quoted runs, the `'\''` splice, adjacent runs
+concatenating into one word — and returns argv plus the redirection. Word
+splitting survives, so the option strings still do what they are for. No
+interpreter survives, so nothing acts on a `;` or a `>` even if one got past
+`SECURE_LINE`.
+
+**The part that nearly went wrong, and is the reason the tokeniser returns more
+than argv.** `SECURE_LINE` deliberately PERMITS `>`, because the call sites
+build their own redirection. A tokeniser that honoured that faithfully would
+have preserved the injection it was meant to remove. Both tenant node types
+redirect to exactly one file inside the node's running directory, so
+`spawnAsTenant()` refuses a line carrying more than one redirection, or one
+whose target is outside that directory. The **count** matters as well as the
+target: a shell opens and truncates every redirection in a line, not just the
+last one it ends up using.
+
+There is deliberately no fallback to `/bin/sh` when the split fails. A fallback
+would reinstate the shell on exactly the input that confused the tokeniser.
+
+**How it is tested.** `tests/Security/CommandArgvTest.php` is differential where
+it counts: for every line it compares argv against what `/bin/sh` actually
+produces, obtained with `printf '%s\0'`, rather than against an opinion about
+shell grammar. Splitting `-drive file='a b'` wrongly would silently corrupt
+every escaped value containing a space, and only ground truth catches that. It
+also pins that the tokeniser's grammar is `secure_line_parse()`'s in both
+directions, so a line cannot pass the guard and then surprise the splitter.
+
+The claim made visible, from a running node:
+
+```
+unl1  42011  1      /opt/vpcsu/bin/vpcs -m 1 -i 1 -p 30001 -e -d vunl1_0
+unl1  42012  42011  /opt/vpcsu/bin/vpcs -m 1 -i 1 -p 30001 -e -d vunl1_0
+/bin/sh processes owned by a tenant: 0
+```
+
+**What this did NOT cover.** Dynamips and IOL do not run as the tenant, so they
+still reach `exec($cmd . ' &')` and still get a shell; for them `SECURE_LINE`
+is still the only thing between an option string and an interpreter. Converting
+them needs whatever replaces the backgrounding that `&` provides, plus a
+licensed image to verify against. And the baseline still reads 47: the sweep is
+static and cannot see that this path ends at an `execv`, so retiring those
+entries means teaching the sweep first.
 
 ---
 
@@ -368,12 +579,11 @@ review and several had been shipping for years.
 
 ## Suggested next steps, in order
 
-1. **Review and merge.** 53 commits is a lot, but each is individually scoped
-   and its message explains the reasoning. Note that two commits carry files
-   they do not describe: `iol.c` landed inside the Guacamole commit `dfc1764`
-   because parallel work shared one index. `8707cbc` is an empty commit
-   recording that. Content is correct and verified; only the attribution is
-   wrong. Rewriting that history is a reasonable pre-merge tidy if you want it.
+1. **Review and merge `phase-04-exit-fixes`.** 38 commits, each individually
+   scoped, each message carrying the reasoning and what was measured. One
+   commit (`9bcff23`) closes two gate items at once because they are two
+   findings on the same allowlist and the same test. Then open Phase 05:
+   nothing gates it any more.
 2. **IOL, with a licensed image.** Everything else is proven; this is the only
    feature claim resting on unit tests alone.
 3. **Finish the sudo migration.** `rm` is the last of the file-mutation grants,
@@ -969,3 +1179,88 @@ control; the fix is not taken on trust.
    it was removed.** `code_only()` in `tests/bootstrap.php` strips comments with
    `token_get_all()` for exactly this; the house style of writing down what went
    away is otherwise in tension with the tests that enforce it.
+
+---
+
+## Phase 04: the exit gate
+
+`docs/PHASE-04-EXIT-FIXES.md` is the record: every item with the commit that
+fixed it and what was measured. This section is what that file does not say —
+the shape of the work, and what to watch for.
+
+**The ordering the file prescribed was right.** Items 1, 4 and 5 (the `fail()`
+narrowing, the two `set -e` aborts) were done first, and the rest could then be
+verified by running rather than reading. The pre-change `PackageRun` really does
+fatal — `Access level to …::fail() must be public` — which means every `php
+artisan` invocation on a deployed box had been fatalling, scheduler included.
+
+**Three fixes are bigger than their line numbers suggest.**
+
+  - *Item 6, the image-commit TOCTOU*, could not be fixed by checking harder:
+    the header qemu-img reads is in a file the tenant owns. The fix hands
+    qemu-img the checked chain as a `json:` block spec with `backing` explicit,
+    so the header's pointer is never dereferenced for a write. That was
+    measured both ways on qemu-img 8.2 before the code was written; the `json:`
+    form rather than `--image-opts` because `"backing": null` (open with NO
+    backing file) is only expressible there.
+  - *Item 12, the fixperms TOCTOU*, could not be fixed in PHP at all: no
+    `fchownat()`, so no race-free walk. GNU `chown -R -h -P` does it correctly
+    (openat traversal, `AT_SYMLINK_NOFOLLOW`, dev/ino re-check), and the action
+    now delegates to it. The test's oracle is chown's own `-v` log, which is
+    what lets it assert "never visited" without planting a link to a root-owned
+    file — important because the suite may run as root, and a regression would
+    then chown `/etc/shadow`.
+  - *Item 15, the lost SIGTERM*, is the classic self-pipe. It is not testable
+    deterministically in a unit test; it is verified by construction and by the
+    wrapper suites still passing.
+
+**Two things a reviewer should know.**
+
+  - `?relicense=1` (item 9) was sent by nothing in this tree. The `CsrfTest`
+    comment that named `error_helper.js:88` as its outbound leg described code
+    that is not there; the parameter was set by the upstream store's redirect,
+    which Phase 05 severs. If a relicense-after-purchase flow is ever wanted
+    again, it POSTs to `admin/default/relicense`.
+  - `Query::make()` rewrites **every** upstream URL from https to http, and
+    always has — login credentials to `user.pnetlab.com` go in the clear. This
+    session pinned the package download to https and left the rewrite for the
+    upstream calls, on the record, because removing it is what Phase 05 does
+    and a TLS failure today would look like a login outage. Phase 05 should
+    delete the rewrite with the calls.
+
+**One trap this session added to the list.** `fork/.claude/worktrees/` holds
+nine full copies of the tree from earlier agent sessions. Every tree walker
+and `php-lint.sh` crawled them: the sudoers test reported grants for call
+sites that only exist in an old copy, the escaping sweep reported dozens of
+NEW values, and the lint took minutes. All of them prune `.claude/` now, and
+so should any new walker — and `rsync --exclude .claude` when copying the
+tree to the VM.
+
+**Verification, on the reference VM against a clean `git archive` of the
+branch head:**
+
+```
+sudo bash install/install.sh --server-name pnetlab.test
+→ INSTALLER-EXIT=0, every step, all verification checks green
+
+bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
+bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/db-backup-restore.sh→ 67 assertions, 0 failed
+bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
+bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
+bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
+bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
+make -C platform/wrappers/src test         → 253 unit assertions, 0 failed (248 before; also clean under ASan+UBSan)
+tools/run-tests.sh (as root)               → 1778 assertions across 31 files, 0 failed
+tools/php-lint.sh (8.4 and 7.4)            → 352 files, 0 failed
+sudo policy                                → 23 grants, unchanged in number; shutdown/reboot now argument-pinned
+```
+
+`lab-functional.sh` and `node-types.sh` each failed once during this session,
+and both failures were state left on the host by a hand-driven check earlier
+in the session (a lab whose session was never destroyed shifted every node
+session id by one, so the console the suite expected on `:30001` was on
+`:30002`). Both passed on a cleaned host. Worth knowing because the symptom —
+"console connection refused" on the first node — does not say "stale
+session" anywhere: check `lab_sessions` and `node_sessions` before reading
+code.

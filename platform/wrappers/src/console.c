@@ -1,3 +1,5 @@
+#define _GNU_SOURCE   /* accept4 */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -130,7 +132,16 @@ int console_open(console_t *c, int port)
 	 * has been hardened with bindv6only=1 would otherwise present a listener
 	 * that satisfies netstat, and so satisfies R1 and makes the node read as
 	 * running, while refusing every actual console connection. */
-	fd = socket(AF_INET6, SOCK_STREAM, 0);
+	/* SOCK_CLOEXEC on the listener, and on every accepted client below.
+	 * child.c forks and execs the emulator through /bin/sh, and an inherited
+	 * copy of this descriptor in that process tree keeps the port bound
+	 * after the wrapper has gone. getNodeStatus() reads a bound console
+	 * port as "running", so an orphaned child -- a `sleep` in a template's
+	 * shell string, a helper the emulator spawned and did not wait for --
+	 * left a stopped node that the UI refused to start again, forever. The
+	 * pty slave and the pipes are handed over on purpose in child.c; nothing
+	 * else here should survive the exec. */
+	fd = socket(AF_INET6, SOCK_STREAM | SOCK_CLOEXEC, 0);
 	if (fd >= 0) {
 		if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off)) != 0)
 			log_wrn("could not clear IPV6_V6ONLY: %s", strerror(errno));
@@ -154,7 +165,7 @@ int console_open(console_t *c, int port)
 		 * than a dead node. */
 		log_wrn("socket(AF_INET6) failed (%s); falling back to IPv4 only",
 		        strerror(errno));
-		fd = socket(AF_INET, SOCK_STREAM, 0);
+		fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
 		if (fd < 0) {
 			log_errno("socket(AF_INET)");
 			return -1;
@@ -278,7 +289,7 @@ static void console_accept(console_t *c)
 {
 	int fd, on = 1;
 
-	fd = accept(c->listen_fd, NULL, NULL);
+	fd = accept4(c->listen_fd, NULL, NULL, SOCK_CLOEXEC);
 	if (fd < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR &&
 		    errno != ECONNABORTED)

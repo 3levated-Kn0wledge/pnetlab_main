@@ -1229,6 +1229,31 @@ static void test_iol_command(void)
 	chk_str("...by closing, escaping and reopening", quoted, "'a'\\''b'");
 	chk("a path that will not fit is refused rather than truncated",
 	    iol_sh_quote("aaaaaaaaaaaaaaaa", quoted, 8) != 0);
+	/* One quote expands to '\'' inside the outer quotes: 6 bytes plus NUL.
+	 * Exactly 7 fits; 6 must be refused, not written one byte past the
+	 * end. This was a one-byte heap overflow, and the buffers here are
+	 * malloc'd at exactly the size under test so that, under ASan, the
+	 * old code fails this rather than scribbling inside a larger array. */
+	{
+		char *exact = malloc(7);
+		char *short1 = malloc(6);
+		char *exact2 = malloc(9);
+		char *short2 = malloc(8);
+
+		chk("a quote in the last usable position fits exactly",
+		    exact != NULL && iol_sh_quote("'", exact, 7) == 0);
+		chk_str("...as the six-byte form", exact, "''\\'''");
+		chk("and one byte less is refused rather than overrun",
+		    short1 != NULL && iol_sh_quote("'", short1, 6) != 0);
+		chk("a quote after a run of plain bytes is bounded too",
+		    short2 != NULL && iol_sh_quote("ab'", short2, 8) != 0);
+		chk("...and fits with one more byte",
+		    exact2 != NULL && iol_sh_quote("ab'", exact2, 9) == 0);
+		free(exact);
+		free(short1);
+		free(exact2);
+		free(short2);
+	}
 
 	snprintf(img, sizeof(img), "/tmp/wrapper_test_image.%d", (int) getpid());
 	{

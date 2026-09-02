@@ -49,9 +49,15 @@ readonly PLATFORM_GID=32768
 #      is visible — but the drop-in adds After/Wants=docker.service so the daemon
 #      is up (and the socket exists) before the pool that talks to it.
 step_platform_docker() {
+	# install.sh runs under `set -e`, so a bare apt_install that fails would
+	# abort the whole installer here -- before the PHP-FPM drop-in below is
+	# installed, which is the step that lets ANY node start. Docker is one
+	# node type; its absence is a warning, not a dead host.
 	if ! have docker; then
 		note "installing docker.io for container-backed nodes"
-		apt_install docker.io
+		if ! apt_install docker.io; then
+			warn "docker.io could not be installed; Docker-backed nodes will not start"
+		fi
 	fi
 
 	if ! have docker; then
@@ -85,11 +91,19 @@ step_platform_docker() {
 	note "         daemon socket on 127.0.0.1:4243, both of which were worse."
 
 	if have systemctl; then
+		# run_ok returns the command's status rather than dying, but under
+		# `set -e` a non-zero return in statement position still aborts the
+		# script. It has to be tested, as packages.sh does, or the warning
+		# branch below is unreachable.
 		if ! systemctl is-enabled --quiet docker.service 2>/dev/null; then
-			run_ok systemctl enable docker.service
+			if ! run_ok systemctl enable docker.service; then
+				warn "could not enable docker.service"
+			fi
 		fi
 		if ! systemctl is-active --quiet docker.service; then
-			run_ok systemctl start docker.service
+			if ! run_ok systemctl start docker.service; then
+				warn "could not start docker.service"
+			fi
 		fi
 		if systemctl is-active --quiet docker.service; then
 			ok "docker.service is running"
@@ -110,11 +124,23 @@ step_platform() {
 	step "Emulation platform"
 
 	# --- emulators and host tooling ------------------------------------
+	#
+	# build-essential is not optional and not a developer convenience: this
+	# step COMPILES the three console wrappers from platform/wrappers/src
+	# below, and dies if it cannot. It is listed here, in the step that
+	# consumes it, rather than in base_packages() -- the web layer itself
+	# needs no compiler, and an install that only serves the web layer
+	# should not pull one in.
+	#
+	# Found by installing onto a freshly provisioned host: every host this
+	# had previously been run on already had gcc, so the installer died at
+	# "no C compiler found" the first time it met a genuinely clean one.
 	local pkgs=(
 		vpcs dynamips qemu-system-x86 qemu-utils
 		bridge-utils uml-utilities net-tools iproute2 psmisc
+		build-essential
 	)
-	note "installing emulators and host tools"
+	note "installing emulators, host tools and the compiler for the wrappers"
 	apt_install "${pkgs[@]}"
 
 	for b in vpcs dynamips qemu-system-x86_64; do
@@ -158,6 +184,55 @@ step_platform() {
 	done
 	run install -d -m 0755 -o root -g root /opt/unetlab/addons/iol/bin /opt/unetlab/addons/iol/lib
 	ok "addons directories created (qemu, iol, dynamips, docker)"
+
+	# --- i386 multiarch, for IOL ----------------------------------------
+	# Every IOL image Cisco published is a 32-bit i386 ELF linked against
+	# /lib/ld-linux.so.2 -- both of the ones this project has been able to
+	# look at are, L2 and L3 alike:
+	#
+	#   ELF 32-bit LSB executable, Intel 80386, dynamically linked,
+	#   interpreter /lib/ld-linux.so.2
+	#     NEEDED libm.so.6, libgcc_s.so.1, libc.so.6, libdl.so.2
+	#
+	# On an amd64 host with no foreign architecture the loader is simply not
+	# there, so the image cannot exec at all -- the failure is "No such file
+	# or directory" naming a binary that plainly exists, which is one of the
+	# more misleading errors in Linux.
+	#
+	# This step already builds iol_wrapper unconditionally, so the installer
+	# has committed to IOL being startable; leaving out the one thing that
+	# makes its payload runnable would be committing to half of it. libm and
+	# libdl are part of libc6 in modern glibc, so libc6:i386 and libgcc-s1:i386
+	# cover the whole NEEDED list -- about 10 MB.
+	#
+	# It is NOT gated on an image being present. The images are licensed and
+	# arrive later, by hand, on a host that is by then already installed;
+	# gating would mean the install that finally gets an image is the one that
+	# cannot run it.
+	if [[ "$(dpkg --print-architecture)" == 'amd64' ]]; then
+		if dpkg --print-foreign-architectures | grep -qx i386; then
+			ok "i386 multiarch is already enabled"
+		else
+			run dpkg --add-architecture i386
+			# Adding an architecture invalidates the package lists: without a
+			# refresh, libc6:i386 is "unable to locate package". apt_install
+			# short-circuits on APT_UPDATED, and the guard is -n, so it has to
+			# be UNSET rather than set to 0 -- "0" is non-empty and would skip
+			# exactly the refresh this needs.
+			unset APT_UPDATED
+			run apt-get update
+			APT_UPDATED=1
+			ok "enabled i386 multiarch (IOL images are 32-bit)"
+		fi
+		if apt_install libc6:i386 libgcc-s1:i386; then
+			ok "32-bit runtime present; IOL images can be executed"
+		else
+			warn "could not install the i386 runtime; IOL nodes will not start.
+      The images are 32-bit and need libc6:i386 and libgcc-s1:i386."
+		fi
+	else
+		note "not amd64; skipping the i386 runtime that IOL images need"
+	fi
 
 	# --- the tenant group node start needs ------------------------------
 	# unl_wrapper runs useradd -g unl for every node session. Without the group

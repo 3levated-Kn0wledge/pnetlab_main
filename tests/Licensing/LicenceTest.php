@@ -130,7 +130,7 @@ $it = new RecursiveIteratorIterator(
     new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
 foreach ($it as $file) {
     $path = str_replace('\\', '/', $file->getPathname());
-    foreach (['/.git/', '/node_modules/', '/store/vendor/', '/docs/', '/tests/'] as $skip) {
+    foreach (['/.git/', '/.claude/', '/node_modules/', '/store/vendor/', '/docs/', '/tests/'] as $skip) {
         if (strpos($path, $skip) !== false) continue 2;
     }
     if (!$file->isFile() || $file->getSize() > 262144) continue;

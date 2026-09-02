@@ -9,8 +9,22 @@
 # checks the host actually reflects that, pings in three directions, then tears
 # everything down and deletes the lab. It leaves no lab behind if it completes.
 #
-# Requires the captcha to be off, which a fresh install has:
-#     REPLACE INTO control VALUES ('ctrl_captcha','0');
+# REQUIRES THE CAPTCHA TO BE OFF, AND A FRESH INSTALL DOES NOT HAVE IT OFF:
+#
+#     REPLACE INTO control (control_name, control_value) VALUES ('ctrl_captcha','0');
+#
+# An earlier revision of this comment claimed a fresh install already had it
+# off. It does not, and the claim was made against a box where someone had
+# already run that SQL by hand. install/sql/seed-control.sql seeds four rows
+# and NOT ctrl_captcha, and LoginController reads it as
+# Ctrl::get(CTRL_CAPTCHA, true) -- so an absent row means the captcha is ON.
+#
+# The cost of getting this wrong is out of all proportion to the cause: every
+# scripted login returns {"data":"Captcha is Wrong"}, the token is never
+# issued, and all 46 assertions after the login section fail with
+# "User is not authenticated" pointing at nothing in particular. If this suite
+# suddenly fails wholesale on a host that used to pass, check the control table
+# before you read any code.
 #
 # Notes for anyone extending it, learned by getting these wrong:
 #

@@ -10,9 +10,11 @@ because "are we done with phase N" was a question nothing in the repo could
 answer.
 
 **Phases 05, 06 and 07 are not started** and are not audited here. Phase 05
-is additionally gated: `docs/PHASE-04-EXIT-FIXES.md` carries fifteen blocking
-fixes found by reviewing the work that closed Phase 04, and must be clear
-before 05 opens.
+was additionally gated on `docs/PHASE-04-EXIT-FIXES.md`, the fifteen blocking
+fixes found by reviewing the work that closed Phase 04. **That gate is clear
+as of 2026-09-02**: all fifteen are fixed and verified on the reference VM,
+and every secondary finding is fixed or carries a written deferral in that
+file.
 
 Two bullets are **declined by decision** rather than outstanding. They are
 marked as such, with the reasoning, because a deferred item that looks like an
@@ -96,7 +98,7 @@ rounded up.
 
 | Bullet | State |
 |---|---|
-| **Convert call sites to argument arrays** | **partial.** 47 sites remain in `tests/Security/shell-escaping-baseline.txt`, down from 73. What is left is `devices/` — see below |
+| **Convert call sites to argument arrays** | **partial, and the remainder is smaller than the number suggests.** The baseline still reads 47, down from 73, but for VPCS and QEMU those values no longer reach a shell at all: `device::spawnAsTenant()` execs the emulator directly. See below |
 | **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is **not** one line away; the reason is below. IOL still drops in-process |
 
 ### Closed: `secureCmd` is an allowlist
@@ -138,9 +140,38 @@ space, so a folder or lab name containing a **newline** passed; and `$` without
 
 47 entries, and with one exception all of them are `devices/`: the template
 option strings, the per-interface flags `getFlag()` concatenates, and the TiMOS
-family. Those are **argument injection by design** — the design decision the fork
-still owes — and escaping does not fix them. Every route from request data to a
-shell through an ordinary API handler has gone.
+family. Those are **argument injection by design** — a template's
+`-machine type=pc,accel=kvm -vga std` has to become four words — so
+`escapeshellarg()` would break every one of the 115 templates that carries one.
+Every route from request data to a shell through an ordinary API handler has
+gone.
+
+**For VPCS and QEMU the shell is gone too**, which the count does not show.
+`device::spawnAsTenant()` splits the assembled line with `unl_command_argv()`
+and execs the program directly, so the option strings can still add arguments,
+which is the feature, and nothing else: no interpreter remains to act on a `;`
+or a `>` even if one got past `SECURE_LINE`. The process tree of a running node
+carries no `/bin/sh` at all.
+
+The baseline is unchanged because the sweep is static and cannot see that a
+call site's string now ends at an `execv` rather than at a shell. Teaching it
+that is what would let these entries be retired, and until then the number
+overstates the exposure for two of the five node types and states it exactly
+for the other three.
+
+**Dynamips and IOL still get a shell**, because they do not run as the tenant
+and so still reach `exec($cmd . ' &')` in `device::start()`. For them
+`SECURE_LINE` remains the only thing between an option string and an
+interpreter. Converting them needs a replacement for the backgrounding `&`
+provides, and a licensed image to verify against — the same blocker as the
+tenant work below.
+
+This was **not** a threat only an admin could reach, which is what made it
+worth doing: `__lab.php` reads every node attribute whose key appears in that
+device's `getOptions()`, `device_qemu::getOptions()` returns `qemu_options`,
+and `templates/device/qemu.yml` renders it as an editable field with no
+`show: 0`. The value travels inside a `.unl` file, so any user who could author
+or import a lab could set it.
 
 The exception is `includes/functions.php $value`, which is `secureCmd()`'s own
 return: validating a value is not escaping it, and the one live path through it
@@ -286,25 +317,34 @@ The bullets below are assessed against what was actually built.
 |---|---|
 | Migrate `brctl`/`tunctl`/`ifconfig` to iproute2 | **deferred** — see below |
 | Validate 32-bit IOL via i386 multiarch | **blocked.** Needs a licensed IOL image, which this project deliberately does not carry |
-| Fix what the review of this work found | **open** — see `docs/PHASE-04-EXIT-FIXES.md` |
+| Fix what the review of this work found | **done** — `docs/PHASE-04-EXIT-FIXES.md`, all fifteen, one commit each, verified on the VM |
 
-### Blocking: the review findings gate Phase 05
+### Cleared: the review findings that gated Phase 05
 
 Every bullet above is met. A full review of the work that met them is not the
 same question, and it found defects the bullet-level audit cannot catch — a
 bullet asks whether the thing was built, a review asks whether it works.
-Fifteen of them block, seven at critical.
+Fifteen of them blocked, seven at critical.
 
-They are listed with evidence in **`docs/PHASE-04-EXIT-FIXES.md`**, which is the
-exit gate for this phase. Two of the fifteen defeat changes made in this branch:
-the read-only allowlist omits the session keep-alive, so admins are silently
-logged out after an hour, and three actions on that same allowlist take
-`?relicense=1` and perform a cross-origin write — the exact hole the allowlist
-was written to close. One blocks the rest: a private `fail()` in `PackageRun`
-illegally narrows `Command::fail()`, so every `php artisan` invocation fatals
-and nothing downstream can be verified by running it.
+They are listed with evidence, and now with the commit that fixed each and
+what was measured, in **`docs/PHASE-04-EXIT-FIXES.md`**. Two of the fifteen
+defeated changes made in this branch: the read-only allowlist omitted the
+session keep-alive, so admins were silently logged out after an hour, and
+three actions on that same allowlist took `?relicense=1` and performed a
+cross-origin write — the exact hole the allowlist was written to close. One
+blocked the rest: a private `fail()` in `PackageRun` illegally narrowed
+`Command::fail()`, so every `php artisan` invocation fatalled and nothing
+downstream could be verified by running it.
 
-**Phase 04 is not past until that file is clear.**
+Three secondary findings are deferred rather than fixed, each with the
+condition that reopens it written beside it: the legacy API's origin guard
+behind a Host-rewriting proxy (the shipped vhost is the supported
+deployment), the IOL start unwind (gated, like everything IOL, on a licensed
+image), and `Query::make()`'s https→http rewrite for upstream calls (Phase
+05 removes the calls).
+
+**Phase 04 is past.** What remains under it is the iproute2 deferral and the
+IOL bullet, both below.
 
 ### Correction: what was actually wrong with KSM
 

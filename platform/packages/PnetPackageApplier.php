@@ -58,6 +58,8 @@ class PnetPackageApplier
     private $journalPath;
     private $journal = array();
     private $stagingDir;
+    /** Held for the whole of apply() or uninstall(); see lock(). */
+    private $lockHandle;
     /** Recorded rather than run, so tests can assert on the argv that would have been used. */
     public $commands = array();
 
@@ -103,6 +105,7 @@ class PnetPackageApplier
         );
 
         try {
+            $this->lock();
             $this->recoverInterrupted();
 
             if (!is_file($packagePath)) {
@@ -214,6 +217,7 @@ class PnetPackageApplier
                 $this->log('rolled back; the host is as it was before this package');
             }
         }
+        $this->unlock();
 
         return $result;
     }
@@ -240,6 +244,7 @@ class PnetPackageApplier
             'key' => null, 'error' => null, 'rolled_back' => false,
         );
         try {
+            $this->lock();
             $this->recoverInterrupted();
 
             $types = PnetManifest::types();
@@ -306,6 +311,8 @@ class PnetPackageApplier
             $result['error'] = $e->getMessage();
             $this->log('ERROR: ' . $e->getMessage());
         }
+        $this->unlock();
+
         return $result;
     }
 
@@ -739,15 +746,27 @@ class PnetPackageApplier
         }
         $payload = json_encode(array('complete' => $complete, 'entries' => $this->journal));
         $tmp = $this->journalPath . '.tmp';
-        file_put_contents($tmp, $payload);
         // The journal has to be on disk before the operation it describes, or a
-        // kill between the two leaves a change nothing knows how to undo.
-        $fh = fopen($tmp, 'r');
-        if ($fh) {
-            fflush($fh);
-            fclose($fh);
+        // kill between the two leaves a change nothing knows how to undo. So
+        // every step of the write is checked, and a failure is an exception
+        // that stops the operation BEFORE it runs: an earlier revision ignored
+        // the write and the rename, and flushed a read handle, so a full disk
+        // or a permissions slip left the journal one entry behind the tree --
+        // exactly the entry recovery would then not know about.
+        $fh = @fopen($tmp, 'wb');
+        if ($fh === false || fwrite($fh, $payload) !== strlen($payload) || !fflush($fh)) {
+            if ($fh !== false) fclose($fh);
+            @unlink($tmp);
+            throw new PnetPackageError('cannot write the journal ' . PnetManifest::quote($tmp));
         }
-        rename($tmp, $this->journalPath);
+        if (function_exists('fsync')) {
+            fsync($fh);
+        }
+        fclose($fh);
+        if (!@rename($tmp, $this->journalPath)) {
+            @unlink($tmp);
+            throw new PnetPackageError('cannot publish the journal ' . PnetManifest::quote($this->journalPath));
+        }
     }
 
     /** Undo the journal, newest first. */
@@ -801,7 +820,57 @@ class PnetPackageApplier
     }
 
     /**
+     * One package operation at a time, host-wide.
+     *
+     * recoverInterrupted() treats every staging directory whose journal is not
+     * marked complete as the wreckage of a killed run and rolls it back. Without
+     * exclusion, a second apply started while the first was still running --
+     * two admins, or one admin and a retry after a slow download -- would read
+     * the first run's live journal as an interruption and undo its operations
+     * underneath it, then clear its staging directory while it was still
+     * extracting into it. flock() on a file in the state directory is the
+     * exclusion: held for the whole of apply() or uninstall(), released on every
+     * exit path, and released by the kernel if the process dies, which is the
+     * case recoverInterrupted() exists for and the one a lock file on its own
+     * would get wrong.
+     *
+     * Non-blocking on purpose. The caller is unl_wrapper with an fpm worker
+     * waiting on it; a second operation is refused with a clear message rather
+     * than queued behind a run that might take minutes.
+     */
+    private function lock()
+    {
+        if ($this->lockHandle !== null) {
+            return;
+        }
+        $this->mkdirp($this->stateDir, 0755);
+        $path = $this->stateDir . '/lock';
+        $h = @fopen($path, 'c');
+        if ($h === false) {
+            throw new PnetPackageError('cannot open the package lock ' . PnetManifest::quote($path));
+        }
+        if (!flock($h, LOCK_EX | LOCK_NB)) {
+            fclose($h);
+            throw new PnetPackageError('another package operation is in progress; try again when it has finished');
+        }
+        $this->lockHandle = $h;
+    }
+
+    private function unlock()
+    {
+        if ($this->lockHandle === null) {
+            return;
+        }
+        flock($this->lockHandle, LOCK_UN);
+        fclose($this->lockHandle);
+        $this->lockHandle = null;
+    }
+
+    /**
      * Unwind any journal left behind by a killed run before starting a new one.
+     *
+     * Only ever called under lock(), so a staging directory found here belongs
+     * to a process that is no longer running.
      *
      * This is the answer to "what happens if the box loses power halfway
      * through an upgrade": the next attempt does not build on the wreckage, it

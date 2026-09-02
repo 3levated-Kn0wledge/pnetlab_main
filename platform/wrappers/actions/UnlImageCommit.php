@@ -157,6 +157,9 @@ class UnlImageCommit
      * that names a backing file is inside a file the tenant (and, because
      * /opt/unetlab/tmp is mode 777, anyone who can write a workspace) controls,
      * and both `commit` and `convert` follow it.
+     *
+     * The format of each member is kept alongside it (see formats()), because
+     * the check alone is not enough -- see spec() for why.
      */
     private function chain($file, $workspace)
     {
@@ -165,8 +168,14 @@ class UnlImageCommit
         if (!$this->runCommands) return array($file);
 
         $chain = array();
+        $this->formats = array();
         foreach (explode("\n", $result['out']) as $line) {
-            if (!preg_match('/^image:\s+(.+)$/', trim($line), $m)) continue;
+            $line = trim($line);
+            if (preg_match('/^file format:\s+(\S+)$/', $line, $m) && count($chain)) {
+                $this->formats[$chain[count($chain) - 1]] = $m[1];
+                continue;
+            }
+            if (!preg_match('/^image:\s+(.+)$/', $line, $m)) continue;
             $member = $m[1];
             if (count($chain) >= self::MAX_CHAIN) return null;
             if (is_link($member)) return null;
@@ -177,6 +186,64 @@ class UnlImageCommit
             $chain[] = realpath($member);
         }
         return count($chain) ? $chain : null;
+    }
+
+    /** Format of a chain member as `qemu-img info` reported it; qcow2 if it did not say. */
+    private $formats = array();
+
+    private function format($member)
+    {
+        return isset($this->formats[$member]) && preg_match('/^[a-z0-9_-]+$/', $this->formats[$member])
+            ? $this->formats[$member] : 'qcow2';
+    }
+
+    /**
+     * The image, as an explicit block-graph spec rather than a filename.
+     *
+     * WHY A FILENAME IS NOT ENOUGH. chain() reads the backing pointer out of
+     * the qcow2 header and checks where it points. `qemu-img commit <file>`
+     * then reads the SAME header again, and writes into whatever it names by
+     * then. The header lives in a file the tenant owns, in a directory that is
+     * mode 777. Between the check and the commit, one `qemu-img rebase -u`
+     * repoints it at any file on the host, and root's qemu-img commits the
+     * node's delta into it -- a write to an attacker-chosen path, with the
+     * check having passed. That was measured, not inferred: a header rebased
+     * to a copy of /etc/hostname after the check was committed into.
+     *
+     * So the pointer the header carries is never used for a write or a read.
+     * The chain that was checked is what is handed to qemu-img, as a `json:`
+     * pseudo-filename whose "backing" is spelled out: the verified member for
+     * a chain with one, and null -- open with NO backing file -- for an image
+     * that had none when it was checked. qemu opens exactly what the spec
+     * says and ignores the header's pointer. Verified against qemu-img 8.2:
+     * a hostile header is committed into the verified template and the file
+     * the header names is untouched; `"backing": null` flattens a standalone
+     * image without opening anything else.
+     *
+     * The spec is JSON, not the key=value --image-opts form, because a comma
+     * in a path would have to be doubled there, and because `backing=null`
+     * is only expressible in JSON.
+     *
+     * The backing member's own backing pointer (a chain of three or more) is
+     * still read from that member's header, and that is intended: those are
+     * templates under the addons root, which the tenant cannot write. What is
+     * closed here is the one hop that crosses the tenant boundary.
+     */
+    private function spec($top, array $chain)
+    {
+        $node = array(
+            'driver' => $this->format($top),
+            'file'   => array('driver' => 'file', 'filename' => $top),
+        );
+        if (count($chain) >= 2 && $chain[0] === $top) {
+            $node['backing'] = array(
+                'driver' => $this->format($chain[1]),
+                'file'   => array('driver' => 'file', 'filename' => $chain[1]),
+            );
+        } else {
+            $node['backing'] = null;
+        }
+        return 'json:' . json_encode($node, JSON_UNESCAPED_SLASHES);
     }
 
     // ------------------------------------------------------------------ entry
@@ -256,9 +323,15 @@ class UnlImageCommit
         if ($type === 'existed') {
             // Merge each node disk down into the template it was cloned from.
             // That mutates a shared template, which is what the feature is; the
-            // chain check above is what stops it mutating something else.
+            // chain check above is what stops it mutating something else -- and
+            // spec() is what makes the check stick, by naming the template
+            // explicitly instead of trusting the header a second time.
             foreach ($qcows as $qcow) {
-                $r = $this->qemu(array('commit', $qcow));
+                $chain = $chains[$qcow];
+                if (count($chain) < 2 || $chain[0] !== realpath($qcow)) {
+                    return $fail(basename($qcow) . ' has no backing file to commit into');
+                }
+                $r = $this->qemu(array('commit', $this->spec($chain[0], $chain)));
                 if ($r['rc'] !== 0) return $fail('qemu-img commit failed: ' . trim($r['out']));
             }
             return array('ok' => true, 'error' => null, 'name' => null,
@@ -288,8 +361,10 @@ class UnlImageCommit
                     return $fail('could not copy ' . basename($qcow));
                 }
             } else {
-                // Flatten the whole chain into one standalone image.
-                $r = $this->qemu(array('convert', '-O', 'qcow2', $qcow, $target));
+                // Flatten the whole chain into one standalone image. The
+                // source is the checked chain, not the header (see spec()).
+                $chain = $chains[$qcow];
+                $r = $this->qemu(array('convert', '-O', 'qcow2', $this->spec($chain[0], $chain), $target));
                 if ($r['rc'] !== 0) {
                     $this->cleanup($newFolder);
                     return $fail('qemu-img convert failed: ' . trim($r['out']));

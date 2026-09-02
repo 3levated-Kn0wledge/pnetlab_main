@@ -42,14 +42,29 @@
  * remains the blunt everything-at-once repair the admin button runs; this is
  * the narrow, named half that application code is allowed to call.
  *
- * SYMLINKS ARE SKIPPED, NOT FOLLOWED
+ * SYMLINKS ARE NOT FOLLOWED, AND THE WALK IS NOT OURS
  *
  * `chown -R` on a tree the web user can already write is a hazard in one
  * direction: a symlink planted inside the tree pointing at, say, /etc/shadow.
- * GNU chown -R does not dereference by default, but PHP's chown() DOES, and PHP
- * has no lchown(). So this walk never touches a symlink at all — it does not
- * chown it and does not descend through it. The effect is that a planted link
- * is inert instead of being a way to take ownership of a file outside the root.
+ * An earlier revision of this file walked the tree itself in PHP, testing
+ * is_link() and then calling chown(). That is a time-of-check/time-of-use
+ * race, and on a www-data-writable tree it is a live one: between the
+ * is_link() and the chown() the entry can be swapped for a symlink, and PHP's
+ * chown() dereferences; between the is_dir() and the scandir() a directory can
+ * be swapped for a symlink to /etc, and every path built beneath it resolves
+ * through the link. PHP has lchown() but no openat()/fchownat(), so a walk
+ * written in PHP cannot be made race-free.
+ *
+ * GNU chown can. `chown -R -h -P` traverses with openat() relative to a held
+ * directory descriptor, changes ownership with fchownat(AT_SYMLINK_NOFOLLOW),
+ * refuses to descend through any symlink, and re-checks each directory's
+ * dev/ino after entering it -- a directory swapped mid-walk is reported as
+ * changed, not followed. That is the traversal this file now delegates to,
+ * as an argv array through proc_open(): no shell, and the only variable
+ * argument is a root chosen from the enumeration below.
+ *
+ * A root that is itself a symlink is still refused here first, and would be
+ * handled by -h -P anyway (the link is changed, its target is not).
  */
 
 class UnlFixPerms
@@ -57,18 +72,23 @@ class UnlFixPerms
     /** The user every one of these trees is handed to. Not a parameter. */
     const OWNER = 'www-data';
 
-    /**
-     * Deeper than any of these trees goes. A cap rather than an unbounded walk,
-     * because the trees are writable by the web user.
-     */
-    const MAX_DEPTH = 32;
+    /** The one binary this action runs. Fixed path; not a parameter of run(). */
+    const CHOWN = '/bin/chown';
 
     private $prefix;
     private $owner;
     private $runCommands;
+    private $chown;
 
-    /** Recorded rather than run when run_commands is false. */
+    /** Recorded rather than run when run_commands is false. One argv per root. */
     public $commands = array();
+
+    /**
+     * Every path chown reported on the last live run, changed or retained,
+     * in the order it visited them. For diagnostics and for the test, which
+     * uses it to prove a planted symlink's target was never visited.
+     */
+    public $visited = array();
 
     public function __construct(array $options = array())
     {
@@ -76,6 +96,7 @@ class UnlFixPerms
         $this->owner  = isset($options['owner']) ? $options['owner'] : self::OWNER;
         $this->runCommands = array_key_exists('run_commands', $options)
             ? (bool) $options['run_commands'] : true;
+        $this->chown = isset($options['chown']) ? $options['chown'] : self::CHOWN;
     }
 
     /**
@@ -136,6 +157,7 @@ class UnlFixPerms
         $changed = 0;
         $failed  = 0;
         $skipped = array();
+        $this->visited = array();
         foreach ($scopes[$scopeRaw] as $root) {
             // A root that is a symlink, or is not there at all, is skipped and
             // said so. Neither is an error: an appliance without the IOL addons
@@ -145,7 +167,7 @@ class UnlFixPerms
                 $skipped[] = $root;
                 continue;
             }
-            $this->own($root, 0, $ids, $changed, $failed);
+            $this->own($root, $ids, $changed, $failed);
         }
 
         return array('ok' => $failed === 0, 'scope' => $scopeRaw,
@@ -170,38 +192,99 @@ class UnlFixPerms
     }
 
     /**
-     * chown one path and, if it is a directory, everything beneath it.
+     * The argv for one root. Every flag is load-bearing:
      *
-     * Recursion is bounded by MAX_DEPTH, and symlinks are neither chowned nor
-     * descended — see the header. Nothing here is built into a string.
+     *   -R              the whole tree
+     *   -h              change a symlink itself, never what it points at
+     *   -P              never traverse a symlink, including one given as the root
+     *   --preserve-root a defence against a root of '/' that the enumeration
+     *                   above already makes unreachable
+     *   -v              one line per path, which is how `changed` is counted
+     *                   and how the test proves what was NOT visited
+     *   --              the root can never be read as an option
+     *
+     * The owner is numeric on a live run (uid:gid as resolved above) so that
+     * the account named in the enumeration and the account chown acts on are
+     * the same lookup. When recording, the name stands in.
      */
-    private function own($path, $depth, array $ids, &$changed, &$failed)
+    private function argv($root, array $ids)
     {
-        if ($depth > self::MAX_DEPTH) {
-            $failed++;
-            return;
-        }
+        $owner = $this->runCommands
+            ? $ids['uid'] . ':' . $ids['gid']
+            : $this->owner . ':' . $this->owner;
+        return array($this->chown, '-R', '-h', '-P', '--preserve-root', '-v', '--', $owner, $root);
+    }
 
+    /**
+     * proc_open() with an ARRAY execs the binary directly: no shell. The
+     * parameter is array-typed because that is the shape the tokenizer sweep
+     * in tests/Security/ShellEscapingTest.php can prove is not a shell.
+     *
+     * Both pipes are read together with stream_select(), never one to EOF and
+     * then the other: chown -v writes a line per path to stdout and a line per
+     * failure to stderr, and a tree with many unreadable entries could fill
+     * the stderr pipe while this side was still waiting on stdout -- the
+     * two-pipe deadlock, which holds the caller's fpm worker until timeout.
+     */
+    private function spawn(array $argv)
+    {
+        $desc = array(0 => array('file', '/dev/null', 'r'),
+                      1 => array('pipe', 'w'),
+                      2 => array('pipe', 'w'));
+        $proc = @proc_open($argv, $desc, $pipes);
+        if (!is_resource($proc)) return array('rc' => 127, 'out' => '', 'err' => '');
+        $buf = array(1 => '', 2 => '');
+        $open = array(1 => $pipes[1], 2 => $pipes[2]);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+        while (count($open)) {
+            $r = array_values($open);
+            $w = null;
+            $e = null;
+            if (@stream_select($r, $w, $e, 60) === false) break;
+            foreach ($r as $stream) {
+                $k = ($stream === $pipes[1]) ? 1 : 2;
+                $chunk = fread($stream, 65536);
+                if ($chunk !== false && $chunk !== '') {
+                    $buf[$k] .= $chunk;
+                } elseif (feof($stream)) {
+                    unset($open[$k]);
+                }
+            }
+        }
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $rc = proc_close($proc);
+        return array('rc' => $rc, 'out' => $buf[1], 'err' => $buf[2]);
+    }
+
+    /** Hand one root and everything beneath it to the owner. */
+    private function own($root, array $ids, &$changed, &$failed)
+    {
+        $argv = $this->argv($root, $ids);
         if (!$this->runCommands) {
-            $this->commands[] = array('chown', $path, $this->owner);
+            $this->commands[] = $argv;
             $changed++;
-        } elseif (@chown($path, $ids['uid']) && @chgrp($path, $ids['gid'])) {
-            $changed++;
-        } else {
-            $failed++;
-        }
-
-        if (!is_dir($path)) return;
-        $entries = @scandir($path);
-        if ($entries === false) {
-            $failed++;
             return;
         }
-        foreach ($entries as $entry) {
-            if ($entry === '.' || $entry === '..') continue;
-            $child = $path . '/' . $entry;
-            if (is_link($child)) continue;
-            $this->own($child, $depth + 1, $ids, $changed, $failed);
+
+        $r = $this->spawn($argv);
+        $rc = $r['rc'];
+        $err = $r['err'];
+
+        foreach (explode("\n", $r['out']) as $line) {
+            // GNU chown -v: "changed ownership of 'P' from A to B" and
+            // "ownership of 'P' retained as B". The path is quoted with the
+            // locale's quotes; both ASCII and the UTF-8 pair are stripped.
+            if (preg_match("/^(changed ownership of|ownership of) (['\x{2018}])(.*)(['\x{2019}]) (from |retained)/u", $line, $m)) {
+                $this->visited[] = $m[3];
+                if ($m[1] === 'changed ownership of') $changed++;
+            }
+        }
+        if ($rc !== 0) {
+            $failed++;
+            error_log(date('M d H:i:s ') . 'ERROR: chown -R on ' . $root . ' exited ' . $rc
+                . ($err !== '' ? ': ' . trim($err) : ''));
         }
     }
 }

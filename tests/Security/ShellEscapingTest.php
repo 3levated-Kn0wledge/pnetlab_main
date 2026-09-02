@@ -100,7 +100,7 @@ const SWEEP_MAX_DEPTH = 6;
 function sweep_files($root)
 {
     $out = [];
-    $skip = [$root . '/.git', $root . '/store/vendor', $root . '/store/node_modules'];
+    $skip = [$root . '/.git', $root . '/.claude', $root . '/store/vendor', $root . '/store/node_modules'];
     $it = new RecursiveIteratorIterator(
         new RecursiveCallbackFilterIterator(
             new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),

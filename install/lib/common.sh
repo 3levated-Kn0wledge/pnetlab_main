@@ -133,8 +133,16 @@ render_template() {
 	local pair name value
 	for pair in "$@"; do
 		name="${pair%%=*}"; value="${pair#*=}"
-		# '|' as the sed delimiter; paths contain '/', not '|'.
-		sed -i "s|@${name}@|${value//|/\\|}|g" "$out"
+		# The value is the REPLACEMENT side of an s||| command, where '\' and
+		# '&' are syntax ('&' is "the whole match") and '|' is the delimiter.
+		# All three are escaped, in that order -- backslash first, or the
+		# escapes just added would be escaped again. The guacamole database
+		# password goes through here; a rotated one containing '&' would
+		# otherwise have been written as the placeholder's own name.
+		value="${value//\\/\\\\}"
+		value="${value//&/\\&}"
+		value="${value//|/\\|}"
+		sed -i "s|@${name}@|${value}|g" "$out"
 	done
 	printf '%s\n' "$out"
 }

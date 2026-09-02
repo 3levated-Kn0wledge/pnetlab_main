@@ -342,7 +342,7 @@ assert_same("sudo x -F 'a b'", secureCmd("sudo x -F 'a b'", SECURE_LINE),
 // call does not count and a call inside a string does not either.
 $undeclared = [];
 $declared = 0;
-$skip = ['/.git/', '/store/vendor/', '/store/node_modules/', '/tests/'];
+$skip = ['/.git/', '/.claude/', '/store/vendor/', '/store/node_modules/', '/tests/'];
 $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
 foreach ($it as $f) {
     if ($f->getExtension() !== 'php') continue;

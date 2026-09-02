@@ -18,9 +18,13 @@
  *
  *   - the scope is a closed enumeration and an unknown one is refused;
  *   - no scope can be made to touch anything outside its own root, including
- *     through a symlink planted inside a tree the web user can already write —
- *     PHP's chown() dereferences and PHP has no lchown(), so a walk that did
- *     not skip links would be a way to take ownership of /etc/shadow;
+ *     through a symlink planted inside a tree the web user can already write.
+ *     The walk is GNU chown's (-R -h -P), not PHP's: a PHP walk that tests
+ *     is_link() and then chown()s is a time-of-check/time-of-use race on a
+ *     tree the web user can rewrite between the two calls, and PHP has no
+ *     fchownat() to close it. So the argv is pinned flag by flag, AND a real
+ *     run over a scratch tree proves the planted link's target is never
+ *     visited;
  *   - the web-layer helper's copy of the enumeration matches the wrapper's;
  *   - the old `sudo chown` shapes are gone from all four rewritten call sites.
  *
@@ -38,12 +42,12 @@ require_once $root . '/store/app/Helpers/System/Wrapper.php';
 
 $ws = sys_get_temp_dir() . '/fixperms-test-' . getmypid();
 
-/** Everything the action would touch, in the order it would touch it. */
+/** Every root the action would hand to chown -R, in the order it would. */
 function planned(UnlFixPerms $f, $scope)
 {
     $r = $f->run($scope);
     $paths = [];
-    foreach ($f->commands as $c) $paths[] = $c[1];
+    foreach ($f->commands as $c) $paths[] = $c[count($c) - 1];
     return [$r, $paths];
 }
 
@@ -51,6 +55,15 @@ function fp()
 {
     global $ws;
     return new UnlFixPerms(['prefix' => $ws, 'run_commands' => false]);
+}
+
+/** A live instance: really runs /bin/chown, handing the tree to the user running this test. */
+function fp_live()
+{
+    global $ws;
+    $me = function_exists('posix_getpwuid') ? posix_getpwuid(posix_geteuid()) : false;
+    if ($me === false) return null;
+    return new UnlFixPerms(['prefix' => $ws, 'owner' => $me['name']]);
 }
 
 $roots = [
@@ -147,28 +160,63 @@ foreach (['addons', 'templates', 'icons', 'scripts'] as $s) {
 sort($union); sort($parts);
 assert_same($parts, $union, "'dependencies' is exactly its four component scopes");
 
+// ------------------------------------------------------------- the argv shape
+
+echo "  -- the argv is GNU chown with every load-bearing flag\n";
+
+$f = fp();
+$f->run('labs');
+assert_same(1, count($f->commands), 'one chown invocation per root');
+$argv = $f->commands[0];
+assert_same('/bin/chown', $argv[0], 'the binary is the fixed path');
+foreach (['-R', '-h', '-P', '--preserve-root', '-v'] as $flag) {
+    assert_true(in_array($flag, $argv, true), "the argv carries $flag");
+}
+$dd = array_search('--', $argv, true);
+assert_true($dd !== false && $dd === count($argv) - 3,
+    "'--' immediately precedes the owner and the root, so neither can be read as an option");
+assert_same($ws . '/opt/unetlab/labs', $argv[count($argv) - 1], 'the root is the last word');
+assert_true(!in_array('-L', $argv, true) && !in_array('-H', $argv, true),
+    'and nothing asks chown to follow links');
+
 // ------------------------------------------------------------ planted symlinks
 
 echo "  -- a symlink planted inside a tree is inert\n";
 
+// A root-owned target that a follow would either chown (as root) or fail on
+// (as anyone else) is deliberately NOT used: this test may run as root, and
+// a regression would then modify /etc/shadow. The targets are inside the
+// scratch tree, and the oracle is chown's own -v log of what it visited.
+mkdir($ws . '/elsewhere/deep', 0755, true);
+file_put_contents($ws . '/elsewhere/deep/secret', 's');
 symlink($ws . '/elsewhere', $ws . '/opt/unetlab/addons/escape');
 symlink($ws . '/elsewhere/secret', $ws . '/opt/unetlab/addons/qemu/secret');
-symlink('/etc/shadow', $ws . '/opt/unetlab/labs/shadow');
+symlink($ws . '/elsewhere/deep/secret', $ws . '/opt/unetlab/labs/shadow');
 
-list($r, $paths) = planned(fp(), 'addons');
-$bad = [];
-foreach ($paths as $p) {
-    if (strpos($p, $ws . '/elsewhere') === 0) $bad[] = $p;
-    if (substr($p, -7) === '/escape' || substr($p, -7) === '/secret') $bad[] = $p;
+$live = fp_live();
+if ($live === null) {
+    echo "  SKIP  ext-posix is not available; the live chown run is not exercised\n";
+} else {
+    $r = $live->run('addons');
+    assert_true($r['ok'], 'a live run over a tree with planted links succeeds'
+        . ($r['ok'] ? '' : ': ' . $r['error']));
+    assert_true(count($live->visited) > 0, 'chown reported the paths it visited');
+    $bad = [];
+    foreach ($live->visited as $p) {
+        if (strpos($p, $ws . '/elsewhere') === 0) $bad[] = $p;
+        if (strpos($p, '/escape/') !== false) $bad[] = $p;
+    }
+    assert_same([], $bad, 'nothing behind a planted link was visited');
+    assert_true(in_array($ws . '/opt/unetlab/addons/qemu/linux/hda.qcow2', $live->visited, true),
+        'while the real tree underneath it still was');
+    assert_true(in_array($ws . '/opt/unetlab/addons/escape', $live->visited, true),
+        'the link itself is visited (chown -h changes the link, not its target)');
+
+    $r = $live->run('labs');
+    assert_true($r['ok'], 'a link to a file outside the root does not fail the run');
+    assert_true(!in_array($ws . '/elsewhere/deep/secret', $live->visited, true),
+        'and its target is not visited');
 }
-assert_same([], $bad, 'neither the link nor anything behind it is chowned');
-assert_true(in_array($ws . '/opt/unetlab/addons/qemu/linux/hda.qcow2', $paths, true),
-    'while the real tree underneath it still is');
-
-list(, $paths) = planned(fp(), 'labs');
-assert_true(!in_array($ws . '/opt/unetlab/labs/shadow', $paths, true),
-    'a link to /etc/shadow is not chowned');
-assert_true(!in_array('/etc/shadow', $paths, true), 'and neither is its target');
 
 unlink($ws . '/opt/unetlab/addons/escape');
 unlink($ws . '/opt/unetlab/addons/qemu/secret');
@@ -192,16 +240,16 @@ $r = $missing->run('labs');
 assert_true($r['ok'], 'a missing root is not an error');
 assert_same([$ws . '/nowhere/opt/unetlab/labs'], $r['skipped'], 'and is reported as skipped');
 
-// ------------------------------------------------------------- the depth bound
+// ------------------------------------------------- the PHP walk is really gone
 
-echo "  -- the walk is bounded\n";
-$deep = $ws . '/opt/unetlab/labs';
-for ($i = 0; $i < UnlFixPerms::MAX_DEPTH + 4; $i++) {
-    $deep .= '/d';
-    mkdir($deep, 0755);
-}
-$r = fp()->run('labs');
-assert_true(!$r['ok'], 'a tree deeper than the cap is reported as failed rather than walked');
+echo "  -- the tree walk is not PHP's\n";
+
+$action = code_without_comments($root . '/platform/wrappers/actions/UnlFixPerms.php');
+assert_true(strpos($action, 'scandir(') === false && strpos($action, 'opendir(') === false,
+    'the action never enumerates a directory itself');
+assert_true(preg_match('/\bchown\s*\(/', $action) === 0 && preg_match('/\bchgrp\s*\(/', $action) === 0,
+    'and never calls PHP\'s dereferencing chown()/chgrp()');
+assert_true(strpos($action, 'proc_open(') !== false, 'chown is exec\'d with an argv array');
 
 // ------------------------------------------- the call sites are really rewritten
 
