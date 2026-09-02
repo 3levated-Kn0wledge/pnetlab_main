@@ -74,7 +74,7 @@ rounded up.
 
 | Bullet | Evidence |
 |---|---|
-| Build the `www-data` sudo allowlist | 42 grants → 24 |
+| Build the `www-data` sudo allowlist | 42 grants → 23 |
 | Reap tenant accounts | `unl_wrapper -a reap-tenant`; a full lab run leaves zero `unl*` accounts |
 | Tighten `/opt/unetlab/tmp` | `755 www-data:www-data` here, against `2777 root:unl` on the appliance |
 | Replace unsalted SHA-256 with `password_hash` | `PasswordHashingTest` |
@@ -86,15 +86,96 @@ rounded up.
 | Re-enable `VerifyCsrfToken` | `CsrfTest`, 107 assertions |
 | Delete `CorsMidware` and the wildcard origin | middleware gone |
 | Regression tests for metacharacter payloads | `ShellEscapingTest`, `SecureCmdTest` |
+| **Invert `secureCmd` to an allowlist** | done — three named shapes, `SecureCmdTest` 146 assertions. See below |
 
 ### Open
 
 | Bullet | State |
 |---|---|
-| **Invert `secureCmd` to an allowlist** | **not done.** Still the denylist `/[#;\|&]\|\.{2,}/m`. `SecureCmdTest` documents ten metacharacters it accepts — backticks, `$( )`, newline, `>`, `<`, space, `$HOME`, quotes, globs — so the gap is measured, not suspected |
 | **Upgrade axios** | **not done.** `package.json` pins `^0.19.0` |
-| **Convert call sites to argument arrays** | **partial.** 73 sites remain in `tests/Security/shell-escaping-baseline.txt`. Everything added this cycle uses `proc_open` with an argv array |
-| **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is one line away but has no image to verify against. IOL still drops in-process |
+| **Convert call sites to argument arrays** | **partial.** 47 sites remain in `tests/Security/shell-escaping-baseline.txt`, down from 73. What is left is `devices/` — see below |
+| **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is **not** one line away; the reason is below. IOL still drops in-process |
+
+### Closed: `secureCmd` is an allowlist
+
+Three named shapes, and every call site declares which one it means:
+`SECURE_TOKEN` for a bare identifier (the seventeen sites in `includes/cli.php`),
+`SECURE_PATH` for a request-supplied path, `SECURE_LINE` for a whole command
+line, parsed rather than pattern-matched. The default is the strictest, so a
+call site added without declaring a shape fails closed. The ten metacharacters
+`SecureCmdTest` used to assert were accepted are now asserted to be rejected,
+under the same descriptions, so the two revisions of that file read as a before
+and after.
+
+It is **defence in depth and says so**. `SECURE_LINE` proves a string cannot
+spawn a second command; it does not prove the arguments are the intended ones,
+because an unquoted space is still a word separator. The control is
+`escapeshellarg` at the interpolation or `proc_open` with an argv array.
+
+Two things came out of tracing the callers that are worth keeping:
+
+- **`checkFolder()` was the real control on the folder routes**, not `secureCmd`.
+  It is `preg_match('/^\/[\/A-Za-z0-9_ -]*\z/', $s)` in `devices/functions.php`,
+  an allowlist applied before the `exec`, stricter than anything in
+  `api_folders.php`, and documented nowhere. Measured against the parent commit:
+  a folder named `x$(touch proof)y` can be created — `apiAddFolder()` validated
+  nothing — and deleting it is refused with 60009, nothing executed. The open
+  half was `apiAddFolder`, which is validated now.
+- **`Admin/LabsController::getDepends()` was the one site genuinely held up by
+  the blocklist**: `sudo qemu-img info --backing-chain <path> | grep image` with
+  the path built from an uploaded lab's `image` attribute. It is an argv array
+  now, and without the `sudo`, which retired the `qemu-img` grant.
+
+Reading `checkFolder()` also turned up two wrong characters in all four
+validators in `devices/functions.php`: `\s` is `[ \t\n\r\f\v]` and not a
+space, so a folder or lab name containing a **newline** passed; and `$` without
+`/D` matches before a trailing newline. Both fixed, both asserted.
+
+### What is left in the escaping baseline
+
+47 entries, and with one exception all of them are `devices/`: the template
+option strings, the per-interface flags `getFlag()` concatenates, and the TiMOS
+family. Those are **argument injection by design** — the design decision the fork
+still owes — and escaping does not fix them. Every route from request data to a
+shell through an ordinary API handler has gone.
+
+The exception is `includes/functions.php $value`, which is `secureCmd()`'s own
+return: validating a value is not escaping it, and the one live path through it
+is the emulator command line, which is the same surface.
+
+Three deliberate leftovers are the accessors `__lab.php`/`__node.php`
+`$this->session` and `$this->port`. Casting inside `getSession()` would turn a
+null session into `0` at 173 call sites, six of which guard on `== null`. That
+is a behaviour change on the node-start path to buy three lines in a text file.
+
+### Dynamips is not one line away
+
+Recorded here because the previous handover said it was, and that was
+measurable without an IOS image.
+
+For an **Ethernet-only** dynamips node it probably is: `prepare()` already
+creates the tap with `addTap($tap_name, $user)`, the running directory is
+`root:unl 0775`, the console comes from `-T` on a 3xxxx port, and none of that
+needs root — the same argument that carried VPCS.
+
+For a node with **serial** interfaces it is not. The five adapters in
+`devices/dynamips/adapters/` build `-s <slot>:<port>:unix:<local>:<remote>` over
+sockets at `/tmp/dynamips/<session>_<if>`, and **dynamips itself creates that
+socket**. `device_dynamips::prepare()` does `mkdir('/tmp/dynamips')` with no
+mode, from inside `unl_wrapper`, so it lands `0755 root:root` and a dropped
+process cannot create a file in it. Flipping `runsAsTenant()` alone would leave
+serial-connected dynamips nodes failing to start, on a host where nobody here
+can notice.
+
+Making it work needs the directory to be per-tenant or at least group-writable,
+and if it is shared it is the same cross-tenant seam as `/opt/unetlab/tmp`: one
+tenant could open another's serial socket. `iol.c` already solved this shape by
+deriving `/tmp/netio<uid>` from the running uid, and that is the pattern to copy.
+
+So the flag was left alone. It is a three-part change — `runsAsTenant()`, the
+socket directory, and its ownership — and it still needs a licensed IOS image to
+verify, which is the part that has not changed.
+
 
 ---
 

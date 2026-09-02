@@ -45,11 +45,11 @@ bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
 bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
 make -C platform/wrappers/src test         → 248 unit assertions, 0 failed
-tools/run-tests.sh                         → 1559 assertions across 31 files, 0 failed
+tools/run-tests.sh                         → 1691 assertions across 31 files, 0 failed
 tools/php-lint.sh (8.4 and 7.4)            → 352 files, 0 failed
 ```
 
-The sudo policy is at **24 grants**, down from 42.
+The sudo policy is at **23 grants**, down from 42.
 
 ---
 
@@ -168,9 +168,10 @@ session because none of them announces itself.
 
 ## Security work in this session
 
-**The sudo policy is down from 42 grants to 25.** Retired: `nproc`, `top`,
+**The sudo policy is down from 42 grants to 23.** Retired: `nproc`, `top`,
 `docker`, `dos2unix`, `php`, `perl`, `kill`, `cp`, `mv`, `mkdir`, `link`,
-`chown`, `chmod`, `touch`, `tee`, `echo`, `useradd`. `tests/Security/SudoersPolicyTest.php`
+`chown`, `chmod`, `touch`, `tee`, `echo`, `useradd`, `qemu-img`.
+`tests/Security/SudoersPolicyTest.php`
 enforces drift in **both** directions, so a grant cannot return without a call
 site and a call site cannot return without a grant.
 
@@ -256,12 +257,77 @@ start-all loop postpones IOL nodes.
 
 **Docker does not drop and cannot**: there is no emulator process (the daemon
 runs the container), and the host-side work left over needs CAP_NET_ADMIN and
-CAP_SYS_ADMIN. **Dynamips is not flipped** although it looks identical to VPCS,
-because there is no IOS image on the reference host to prove it with. **IOL is
+CAP_SYS_ADMIN. **Dynamips is not flipped**, and an earlier revision of this
+paragraph said that was only for want of an IOS image. That was wrong and the
+reason is in "The shell layer" below: for a node with serial interfaces it is a
+three-part change, not a one-line one. **IOL is
 untouched**, still dropping in-process; moving it would also delete a latent bug
 (a second IOL node in one start-all cannot create its account), but no IOL node
 has ever run here and `iol-dataplane.sh` drives `iol_wrapper` directly rather
 than `device_iol`, so nothing would have caught a mistake.
+
+---
+
+## The shell layer
+
+Phase 02's two shell bullets, closed against the tree rather than against
+intent. Both are recorded bullet by bullet in `docs/ROADMAP-STATUS.md`.
+
+**`secureCmd()` is an allowlist.** It was `/[#;|&]|\.{2,}/m` — five characters
+and a traversal check — applied to whole command lines on some paths and to bare
+values on others, and `SecureCmdTest` had already measured the ten
+metacharacters it let through. It is now three named shapes, `SECURE_TOKEN`,
+`SECURE_PATH` and `SECURE_LINE`, and **every call site declares which one it
+means**; the default is the strictest, so a call site added without declaring
+one fails closed. `SECURE_LINE` is parsed rather than pattern-matched: the line
+must be single-quoted runs (`escapeshellarg`'s output, its `'\''` joiner
+included), double-quoted runs with no expansion, and unquoted text from a safe
+class.
+
+It is **defence in depth and now says so**. `SECURE_LINE` proves a string cannot
+spawn a second command; it does not prove the arguments are the intended ones,
+because an unquoted space is still a word separator. That distinction is why
+`devices/device.php`'s emulator line is still in the escaping baseline.
+
+**The escaping baseline is 47, down from 73.** With one exception everything
+left is `devices/` — the template option strings, `getFlag()`'s per-interface
+flags and the TiMOS family, which are argument injection by design. Every route
+from request data to a shell through an ordinary API handler has gone. The
+highest-severity entry the baseline named — the QEMU binary path built from
+`qemu_arch` and `qemu_version` off the request body — went with one
+`escapeshellarg($bin)`, which `device_qemu_wp.php` already had and the other two
+backends did not.
+
+**Two findings from this that are worth more than the fixes.**
+
+1. `checkFolder()` was the real control on the folder routes, not `secureCmd`.
+   It is an allowlist over the whole path in `devices/functions.php`, applied
+   before the `exec`, stricter than anything in `api_folders.php`, and written
+   down nowhere. Measured against the parent commit: a folder named
+   `x$(touch proof)y` **can** be created, because `apiAddFolder()` validated
+   nothing at all, and deleting it is then refused with 60009 and nothing runs.
+   The genuinely open half was `apiAddFolder`, which is validated now — so the
+   three folder routes finally agree about what a folder name is.
+
+   Reading it also turned up two wrong characters in all four validators there:
+   `\s` is `[ \t\n\r\f\v]` and not a space, so a folder or lab name
+   containing a **newline** passed every one of them, and `$` without `/D`
+   matches before a trailing newline. This is the third place in this tree the
+   `$` trap has been found.
+
+2. `Admin/LabsController::getDepends()` **was** held up only by the blocklist,
+   and it is the one site in the tree that was: `sudo qemu-img info
+   --backing-chain <path> | grep image`, with the path built from the `image`
+   attribute of an uploaded lab's XML. It needs a crafted name on disk and the
+   root role, so it is not a drive-by, but the sudo is gone now — `qemu-img
+   info` returns the chain as `www-data`, measured — and the **`qemu-img` grant
+   went with it**, which is why the policy is 23 and not 24.
+
+One trap to remember when moving entries off the baseline: writing an int
+coercion as `$value = (string) $value` makes the sweep stop reporting that
+symbol, because it resolves `$value`, finds an assignment whose right-hand side
+is `$value`, and the cycle guard that stops it looping also stops it reporting.
+That silently retired a live entry. Assign to a second name.
 
 ---
 
@@ -276,7 +342,7 @@ review and several had been shipping for years.
   containing `escapeshellarg` after narrowing to interpolated lines; zero lines
   reached the assertion. Rewritten as a tokenizer sweep: 340 files, 322 call
   sites, and a baseline of **73** genuinely unescaped values that must only ever
-  shrink.
+  shrink. It is **47** now — see "The shell layer" above.
 - **Every QEMU node was unstartable on 24.04**, three times over: `qemu-img`
   refuses `-b` without `-F` since 5.0; templates pin `/opt/qemu-<version>` paths
   that a package-managed host does not have; and `device::stop()` passed
@@ -311,12 +377,16 @@ review and several had been shipping for years.
    argument-injection surface, and a design decision rather than a bug fix.
    Cheaper now than it was: the shell that expands them runs as `unl<session>`
    for VPCS and QEMU, so the blast radius is a tenant rather than the host.
-5. **Dynamips unprivileged**, which needs one licensed IOS image and nothing
-   else. It is the same shape as VPCS — a tap handed to the tenant, a
-   workspace, a console port from `-T` — and the only reason it is still root
-   is that the claim could not be measured here. `runsAsTenant()` in
-   `devices/dynamips/device_dynamips.php` is a one-line change; the work is
-   running `node-types.sh` against a real image afterwards.
+5. **Dynamips unprivileged**, which is three changes and a licensed IOS image,
+   not the one line this list used to claim. `runsAsTenant()` is the one line
+   and it is enough for an Ethernet-only node. A node with **serial**
+   interfaces also needs `/tmp/dynamips`, because the adapters build
+   `-s <slot>:<port>:unix:<local>:<remote>` and dynamips itself creates the
+   socket there — and `device_dynamips::prepare()` makes that directory with a
+   bare `mkdir()` from inside `unl_wrapper`, so it lands `0755 root:root` and a
+   dropped process cannot write it. If it is made shared it is the same
+   cross-tenant seam as item 6; `iol.c` already solved this shape by deriving
+   `/tmp/netio<uid>` from the running uid, and that is the pattern to copy.
 6. **Tighten `/opt/unetlab/tmp`**, the last untouched item in Phase 02's
    privilege-model list. Node workspaces are `root:unl 0775`, so every tenant
    can write every other tenant's workspace. Now that emulators run as their
@@ -726,10 +796,10 @@ tools/integration/wrapper-console.sh   44 passed, 0 failed
 tools/integration/wrapper-docker.sh    45 passed, 0 failed
 tools/integration/iol-dataplane.sh     75 passed, 0 failed
 make -C platform/wrappers/src test     248 unit assertions, 0 failed
-tools/run-tests.sh                     1559 assertions across 31 files, 0 failed
+tools/run-tests.sh                     1691 assertions across 31 files, 0 failed
                                                             (was 1480 across 28)
 tools/php-lint.sh (8.4 and 7.4)        352 files, 0 failed  (was 349)
-sudo policy                            24 grants, unchanged
+sudo policy                            23 grants
 shell-escaping baseline                73 of 73, unchanged
 ```
 
