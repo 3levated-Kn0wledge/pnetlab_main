@@ -97,8 +97,14 @@ www-data ALL=(root) NOPASSWD: /usr/bin/ps
 # than the bug: the keygen lives in a tree the web user owns.
 
 # --- Appliance control (availability impact only) -------------------------
-www-data ALL=(root) NOPASSWD: /usr/sbin/shutdown
-www-data ALL=(root) NOPASSWD: /usr/sbin/reboot
+# Both are symlinks to systemctl on a systemd host; the grant is by path, and
+# systemctl behaves by argv[0], so this is not a systemctl grant -- but an
+# unpinned shutdown accepts a wall message and a delay, which is a way to
+# write a string to every terminal on the host as root. The two call sites
+# (Admin/SystemController::shutdown() and ::reboot()) pass exactly these
+# arguments and nothing else; the grants now say so.
+www-data ALL=(root) NOPASSWD: /usr/sbin/shutdown -h now
+www-data ALL=(root) NOPASSWD: /usr/sbin/reboot ""
 www-data ALL=(root) NOPASSWD: /usr/sbin/ntpdate
 
 # --- ROOT-EQUIVALENT. Remove these first; route behind unl_wrapper. --------
