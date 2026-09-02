@@ -87,12 +87,12 @@ rounded up.
 | Delete `CorsMidware` and the wildcard origin | middleware gone |
 | Regression tests for metacharacter payloads | `ShellEscapingTest`, `SecureCmdTest` |
 | **Invert `secureCmd` to an allowlist** | done — three named shapes, `SecureCmdTest` 146 assertions. See below |
+| **Upgrade axios** | done — 0.19.2 → 1.20.0, bundles rebuilt and committed, `CsrfTest` 120 assertions. See below |
 
 ### Open
 
 | Bullet | State |
 |---|---|
-| **Upgrade axios** | **not done.** `package.json` pins `^0.19.0` |
 | **Convert call sites to argument arrays** | **partial.** 47 sites remain in `tests/Security/shell-escaping-baseline.txt`, down from 73. What is left is `devices/` — see below |
 | **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is **not** one line away; the reason is below. IOL still drops in-process |
 
@@ -147,6 +147,84 @@ Three deliberate leftovers are the accessors `__lab.php`/`__node.php`
 `$this->session` and `$this->port`. Casting inside `getSession()` would turn a
 null session into `0` at 173 call sites, six of which guard on `== null`. That
 is a behaviour change on the node-start path to buy three lines in a text file.
+
+### Closed: axios is 1.20.0, and the bundles were rebuilt
+
+`package.json` pinned `^0.19.0`, resolving to 0.19.2 — a release npm itself
+prints a deprecation for. `npm audit` against that version reports **26 axios
+advisories** (range `<=0.32.0`) plus **five** in the `follow-redirects` it
+depends on. At 1.20.0 it reports none. Latest 0.x (0.33.0) also audits clean and
+was the prepared fallback; it was not needed, because webpack 4 parsed 1.20.0
+without complaint and `npm run production` exited 0 under the legacy provider.
+
+**Be honest about which of the 26 were reachable.** axios maps
+`lib/adapters/http.js` to `xhr.js` through its `browser` field, so the node
+adapter is not in the bundle and never was: the committed 0.19 `app.js` has zero
+occurrences of `http.ClientRequest`, `zlib` or `Proxy-Authorization`, and its one
+`follow-redirects`-shaped hit is the string `maxRedirects` in a config-key list.
+So every SSRF, `NO_PROXY`-bypass, `Proxy-Authorization`-leak and
+`maxContentLength`/`maxBodyLength` advisory was closed in the dependency but was
+not live exposure here. Two categories **were** in the shipped bundle:
+
+- the **ReDoS**, GHSA-cph5-m8f7-6c5x (CVE-2021-3749) — 0.19.2's
+  `trim()` is `str.replace(/^\s*/,'').replace(/\s*$/,'')` and that exact pair is
+  in the committed `app.js`. 1.20.0 calls native `String.prototype.trim`, and
+  the regex is gone from the rebuilt bundle;
+- the **prototype-pollution gadget family** against `mergeConfig`,
+  `AxiosHeaders` and `AxiosURLSearchParams`, all of which are browser-side.
+
+The **XSRF token leak**, GHSA-wf5p-g6vw-rhxx (CVE-2023-45857), is closed too,
+but it needed `withCredentials: true` on a cross-origin request and this
+application sets neither — so it was not live here either. It matters for the
+opposite reason: **its fix is what could have broken the product.**
+
+**What the fix changed, and what it did not.** 0.19.2 attached the header when
+`(config.withCredentials || isURLSameOrigin(fullPath))`. 1.20.0's
+`resolveConfig()` decides with
+`withXSRFToken === true || (withXSRFToken == null && isURLSameOrigin(url))`.
+Left unset — which is what `bootstrap.js` does — the second clause applies and
+the behaviour is the same one 0.19 had. Every URL the front end asks for is
+root-relative, so every request qualifies. Setting `withXSRFToken: true` would
+have been the wrong "explicit" fix: it takes the first clause, sends the token to
+any origin, and reinstates the advisory. `CsrfTest` now asserts nothing sets it.
+
+**The upgrade did break two things, and neither announced itself.**
+
+1. **`window.axios = require('axios')` stopped returning axios.** 0.19's
+   `index.js` was CommonJS; 1.x ships an ES module entry, and webpack 4 predates
+   the `exports` map so it resolves `main`, which is ESM. A bare `require()` of
+   an ES module through webpack yields the namespace object — the instance is on
+   `.default`. `window.axios.VERSION` reads fine because it is a named export,
+   while `window.axios.request` is undefined, so `app.js` dies at module scope
+   fetching the language table and `#app` never renders. **A blank login page**,
+   measured in a real browser. This global is 107 of the 109 front-end files
+   that use axios; only `app.js` and `components/uploader/ckeditorUploadAdapter.js`
+   import the module themselves.
+
+2. **`error_helper.js` stopped seeing the 419.** `error_handle()` found the
+   status by testing `error.name == 'Error'`, which held only because 0.x built
+   its rejection with `enhanceError(new Error(...))`. 1.x rejects with an
+   `AxiosError`. The test stopped matching, the status stayed 200, and the
+   bounce to the login page became a toast — silently, because nothing throws.
+   192 call sites hand that function the raw error. It keys on `error.response`
+   now, which is what axios documents and is identical on both lines.
+
+Both were measured on the reference VM by driving the deployed install in
+headless Chromium — login through the real form, a mutating admin POST, a lab
+created and deleted through `delLab()` (the one DELETE in the tree that carries
+a body), and the same POST with the `XSRF-TOKEN` cookie stripped. 18 checks,
+green on 0.19.2 before the change and on 1.20.0 after it; a bundle built with the
+upgrade and without fix 2 fails the 419 check and only that check, which is the
+negative control.
+
+`CsrfTest` grew from 107 assertions to 120. The assertion it used to rest on —
+that the bundle contains `xsrfCookieName:"XSRF-TOKEN"` — is still true on 1.x and
+**no longer decides anything**, so it would have passed against a bundle that
+sends no token at all. What is pinned now is the decision: the `.default`
+unwrap, the `withXSRFToken`-or-same-origin gate, the cookie read reaching a
+header set, and the response-shaped error test, each in the source and in the
+committed bundle. Reverting the bundles to 0.19 fails ten of them; reverting only
+`error_helper.js` fails two; setting `withXSRFToken` fails one.
 
 ### Dynamips is not one line away
 
