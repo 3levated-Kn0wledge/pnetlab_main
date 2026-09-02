@@ -98,7 +98,7 @@ rounded up.
 
 | Bullet | State |
 |---|---|
-| **Convert call sites to argument arrays** | **partial.** 47 sites remain in `tests/Security/shell-escaping-baseline.txt`, down from 73. What is left is `devices/` — see below |
+| **Convert call sites to argument arrays** | **partial, and the remainder is smaller than the number suggests.** The baseline still reads 47, down from 73, but for VPCS and QEMU those values no longer reach a shell at all: `device::spawnAsTenant()` execs the emulator directly. See below |
 | **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is **not** one line away; the reason is below. IOL still drops in-process |
 
 ### Closed: `secureCmd` is an allowlist
@@ -140,9 +140,38 @@ space, so a folder or lab name containing a **newline** passed; and `$` without
 
 47 entries, and with one exception all of them are `devices/`: the template
 option strings, the per-interface flags `getFlag()` concatenates, and the TiMOS
-family. Those are **argument injection by design** — the design decision the fork
-still owes — and escaping does not fix them. Every route from request data to a
-shell through an ordinary API handler has gone.
+family. Those are **argument injection by design** — a template's
+`-machine type=pc,accel=kvm -vga std` has to become four words — so
+`escapeshellarg()` would break every one of the 115 templates that carries one.
+Every route from request data to a shell through an ordinary API handler has
+gone.
+
+**For VPCS and QEMU the shell is gone too**, which the count does not show.
+`device::spawnAsTenant()` splits the assembled line with `unl_command_argv()`
+and execs the program directly, so the option strings can still add arguments,
+which is the feature, and nothing else: no interpreter remains to act on a `;`
+or a `>` even if one got past `SECURE_LINE`. The process tree of a running node
+carries no `/bin/sh` at all.
+
+The baseline is unchanged because the sweep is static and cannot see that a
+call site's string now ends at an `execv` rather than at a shell. Teaching it
+that is what would let these entries be retired, and until then the number
+overstates the exposure for two of the five node types and states it exactly
+for the other three.
+
+**Dynamips and IOL still get a shell**, because they do not run as the tenant
+and so still reach `exec($cmd . ' &')` in `device::start()`. For them
+`SECURE_LINE` remains the only thing between an option string and an
+interpreter. Converting them needs a replacement for the backgrounding `&`
+provides, and a licensed image to verify against — the same blocker as the
+tenant work below.
+
+This was **not** a threat only an admin could reach, which is what made it
+worth doing: `__lab.php` reads every node attribute whose key appears in that
+device's `getOptions()`, `device_qemu::getOptions()` returns `qemu_options`,
+and `templates/device/qemu.yml` renders it as an editable field with no
+`show: 0`. The value travels inside a `.unl` file, so any user who could author
+or import a lab could set it.
 
 The exception is `includes/functions.php $value`, which is `secureCmd()`'s own
 return: validating a value is not escaping it, and the one live path through it

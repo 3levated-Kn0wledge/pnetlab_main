@@ -1,6 +1,6 @@
 # Handover
 
-**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 31
+**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 34
 commits ahead of `main` (which now carries the merged `phase-02-shell-hardening`),
 none pushed. Nothing uncommitted.
 
@@ -66,8 +66,8 @@ bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
 bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
 make -C platform/wrappers/src test         → 253 unit assertions, 0 failed
-tools/run-tests.sh (as root)               → 1778 assertions across 31 files, 0 failed
-tools/php-lint.sh (8.4)                    → 352 files, 0 failed
+tools/run-tests.sh (as root)               → 1842 assertions across 32 files, 0 failed
+tools/php-lint.sh (8.4)                    → 353 files, 0 failed
 ```
 
 **`tools/php-lint.sh` runs against 8.4 only on a clean host.** Nothing installs
@@ -177,6 +177,73 @@ the verification suites need them.
 `node-types.sh` skips it and `iol-dataplane.sh` drives the wrapper directly
 against a stand-in. And **PHP 7.4**, which nothing installs, so the lint matrix
 on a clean host is 8.4 alone.
+
+---
+
+## The emulator no longer starts through a shell
+
+For VPCS and QEMU, `device::spawnAsTenant()` execs the emulator directly. It
+used to hand the assembled command line to `/bin/sh -c`, and the comment above
+it said an argv array "would break every template", which was true of the
+obvious approach and false of the one taken.
+
+**Why it could not simply be escaped.** Four values reach that line unescaped
+on purpose: `qemu_options`, `dynamips_options`, `iol_options`, and the
+per-interface flags `getFlag()` concatenates. They are multi-argument by
+design, so wrapping one in `escapeshellarg()` makes it a single argument and
+breaks every one of the 115 templates that carries one. That is why they sat in
+`tests/Security/shell-escaping-baseline.txt` rather than being fixed.
+
+**Why it mattered more than the baseline implied.** These are not admin-only
+template data. `__lab.php` reads every node attribute whose key appears in that
+device's `getOptions()`; `device_qemu::getOptions()` returns `qemu_options`;
+and `templates/device/qemu.yml` renders it as an editable field with no
+`show: 0`. So the value rides inside a `.unl` file and is set per node, and any
+user who could author or import a lab could put words in it.
+
+**What was done.** `unl_command_argv()` in `includes/functions.php` splits the
+line the way a shell would — quoted runs, the `'\''` splice, adjacent runs
+concatenating into one word — and returns argv plus the redirection. Word
+splitting survives, so the option strings still do what they are for. No
+interpreter survives, so nothing acts on a `;` or a `>` even if one got past
+`SECURE_LINE`.
+
+**The part that nearly went wrong, and is the reason the tokeniser returns more
+than argv.** `SECURE_LINE` deliberately PERMITS `>`, because the call sites
+build their own redirection. A tokeniser that honoured that faithfully would
+have preserved the injection it was meant to remove. Both tenant node types
+redirect to exactly one file inside the node's running directory, so
+`spawnAsTenant()` refuses a line carrying more than one redirection, or one
+whose target is outside that directory. The **count** matters as well as the
+target: a shell opens and truncates every redirection in a line, not just the
+last one it ends up using.
+
+There is deliberately no fallback to `/bin/sh` when the split fails. A fallback
+would reinstate the shell on exactly the input that confused the tokeniser.
+
+**How it is tested.** `tests/Security/CommandArgvTest.php` is differential where
+it counts: for every line it compares argv against what `/bin/sh` actually
+produces, obtained with `printf '%s\0'`, rather than against an opinion about
+shell grammar. Splitting `-drive file='a b'` wrongly would silently corrupt
+every escaped value containing a space, and only ground truth catches that. It
+also pins that the tokeniser's grammar is `secure_line_parse()`'s in both
+directions, so a line cannot pass the guard and then surprise the splitter.
+
+The claim made visible, from a running node:
+
+```
+unl1  42011  1      /opt/vpcsu/bin/vpcs -m 1 -i 1 -p 30001 -e -d vunl1_0
+unl1  42012  42011  /opt/vpcsu/bin/vpcs -m 1 -i 1 -p 30001 -e -d vunl1_0
+/bin/sh processes owned by a tenant: 0
+```
+
+**What this did NOT cover.** Dynamips and IOL do not run as the tenant, so they
+still reach `exec($cmd . ' &')` and still get a shell; for them `SECURE_LINE`
+is still the only thing between an option string and an interpreter. Converting
+them needs whatever replaces the backgrounding that `&` provides, plus a
+licensed image to verify against. And the baseline still reads 47: the sweep is
+static and cannot see that this path ends at an `execv`, so retiring those
+entries means teaching the sweep first.
 
 ---
 
@@ -490,7 +557,7 @@ review and several had been shipping for years.
 
 ## Suggested next steps, in order
 
-1. **Review and merge `phase-04-exit-fixes`.** 31 commits, each individually
+1. **Review and merge `phase-04-exit-fixes`.** 34 commits, each individually
    scoped, each message carrying the reasoning and what was measured. One
    commit (`9bcff23`) closes two gate items at once because they are two
    findings on the same allowlist and the same test. Then open Phase 05:
