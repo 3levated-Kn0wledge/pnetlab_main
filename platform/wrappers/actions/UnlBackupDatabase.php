@@ -361,14 +361,45 @@ class UnlBackupDatabase
                              'bytes' => (int) filesize($tmp));
         }
 
-        // Every schema dumped cleanly. Publish them together.
+        // Every schema dumped cleanly. Publish them together -- and if the
+        // second rename fails after the first succeeded, put the first back.
+        // Two renames are not one atomic operation, and "a new pnetlab_db.sql
+        // beside a stale guacdb.sql" is precisely the pair a restore must
+        // never be offered. The previous generation is held by a hard link
+        // in the same directory for the duration, so undoing is a rename
+        // rather than a copy.
+        $previous = array();
+        foreach ($staged as $schema => $tmp) {
+            $target = $dir . '/' . $schema . '.sql';
+            if (is_file($target)) {
+                $keep = $target . '.prev';
+                @unlink($keep);
+                if (!@link($target, $keep)) {
+                    return $abort('could not hold the previous dump of ' . $schema . ' while publishing');
+                }
+                $previous[$schema] = $keep;
+            }
+        }
+        $published = array();
         foreach ($staged as $schema => $tmp) {
             $target = $dir . '/' . $schema . '.sql';
             if (!@rename($tmp, $target)) {
-                return $abort('could not move the new dump of ' . $schema . ' into place');
+                // Undo what was published, oldest first, then clean up.
+                foreach ($published as $done) {
+                    if (isset($previous[$done])) {
+                        @rename($previous[$done], $dir . '/' . $done . '.sql');
+                    } else {
+                        @unlink($dir . '/' . $done . '.sql');
+                    }
+                }
+                foreach ($previous as $keep) @unlink($keep);
+                return $abort('could not move the new dump of ' . $schema
+                    . ' into place; the previous backup has been left as it was');
             }
             @chmod($target, 0600);
+            $published[] = $schema;
         }
+        foreach ($previous as $keep) @unlink($keep);
         return array('ok' => true, 'error' => null, 'files' => $files);
     }
 
