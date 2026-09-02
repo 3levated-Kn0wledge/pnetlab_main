@@ -61,7 +61,17 @@ class LabsController extends Controller
                             foreach (array_diff(scandir($imagePath), ['.', '..']) as $filename){
                                 // SECURE_PATH, not the old bare secureCmd(): this is a
                                 // filesystem path, and the shape it needs is a path.
-                                $file = secureCmd($imagePath.'/'.$filename, SECURE_PATH);
+                                // Since the allowlist inversion it THROWS on a name it
+                                // will not accept, and one such file in an image folder
+                                // must not turn the whole dependency listing into an
+                                // uncaught exception: the file is skipped and logged.
+                                try {
+                                    $file = secureCmd($imagePath.'/'.$filename, SECURE_PATH);
+                                } catch (\Exception $e) {
+                                    error_log(date('M d H:i:s ') . 'WARNING: skipping ' . $imagePath
+                                        . ' entry with an unacceptable name: ' . $e->getMessage());
+                                    continue;
+                                }
                                 $depends[] = $file;
                                 if(preg_match('/^.+\.qcow2$/', $file)){
                                     // WHAT THIS USED TO BE, AND WHY IT MATTERED
