@@ -67,6 +67,121 @@ http_code() {
 }
 
 
+# --- AppArmor ---------------------------------------------------------------
+#
+# The fork ships NO AppArmor profile of its own. docs/APPARMOR.md says why, and
+# what one would have to cover.
+#
+# What these checks are for is the other half of that: upstream's answer to
+# AppArmor was `apparmor=0` on the kernel command line, with AppArmor confirmed
+# off at runtime on the appliance. Nothing in install/ touches GRUB, the
+# apparmor service or the userns sysctl -- and the point of asserting it here is
+# that "we did not disable it" is a claim that decays silently. If somebody
+# fixes a node-start failure by turning AppArmor off, this is where it shows up.
+#
+# Every one of these is soft. The fork does not require AppArmor and works
+# without it; what it must not do is switch it off. A host whose operator
+# disabled it deliberately gets a warning, not a failed install.
+_apparmor_enabled()   { [[ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" == 'Y' ]]; }
+_apparmor_not_off()   { ! grep -qw 'apparmor=0' /proc/cmdline; }
+# 1 means unprivileged user namespaces are AppArmor-restricted, which is
+# Ubuntu's 24.04 default and what the container and browser sandboxes rely on.
+_userns_restricted()  { [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null)" == '1' ]]; }
+# Docker ships its own profile and applies it to every container it starts.
+# It is the only AppArmor confinement any part of this stack currently has.
+_docker_default_profile() {
+	have docker || return 0
+	aa-status 2>/dev/null | grep -q '^   docker-default$'
+}
+
+verify_apparmor() {
+	info "apparmor"
+
+	if ! [[ -d /sys/module/apparmor ]]; then
+		printf '    %s[info]%s this kernel has no AppArmor; nothing to check.\n' \
+			"$C_YELLOW" "$C_RESET"
+		return 0
+	fi
+
+	check_soft "AppArmor is enabled in the kernel"           _apparmor_enabled
+	check_soft "apparmor=0 is NOT on the kernel command line" _apparmor_not_off
+	check_soft "unprivileged user namespaces are restricted" _userns_restricted
+	if have docker; then
+		check_soft "docker-default is loaded (containers are confined)" _docker_default_profile
+	fi
+
+	printf '    %s[info]%s this fork ships no profile of its own; see docs/APPARMOR.md\n' \
+		"$C_YELLOW" "$C_RESET"
+}
+
+# --- Docker and the cgroup hierarchy ---------------------------------------
+#
+# The appliance ran Docker 20.10 on cgroup **v1** with the `cgroupfs` driver.
+# Every current LTS is v2-only, and the fork has only ever been run there:
+# measured on the reference host, `stat -fc %T /sys/fs/cgroup` is `cgroup2fs`
+# and Docker 29.1.3 reports `Cgroup Version: 2`, `Cgroup Driver: systemd`.
+#
+# THIS WORKS. Nothing here is a fix; these checks exist because nothing asserted
+# it. The failure they are for is not "Docker is broken" -- it is a host that
+# presents v1, or a hybrid host, or a daemon started with
+# --exec-opt native.cgroupdriver=cgroupfs against a v2 kernel. Each of those
+# produces containers that start and then behave differently under resource
+# pressure, and the symptom surfaces as a lab that misbehaves rather than as an
+# installer that failed. Discovering it here costs one line of output.
+#
+# Two of the three are soft. The hierarchy itself is a hard failure because
+# nothing in this tree has ever run on v1 and saying so is the point; the
+# driver is a warning because a `cgroupfs` driver on a v2 host is a real
+# configuration smell but not one this installer set or should silently change.
+_cgroup_v2()        { [[ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" == 'cgroup2fs' ]]; }
+# A hybrid host mounts v1 controllers under /sys/fs/cgroup/<controller>. On a
+# pure v2 host those directories do not exist.
+_cgroup_not_hybrid() { ! mount | grep -q '^cgroup on /sys/fs/cgroup/'; }
+_docker_cgroup_v2() { docker info 2>/dev/null | grep -q 'Cgroup Version: 2'; }
+_docker_cgroup_drv(){ docker info 2>/dev/null | grep -q 'Cgroup Driver: systemd'; }
+# The web layer reaches the daemon over the unix socket and by group
+# membership; `docker info` succeeding as root does not prove WEB_USER can.
+_docker_socket_usable() { sudo -u "$WEB_USER" docker -H=unix:///var/run/docker.sock info; }
+
+verify_docker() {
+	info "docker and cgroups"
+
+	if ! have docker; then
+		printf '    %s[info]%s docker is not installed; Docker-backed nodes are unavailable.\n' \
+			"$C_YELLOW" "$C_RESET"
+		return 0
+	fi
+
+	check      "/sys/fs/cgroup is cgroup2fs (v2), not v1"    _cgroup_v2
+	check      "no v1 controllers are mounted alongside it"  _cgroup_not_hybrid
+
+	if ! systemctl is-active --quiet docker.service 2>/dev/null; then
+		printf '    %s[warn]%s docker.service is not running; skipped the daemon checks\n' \
+			"$C_YELLOW" "$C_RESET"
+		return 0
+	fi
+
+	check      "the daemon reports Cgroup Version: 2"        _docker_cgroup_v2
+	check_soft "and Cgroup Driver: systemd"                  _docker_cgroup_drv
+	check      "${WEB_USER} reaches the daemon on the unix socket" _docker_socket_usable
+
+	# Images. There is no registry on an offline host, so a Docker node type is
+	# only selectable if an image is already local. Information, not a failure:
+	# an install with no Docker nodes is a perfectly good install.
+	local n
+	n="$(docker image ls -q 2>/dev/null | wc -l)"
+	if [[ "${n:-0}" -gt 0 ]]; then
+		printf '    %s[ ok ]%s %s docker image(s) available locally\n' "$C_GREEN" "$C_RESET" "$n"
+	else
+		printf '    %s[info]%s no docker images on this host, so no Docker node can start.\n' \
+			"$C_YELLOW" "$C_RESET"
+		printf '           Stage them with tools/docker-images.sh save on a connected\n'
+		printf '           machine, copy into %s/addons/docker, then\n' "$BASE_DIR"
+		printf '           sudo install/install.sh --only docker-images.\n'
+		printf '           See docs/DOCKER-IMAGES.md.\n'
+	fi
+}
+
 # --- HTML5 consoles --------------------------------------------------------
 #
 # The step is optional, so every check here has to know the difference between
@@ -181,6 +296,8 @@ step_verify() {
 	fi
 
 	verify_http
+	verify_apparmor
+	verify_docker
 	verify_guacamole
 	verify_php_settings
 

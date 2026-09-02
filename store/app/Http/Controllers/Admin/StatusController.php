@@ -47,31 +47,25 @@ class StatusController extends Controller
             $cores = $o[0];
         }
 
-        $o = '';
-        $cmd = 'cat /sys/kernel/mm/uksm/run';
-        exec($cmd, $o, $rc);
-        if ($rc != 0) {
-            $uksm = 'unsupported';
-        } else {
-            if ($o[0] == "1") {
-                $uksm = "enabled";
-            } else {
-                $uksm = "disabled";
-            }
-        }
+        // Memory dedup. One control, read once — see unl_ksm_state() in
+        // includes/cli.php for what it does and does not cover.
+        $ksm = unl_ksm_state();
 
-        $o = '';
-        $cmd = 'cat /sys/kernel/mm/ksm/run';
-        exec($cmd, $o, $rc);
-        if ($rc != 0) {
-            $ksm = 'unsupported';
-        } else {
-            if ($o[0] == "1") {
-                $ksm = "enabled";
-            } else {
-                $ksm = "disabled";
-            }
-        }
+        // 'uksm' is reported, always as 'unsupported', and that is the truth
+        // rather than a placeholder: UKSM is an out-of-tree patch that lived in
+        // the appliance's custom 4.15 kernel and the fork ships stock Ubuntu,
+        // so /sys/kernel/mm/uksm/ cannot exist here. What used to be here was
+        // `cat` of that path, once per status poll, to reach the same answer.
+        //
+        // The FIELD stays because the committed React bundle indexes it
+        // (store/public/react/pages/admin-StatusView-js.js): on 'unsupported'
+        // it draws a greyed, non-clickable toggle, and on anything else — an
+        // ABSENT key included — it draws a live one wired to apiSetUksm.
+        // Dropping the key here would turn a correctly-inert row into a working
+        // button for a control that does not exist. The row itself goes when
+        // the frontend is next built; docs/PLATFORM-SUPPORT.md records why that
+        // could not be done in the same change.
+        $uksm = 'unsupported';
 
         $o = "";
         $cmd = 'systemctl is-active cpulimit.service';
@@ -195,23 +189,21 @@ class StatusController extends Controller
         }
     }
 
+    /*
+     * Function to set UKSM status.
+     *
+     * Retained, and deliberately identical to apiSetKsm below: there is one
+     * memory-dedup control on this platform and both entry points reach it. It
+     * cannot normally be called — getInfo() reports uksm as 'unsupported', which
+     * is what makes the status page's UKSM toggle inert — but it is a live route
+     * and a hand-made POST used to get back "Change UKSM status fail" from a
+     * wrapper verb writing to a path that no stock kernel has.
+     *
+     * @return  Bool Success operation
+     */
     function apiSetUksm(Request $request)
     {
-        if (!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        $state = $request->input('state', true);
-        if ($state == true) {
-            $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a uksmon";
-            error_log(date('M d H:i:s ') . 'DEBUG: uksm on');
-        } else {
-            $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a uksmoff";
-            error_log(date('M d H:i:s ') . 'DEBUG: uksm off');
-        }
-        exec($cmd, $o, $rc);
-        if ($rc == 0) {
-            Reply::finish(true, 'success');
-        } else {
-            Reply::finish(false, 'Change UKSM status fail');
-        }
+        return $this->apiSetKsm($request);
     }
 
     /*
@@ -224,7 +216,19 @@ class StatusController extends Controller
     {
         if (!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
         $state = $request->input('state', true);
-        if ($state == true) {
+        // filter_var, not `$state == true`. The SPA posts a JSON body and its
+        // booleans survive as PHP booleans, so that comparison happened to work
+        // from the browser — but any form-encoded caller sends the STRING
+        // 'false', and 'false' == true is true in PHP, so the off half of the
+        // toggle silently turned KSM on. Both spellings, and '0'/'off'/'', now
+        // map the way they read.
+        $on = filter_var($state, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($on === null) $on = true;
+        // Two whole literals rather than one literal plus a chosen verb: the
+        // shell-escaping sweep traces every exec() argument back to its source
+        // and a concatenated request-derived value is a finding even when both
+        // branches are safe. Nothing is interpolated, so nothing needs escaping.
+        if ($on) {
             $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a ksmon";
             error_log(date('M d H:i:s ') . 'DEBUG: ksm on');
         } else {

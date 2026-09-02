@@ -26,15 +26,21 @@ a clean checkout of HEAD unpacked onto a provisioned host:
 sudo bash install/install.sh --server-name pnetlab.test
 → INSTALLER-EXIT=0, every step, all verification checks green
 
-bash tools/integration/lab-functional.sh   → 49 shell assertions, 8 data-plane checks, 0 failed
-bash tools/integration/node-types.sh       → 28 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
+bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/db-backup-restore.sh→ 67 assertions, 0 failed
 bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
 bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
+bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
 make -C platform/wrappers/src test         → 248 unit assertions, 0 failed
-tools/run-tests.sh                         → 865 assertions across 22 files, 0 failed
-tools/php-lint.sh (8.4 and 7.4)            → 340 files, 0 failed
+tools/run-tests.sh                         → 1559 assertions across 31 files, 0 failed
+tools/php-lint.sh (8.4 and 7.4)            → 352 files, 0 failed
 ```
+
+This block was stale by three sessions when it was last read. If you change a
+suite, change it here too; the numbers are the only thing that distinguishes
+"verified" from "believed".
 
 That is what the word carries here: the installer completes from nothing, its
 own verification step passes, and the suites above pass on the host it built.
@@ -43,7 +49,23 @@ never been run against a licensed image.
 
 The stack that was verified: PHP 8.4 from `ppa:ondrej/php` under FPM, Apache
 2.4 with `mod_proxy_fcgi`, MariaDB 10.11, guacd 1.3.0 with the Guacamole 1.5.5
-web application on jetty9 9.4.53, openjdk-17.
+web application on jetty9 9.4.53, openjdk-17, Docker 29.1.3 on cgroup v2 with
+the systemd driver.
+
+Three kernel-era facts the installer now asserts rather than assumes, because
+each was an appliance-era assumption that inverted on a stock kernel:
+
+| Fact | On 24.04 | Was, on the appliance |
+|---|---|---|
+| memory dedup | mainline KSM at `/sys/kernel/mm/ksm/run`; UKSM absent | UKSM only — `CONFIG_UKSM=y`, `CONFIG_KSM_LEGACY=n` in a custom 4.15 |
+| cgroups | `cgroup2fs`, v2 only, `Cgroup Driver: systemd` | v1 with `cgroupfs` |
+| AppArmor | enabled, `unprivileged_userns` enforcing, `apparmor_restrict_unprivileged_userns=1` | `apparmor=0` on the kernel command line |
+
+The memory-dedup toggle is a **QEMU** control and nothing else: KSM scans only
+mappings whose owner called `madvise(MADV_MERGEABLE)`, QEMU does that by default
+(`mem-merge`), and VPCS, dynamips, IOL and Docker-backed nodes do not. Measured:
+three 512 MB CirrOS guests reached `pages_sharing` 22900 within one full scan.
+`docs/HANDOVER.md` has the rest, including why `off` writes 0 rather than 2.
 
 ---
 
@@ -159,11 +181,15 @@ down as done until one exists:
 - Does the application run on PHP 8.5 (not just lint)?
 - Does a source-built guacd negotiate with the staged web application, and does
   `tools/integration/guacamole-console.sh` pass?
-- Docker on cgroup v2 with the reimplemented `docker_wrapper`.
 - The php-fpm confinement drop-in against a newer systemd — the `ProtectSystem`
   behaviour it works around is version-sensitive, and the trap recorded in
   `install/systemd/php-fpm-pnetlab.conf` was measured on 24.04's systemd.
-- AppArmor and unprivileged user namespaces, which the fork has no profile for.
+- AppArmor and unprivileged user namespaces. The fork still ships no profile
+  and that is deliberate (`docs/APPARMOR.md`); what a 26.04 bring-up owes is a
+  re-run of the four host facts `--only verify` now checks — the kernel switch,
+  `apparmor=0` absent from the command line, the userns restriction, and
+  `docker-default` loaded — since a release that changed any of them would
+  change the fork's security posture without anyone deciding to.
 - `qemu-system-x86` behaviour changes, and whether the `/opt/qemu/bin` symlink
   layout still satisfies the templates.
 
@@ -197,7 +223,10 @@ none of it is design work.
    bug.
 7. **Import both schemas into MariaDB 11.8** and confirm table counts
    (`pnetlab_db` ~11, `guacdb` ~23) and that logins work.
-8. **Docker on cgroup v2**, then `tools/integration/wrapper-docker.sh`.
+8. **Docker on cgroup v2**, then `tools/integration/wrapper-docker.sh`. The
+   installer now checks the hierarchy and the daemon's own report, so
+   `--only verify` answers this before any node is started; on 24.04 it reports
+   `cgroup2fs`, `Cgroup Version: 2` and `Cgroup Driver: systemd`, all green.
 9. **Confirm the php-fpm drop-in still does its job**: start a node and watch
    for `useradd: cannot lock /etc/passwd`. If the confinement behaviour moved,
    update the drop-in's header with what was measured, not with what was tried.
