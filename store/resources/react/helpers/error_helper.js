@@ -9,7 +9,23 @@ global.error_handle = (error)=>{
 		var status = 200;
 		var data = error;
 
-		if(error.name == 'Error'){
+		// A failed axios request arrives here as an error carrying the server's
+		// reply on `response`. This used to test `error.name == 'Error'`, which
+		// worked only because 0.x built its rejection with
+		// enhanceError(new Error(...)) and so left the name as 'Error'. 1.x
+		// throws an AxiosError, whose name is 'AxiosError', so the test stopped
+		// matching -- silently, because nothing throws: a 419 fell past this
+		// branch and past the two below, kept status 200, and surfaced as the
+		// toast "Request failed with status code 419" instead of the bounce to
+		// the login page. 192 call sites hand this function the raw error.
+		//
+		// `response` is the discriminator axios documents and it is identical on
+		// both lines. The 147 call sites that pass a SUCCESSFUL response instead
+		// of an error are unaffected -- a response object has no `response` key
+		// of its own -- and a network error, which has no response on either
+		// version, now falls through to the message handling below rather than
+		// throwing on `undefined.status` into the outer catch.
+		if(isset(error.response) && isset(error.response.status)){
 			status = error.response.status;
 			data = error.response.data;
 		}
