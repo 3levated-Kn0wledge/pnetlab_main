@@ -147,10 +147,15 @@ guac_verify_artefact() {
 	name="$(basename "$path")"
 	local manifest="${GUACAMOLE_DIR}/SHA512SUMS"
 
+	# The manifest is committed beside the artefacts. Its absence is not a
+	# degraded install, it is a tree that has been tampered with or truncated,
+	# and the artefact it would have pinned is a jar that Jetty runs as root's
+	# peer on the console path. Fail closed; this used to warn and install.
 	if [[ ! -f "$manifest" ]]; then
-		warn "no ${manifest}; installing ${name} unverified.
-             That file is the pin for these artefacts and should be present."
-		return 0
+		die "${name} is staged but ${manifest} is missing.
+    That file is the reviewed pin for every artefact in this directory, and
+    nothing is deployed out of it unverified. Restore the manifest from the
+    repository, or remove the staged file to install without Guacamole."
 	fi
 
 	expected="$(awk -v f="$name" '$2 == f || $2 == "*" f { print $1; exit }' "$manifest")"
