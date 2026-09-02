@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/select.h>
@@ -14,12 +15,88 @@
 static volatile sig_atomic_t g_hup;
 static volatile sig_atomic_t g_term;
 
+/*
+ * The self-pipe. A flag alone is not enough: a signal that lands anywhere
+ * OUTSIDE select() -- while reaping the child, broadcasting output, servicing
+ * a client -- sets the flag and is then forgotten, because select() has no
+ * timeout and nothing else will wake it. That was a real hang: `stopall`
+ * sends SIGTERM to every wrapper at once, the ones caught mid-service never
+ * returned from the select() they entered next, and their IOL children ran
+ * on. The handler now also writes a byte here, the read end sits in every
+ * select() set, and the flags are checked after every wake as well as
+ * before every sleep. write() is async-signal-safe; nothing else the handler
+ * does needs to be.
+ */
+static int g_sigpipe[2] = { -1, -1 };
+
 static void on_signal(int sig)
 {
+	int           saved = errno;
+	unsigned char b = (unsigned char) sig;
+
 	if (sig == SIGHUP)
 		g_hup = 1;
 	else
 		g_term = 1;
+	if (g_sigpipe[1] >= 0)
+		(void) !write(g_sigpipe[1], &b, 1);
+	errno = saved;
+}
+
+static void sigpipe_open(void)
+{
+	int i;
+
+	if (g_sigpipe[0] >= 0)
+		return;
+	if (pipe(g_sigpipe) != 0) {
+		log_wrn("could not create the signal pipe: %s -- a signal that "
+		        "arrives outside select() may be noticed late",
+		        strerror(errno));
+		g_sigpipe[0] = g_sigpipe[1] = -1;
+		return;
+	}
+	for (i = 0; i < 2; i++) {
+		int fl = fcntl(g_sigpipe[i], F_GETFL, 0);
+
+		if (fl >= 0)
+			(void) fcntl(g_sigpipe[i], F_SETFL, fl | O_NONBLOCK);
+		fl = fcntl(g_sigpipe[i], F_GETFD, 0);
+		if (fl >= 0)
+			(void) fcntl(g_sigpipe[i], F_SETFD, fl | FD_CLOEXEC);
+	}
+}
+
+static void sigpipe_drain(void)
+{
+	unsigned char buf[64];
+
+	if (g_sigpipe[0] < 0)
+		return;
+	while (read(g_sigpipe[0], buf, sizeof(buf)) > 0)
+		;
+}
+
+/*
+ * Act on whatever the handler recorded. Returns 1 if the loop must end.
+ * Called before every select() and after every wake, so a signal can only
+ * ever be missed for as long as one pass through the loop body.
+ */
+static int handle_pending(console_t *con, child_t *ch)
+{
+	sigpipe_drain();
+	if (g_term) {
+		/* This is the device::stop() path: `sudo fuser -k -TERM
+		 * <running path>` SIGTERMs everything whose cwd is the node's
+		 * running directory, which is us (R2) and the child. */
+		loop_teardown(con, ch, "signalled");
+		return 1;
+	}
+	if (g_hup) {
+		g_hup = 0;
+		console_drop_all_clients(con);
+	}
+	return 0;
 }
 
 static void install_signals(void)
@@ -32,6 +109,8 @@ static void install_signals(void)
 	 * so the disposition is what protects us.
 	 */
 	signal(SIGPIPE, SIG_IGN);
+
+	sigpipe_open();
 
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = on_signal;
@@ -161,29 +240,33 @@ int loop_run(console_t *con, child_t *ch, const loop_hooks_t *hooks)
 			return 0;
 		}
 
+		/* Anything that arrived since the last wake, before we sleep on
+		 * it. The self-pipe below covers the window between this check
+		 * and the select(). */
+		if (handle_pending(con, ch))
+			return 0;
+		if (g_sigpipe[0] >= 0 && g_sigpipe[0] < FD_SETSIZE) {
+			FD_SET(g_sigpipe[0], &rfds);
+			if (g_sigpipe[0] > maxfd)
+				maxfd = g_sigpipe[0];
+		}
+
 		/* No timeout: there is nothing to do on a tick. */
 		n = select(maxfd + 1, &rfds, &wfds, NULL, NULL);
 
 		if (n < 0) {
 			if (errno == EINTR) {
-				if (g_term) {
-					/* This is the device::stop() path: `sudo fuser -k
-					 * -TERM <running path>` SIGTERMs everything whose
-					 * cwd is the node's running directory, which is us
-					 * (R2) and the child. */
-					loop_teardown(con, ch, "signalled");
+				if (handle_pending(con, ch))
 					return 0;
-				}
-				if (g_hup) {
-					g_hup = 0;
-					console_drop_all_clients(con);
-				}
 				continue;
 			}
 			log_errno("select");
 			loop_teardown(con, ch, "select failed");
 			return 0;
 		}
+
+		if (handle_pending(con, ch))
+			return 0;
 
 		/* §2.3 step 4: node output. Read in blocks, not one byte at a time
 		 * (§10.3 #1). */
