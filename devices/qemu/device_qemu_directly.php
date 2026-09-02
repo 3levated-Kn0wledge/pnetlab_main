@@ -248,9 +248,13 @@ class device_qemu_directly extends device
             // Setting non default NIC driver
             $flags = str_replace('%NICDRIVER%', $qnic, $flags);
         } else if ($qnic != '') {
-            // Invalid NIC driver
+            // Invalid NIC driver. This is a FAILURE, and it has to look like
+            // the arch/binary failures above: device::start() reads '' as
+            // "this node type has no command line" (Docker) and returns
+            // success, so a bad qemu_nic left the taps up and the tenant
+            // account pinned by them, with the node reported as started.
             error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80017]);
-            return '';
+            return array(False, False);
         } else {
             // Setting default NIC driver
             $flags = str_replace('%NICDRIVER%', 'e1000', $flags);
