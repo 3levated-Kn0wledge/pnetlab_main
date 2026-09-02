@@ -19,7 +19,42 @@
  * CSRF token as a header based on the value of the "XSRF" token cookie.
  */
 
-window.axios = require('axios');
+// The `.default` is load-bearing, and it is the whole SPA.
+//
+// 0.19 was CommonJS: its index.js was `module.exports = require('./lib/axios')`,
+// so a bare require() handed back the callable instance and this line read
+// `window.axios = require('axios')`. 1.x ships an ES module entry -- webpack 4
+// predates the package.json `exports` map and so resolves `main`, which is
+// ESM -- and require()ing an ES module through webpack yields the namespace
+// OBJECT. The instance is one level down, on `default`.
+//
+// It breaks loudly but in the wrong place. `window.axios.VERSION` is a named
+// export and reads fine, so the module looks present; `window.axios.request` is
+// undefined, and app.js calls it at module scope to fetch the language table.
+// The page dies with "axios.request is not a function" before React mounts, and
+// #app stays empty -- a blank login screen, which reads as a broken deploy
+// rather than as a dependency upgrade.
+//
+// This global is not a convenience. 107 of the 109 front-end files that use
+// axios reach it this way; only app.js and components/uploader/
+// ckeditorUploadAdapter.js import the module themselves.
+const axiosModule = require('axios');
+window.axios = axiosModule.default || axiosModule;
+
+// XSRF is still automatic, and deliberately still not configured here.
+//
+// axios 1.x gained a `withXSRFToken` option when it fixed the token-leak
+// advisory (GHSA-wf5p-g6vw-rhxx), and resolveConfig() now decides with
+// `withXSRFToken === true || (withXSRFToken == null && isURLSameOrigin(url))`.
+// Left unset -- which is what this file does -- the second clause applies, so
+// the XSRF-TOKEN cookie is still copied into X-XSRF-TOKEN on same-origin
+// requests exactly as 0.19 did. Every URL the front end asks for is
+// root-relative, so every request qualifies.
+//
+// Setting `withXSRFToken: true` would be the wrong "explicit" fix: it takes the
+// first clause, which sends the token to ANY origin and reintroduces precisely
+// the leak the advisory is about. The default is the safer of the two and it is
+// the one this application needs.
 //
 //window.axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
 

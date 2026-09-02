@@ -326,11 +326,62 @@ foreach ($routeMatches as $r) {
 | XSRF-TOKEN cookie on same-origin requests, with no configuration; the theme's
 | jQuery never touches a Laravel route; and a missed token surfaces as a bounce
 | to the login page rather than a silent failure.
+|
+| That claim survived the 0.19 -> 1.20 upgrade, but the assertion that used to
+| carry it did not. It looked for the strings xsrfCookieName:"XSRF-TOKEN" and
+| xsrfHeaderName:"X-XSRF-TOKEN", which are still the defaults in 1.x and are
+| still in the bundle -- and which no longer decide anything on their own. 1.x
+| gained a `withXSRFToken` option when it fixed GHSA-wf5p-g6vw-rhxx, and it is
+| that option, not the cookie name, that says whether the header is attached.
+| So the old assertion would have passed against a bundle that sends no token
+| at all. What is pinned below is the DECISION, not the names it decides with.
 */
 
 $bundles = (array) glob($root . '/store/public/react/js/*.js');
 assert_true(count($bundles) > 0, 'the built bundles are present to check');
 
+/**
+ * The three things that have to be true of a shipped bundle for a POST from
+ * this application to carry a token, each keyed to the minified shape the
+ * pinned toolchain (webpack 4 + terser) emits.
+ *
+ * A miss here is not a style nit. If the first fails the SPA does not render
+ * at all; if the second fails every POST in the admin UI is refused with 419
+ * and it reads as a CSRF bug rather than as a dependency change.
+ */
+$bundleChecks = [
+    // window.axios = axiosModule.default || axiosModule
+    //
+    // 107 of the 109 front-end files reach axios through this global. 1.x
+    // resolves to an ES module under webpack 4 (which predates the exports
+    // map), so a bare require() yields the namespace object and .request is
+    // undefined -- app.js then dies at module scope and #app stays empty.
+    'the global axios is the callable instance, not the ES module namespace'
+        => '/window\.axios=(\w+)\.default\|\|\1/',
+
+    // resolveConfig(): !0===w || null==w && isURLSameOrigin(config.url)
+    //
+    // Unset (the second clause) is what this application relies on and is what
+    // 0.19 did too. `!0===w` alone would mean someone set withXSRFToken:true,
+    // which sends the token to ANY origin and reopens the advisory.
+    'the bundle still gates the XSRF header on withXSRFToken-or-same-origin'
+        => '/!0===(\w+)\|\|null==\1&&\w+\(\w+\.url\)/',
+
+    // ...and having decided, it reads the cookie and sets the header.
+    'the bundle reads the XSRF cookie and sets it as a request header'
+        => '/\.read\(\w+\);\w+&&\w+\.set\(/',
+];
+
+foreach ($bundleChecks as $what => $pattern) {
+    $hits = 0;
+    foreach ($bundles as $b) {
+        if (preg_match($pattern, (string) file_get_contents($b))) $hits++;
+    }
+    assert_same(count($bundles), $hits, $what);
+}
+
+// The names are still asserted -- they are what the middleware reads -- but as
+// a supporting fact rather than as the proof.
 $withXsrf = 0;
 foreach ($bundles as $b) {
     $s = (string) file_get_contents($b);
@@ -341,6 +392,26 @@ foreach ($bundles as $b) {
 }
 assert_same(count($bundles), $withXsrf,
     'every shipped bundle carries axios with the XSRF-TOKEN -> X-XSRF-TOKEN defaults');
+
+/**
+ * The committed bundles are what a deployed install serves -- the installer
+ * never builds a frontend (docs/LICENSING.md, gap G2) -- so a package.json
+ * that has moved on from the bundles is a real divergence, not bookkeeping.
+ * Pin the line rather than the exact version: 0.19 predates every fix below,
+ * and `withXSRFToken` does not exist before 1.6.2 on the 1.x line.
+ */
+$pkg = json_decode((string) @file_get_contents($root . '/package.json'), true);
+$axiosRange = isset($pkg['devDependencies']['axios'])
+    ? $pkg['devDependencies']['axios']
+    : (isset($pkg['dependencies']['axios']) ? $pkg['dependencies']['axios'] : '');
+assert_true($axiosRange !== '' && preg_match('/^\^?[1-9]/', $axiosRange) === 1,
+    "package.json pins axios off the 0.19 line (got '$axiosRange')");
+
+foreach ($bundles as $b) {
+    assert_true(strpos((string) file_get_contents($b), 'withXSRFToken') !== false,
+        basename($b) . ' was built from an axios that has withXSRFToken (>= 1.6.2)');
+}
+
 
 // Nothing may override those defaults; doing so is how the implicit path breaks.
 $overrides = [];
@@ -370,10 +441,81 @@ foreach ($reactFiles as $p) {
 assert_same([], array_values(array_unique($overrides)),
     'nothing in the front end overrides axios\'s XSRF cookie/header names');
 
+// Setting withXSRFToken:true attaches the token to EVERY origin, which is the
+// leak GHSA-wf5p-g6vw-rhxx is about; setting it false turns the mechanism off
+// and every POST becomes a 419. Neither belongs here -- leaving it unset is
+// what gives the same-origin behaviour 0.19 had, and it is what was measured.
+$xsrfOptOverrides = [];
+foreach ($reactFiles as $p) {
+    foreach (explode("\n", (string) file_get_contents($p)) as $line) {
+        $t = ltrim($line);
+        if ($t === '' || $t[0] === '*' || strpos($t, '//') === 0 || strpos($t, '/*') === 0) continue;
+        if (strpos($line, 'withXSRFToken') !== false) $xsrfOptOverrides[] = $p;
+    }
+}
+assert_same([], array_values(array_unique($xsrfOptOverrides)),
+    'nothing in the front end sets withXSRFToken (unset is the same-origin default)');
+
+/**
+ * The JavaScript equivalent of code_without_comments(), and it is needed for
+ * the same reason: this house writes down what it removed, and the note in
+ * error_helper.js explaining why `error.name == 'Error'` had to go would
+ * otherwise satisfy the assertion that it is gone. (Handover trap 6.)
+ *
+ * Line-oriented, matching the sweeps above -- enough for a file whose comments
+ * are all whole lines, and it does not pretend to tokenize JavaScript.
+ */
+function js_code_only($src)
+{
+    $out = [];
+    $inBlock = false;
+    foreach (explode("\n", $src) as $line) {
+        $t = ltrim($line);
+        if ($inBlock) {
+            if (strpos($t, '*/') !== false) $inBlock = false;
+            continue;
+        }
+        if (strpos($t, '/*') === 0) {
+            if (strpos($t, '*/') === false) $inBlock = true;
+            continue;
+        }
+        if ($t === '' || $t[0] === '*' || strpos($t, '//') === 0) continue;
+        $out[] = $line;
+    }
+    return implode("\n", $out);
+}
+
 // A 419 has to be recoverable, not a dead page.
-$errorHelper = (string) @file_get_contents($reactDir . '/helpers/error_helper.js');
+$errorHelper = js_code_only((string) @file_get_contents($reactDir . '/helpers/error_helper.js'));
 assert_true(strpos($errorHelper, '419') !== false && strpos($errorHelper, 'auth/login/manager') !== false,
     'error_helper.js still turns a 419 into a bounce to the login page');
+
+/**
+ * ...and it has to still REACH that 419.
+ *
+ * error_handle() reads the status off the error axios rejects with. It used to
+ * find it by testing `error.name == 'Error'`, which held only because 0.x built
+ * its rejection with enhanceError(new Error(...)). 1.x rejects with an
+ * AxiosError, name 'AxiosError', so that test stopped matching and a 419 fell
+ * through to a toast -- measured, on this host, against a bundle built with the
+ * upgrade but without this fix: the browser stayed on the admin page instead of
+ * bouncing. Nothing throws, so only an assertion catches it.
+ *
+ * `response` is the discriminator axios documents and it is the same on both
+ * lines. Assert against the SOURCE and the BUNDLE: the bundles are committed
+ * output that a deployed install serves directly, so a fixed source with a
+ * stale bundle is still a broken box.
+ */
+assert_true(preg_match('/isset\(\s*error\.response\s*\)/', $errorHelper) === 1,
+    'error_helper.js keys the status off error.response, not off the error\'s name');
+assert_true(preg_match('/\berror\.name\s*==/', $errorHelper) === 0,
+    'error_helper.js no longer discriminates on the axios error\'s name');
+
+foreach ($bundles as $b) {
+    $s = (string) file_get_contents($b);
+    assert_true(preg_match('/isset\((\w+)\.response\)&&isset\(\1\.response\.status\)/', $s) === 1,
+        basename($b) . ' carries the response-shaped error test, so a 419 still bounces');
+}
 
 // The theme's jQuery is the code path axios does not cover. It may reach the
 // legacy API, which has its own guard (includes/api_origin_guard.php), but it

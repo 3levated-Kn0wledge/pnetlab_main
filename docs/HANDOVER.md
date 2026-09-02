@@ -1,7 +1,11 @@
 # Handover
 
 **State at end of session, 2026-09-02.** Branch `phase-02-shell-hardening`,
-75 commits ahead of `main`, none pushed. Nothing uncommitted.
+90 commits ahead of `main`, none pushed. Nothing uncommitted.
+
+**Phase 02's dependency bullet is closed**: axios is 1.20.0 and the committed
+bundles were rebuilt against it — see "Phase 02: the axios upgrade" below. That
+was the last item standing between here and Phase 05.
 
 **Roadmap phases 00 through 04 are done**, with three deliberate redefinitions,
 each recorded in its own document:
@@ -45,8 +49,9 @@ bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
 bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
 make -C platform/wrappers/src test         → 248 unit assertions, 0 failed
-tools/run-tests.sh                         → 1691 assertions across 31 files, 0 failed
+tools/run-tests.sh                         → 1704 assertions across 31 files, 0 failed
 tools/php-lint.sh (8.4 and 7.4)            → 352 files, 0 failed
+npm run production (legacy provider)       → exit 0, bundles regenerated
 ```
 
 The sudo policy is at **23 grants**, down from 42.
@@ -428,6 +433,17 @@ The reference VM carries a CirrOS image at
 telnet console. It is a 21 MB public test image, not a vendor one, and it is not
 in the repository.
 
+**The reference VM can now build the frontend, and drive it.** Node 22.14.0 is
+unpacked at `/opt/node22` with `node`/`npm`/`npx` symlinked into
+`/usr/local/bin`, matching the `node-version: '22'` the `frontend-build` CI job
+uses; `npm install && NODE_OPTIONS=--openssl-legacy-provider npm run production`
+from a clean tree reproduces the committed bundles **byte for byte**, which is
+what makes a diff in `store/public/react/` attributable. Playwright 1.49.1 and
+its headless Chromium are in `~/verify` for driving the deployed SPA over HTTP.
+Neither is in the repository and neither is an install dependency — they are
+tooling on the reference host, and the build still must not be run on the
+workstation.
+
 ---
 
 ## Documents
@@ -454,6 +470,123 @@ disagree about what works, this one was measured more recently. Note that
 `docs/ROADMAP.md` is referenced in the table above but is not in the tree — it
 has never been committed on this branch, and `git log --all -- docs/ROADMAP.md`
 finds nothing.
+
+---
+
+## Phase 02: the axios upgrade
+
+0.19.2 → **1.20.0**, the last open bullet before Phase 05. Latest 0.x (0.33.0)
+was the prepared fallback and was not needed: webpack 4 parsed 1.20.0 without
+complaint and `npm run production` exited 0 under the legacy provider.
+
+`npm audit` reports **26 axios advisories** against 0.19.2 (range `<=0.32.0`)
+plus five in its `follow-redirects`, and **none** against 1.20.0. Which of the 26
+were actually reachable, and which were not, is set out in
+`docs/ROADMAP-STATUS.md` — the short version is that the node http adapter is not
+in a browser bundle, so the SSRF and proxy-header family was never live here,
+while the ReDoS in `trim()` demonstrably was: 0.19.2's
+`str.replace(/^\s*/,'').replace(/\s*$/,'')` is in the committed `app.js` and is
+gone from the rebuilt one.
+
+**This is a frontend change, so it is only real because the bundles were
+rebuilt.** `install/lib/deploy.sh` only warns about a missing bundle and the
+installer never builds a frontend, so a deployed install serves whatever
+`store/public/react/` holds in the repository. That the bundles are tracked
+build output rather than a built artefact is `docs/LICENSING.md` gap **G2**,
+which this does not close and was not trying to. 34 files under
+`store/public/react/` are regenerated output in the commit. The chunk names and
+the file set are unchanged; the page chunks all moved because webpack renumbers
+modules when the dependency graph shifts.
+
+**Two things broke, and this is the part worth reading.**
+
+1. **`window.axios = require('axios')` stopped returning axios**, because 1.x
+   ships an ES module entry and webpack 4 predates the `exports` map, so
+   `require()` hands back the namespace object and the instance is on
+   `.default`. `VERSION` is a named export and reads fine; `.request` is
+   undefined. `app.js` calls `axios.request` at module scope, so the page died
+   before React mounted and the login screen was **blank**. 107 of the 109
+   front-end files that use axios reach it through that global.
+
+2. **`error_helper.js` stopped seeing the 419.** It tested `error.name ==
+   'Error'`, true only because 0.x rejected with `enhanceError(new Error(...))`;
+   1.x rejects with an `AxiosError`. The status stayed 200 and the bounce to the
+   login page became a toast — silently. 192 call sites pass it the raw error.
+   It keys on `error.response` now, which is what axios documents and is the same
+   on both lines.
+
+**XSRF is still automatic and is deliberately still unconfigured.** 1.x decides
+with `withXSRFToken === true || (withXSRFToken == null && isURLSameOrigin(url))`.
+Unset takes the second clause, which is the behaviour 0.19 had, and every URL
+the front end asks for is root-relative. Setting `withXSRFToken: true` would take
+the *first* clause and send the token to any origin — reinstating the very
+advisory (GHSA-wf5p-g6vw-rhxx) whose fix introduced the option. The default is
+both the compatible answer and the safe one; `bootstrap.js` says so and
+`CsrfTest` asserts nothing sets it.
+
+**How it was proven.** Headless Chromium against the deployed install: login
+through the real form, a mutating admin POST, a lab created and deleted through
+`delLab()` — the one DELETE in the tree carrying a request body — and the same
+POST with the `XSRF-TOKEN` cookie stripped. 18 checks, green on 0.19.2 *before*
+the change and on 1.20.0 after it, so the suite is calibrated rather than merely
+passing. The X-XSRF-TOKEN header was observed on the wire and matched the cookie.
+
+**`CsrfTest` is 120 assertions, up from 107, and the reason is a lesson.** The
+assertion it used to rest on was that the bundle contains
+`xsrfCookieName:"XSRF-TOKEN"`. That string is still there on 1.x and **no longer
+decides anything** — it would have passed against a bundle that sends no token at
+all. A test that pins a name rather than a decision survives exactly the change
+it exists to catch. What is pinned now is the decision, in the source and in the
+committed bundle, and it was mutation-checked: reverting the bundles to 0.19
+fails ten assertions, reverting only `error_helper.js` fails two, setting
+`withXSRFToken` fails one.
+
+Traps, both of which cost time:
+
+  - **The 0.19 bundle and the 1.x bundle both contain the string this test used
+    to look for.** See above. If you are upgrading a bundled dependency, check
+    what the existing assertions would still say against the new artefact before
+    you trust a green run.
+  - **A comment that quotes the thing it removed fails the test that checks it
+    was removed** — handover trap 6, hit again, this time in JavaScript. The
+    note in `error_helper.js` explaining why `error.name` had to go satisfied
+    the assertion that it is gone. `CsrfTest` has a `js_code_only()` now, the
+    line-oriented counterpart of the existing `code_without_comments()`.
+
+Not done, deliberately: `axios` is still in `devDependencies` rather than
+`dependencies`, which is where a bundled runtime library arguably belongs; and
+`app.js`'s `import Axios from 'axios'` is unused (capital A — the module-scope
+call is the lowercase global). Both are cosmetic and neither was worth widening
+this commit for.
+
+**Found while verifying, not fixed: six committed chunks the build does not
+produce.** A clean-room build — `rm -rf store/public/react`, `npm ci`,
+`npm run production` — reproduces the three entry bundles and all 26 page chunks
+**byte for byte**, and emits nothing the tree does not already have. But the tree
+carries six extra files it does not emit, all under the doubled
+`pages/<chunk>~./store/public/react/pages/` prefix and several with content
+hashes in their names:
+
+```
+pages/admin-LabsCreate-js~./…/admin-VersionsAddView-js.js
+pages/admin-Lab_sessionsView-js~./…/admin-LabsCreate-js~~7c77302f.js
+pages/admin-Lab_sessionsView-js~./…/admin-LabsCreate-js~~fbd71f6d.js
+pages/admin-Lab_sessionsView-js~./…/admin-UsersOffline-j~8405d653.js
+pages/admin-ModeView-js~./…/admin-SystemView-js.js
+pages/admin-User_rolesView-js~./…/admin-UsersOffline-js~~2e9e45b3.js
+```
+
+They are tracked, they predate this work, and this commit does not touch them —
+they are dead output from an earlier chunk-hash generation, kept alive only by
+`git`. Nothing loads them: chunk names come from the runtime manifest inside
+`app.js`, which names only what the current build emits. They should go with
+whatever change next audits `store/public/react/`; they were left alone here for
+the same reason as everything else in this section.
+
+That the byte-for-byte reproduction holds at all is the useful part: it means a
+diff under `store/public/react/` is attributable to a source or dependency
+change and not to build nondeterminism, which is what let the negative controls
+above mean anything.
 
 ---
 
@@ -721,13 +854,17 @@ pages needs N free pages *now*, and the dense host is the only reason to have
 had KSM on. Both 0 and 2 report `disabled`, which is true of both. Writing 2 took
 `pages_sharing` 22900 → 0, measured.
 
-**One thing is not finished and cannot be here.** `getInfo()` still reports a
-`uksm` field, pinned to `'unsupported'`. Removing it needs a frontend rebuild:
-the committed bundle draws a **live** toggle for any value that is not that
-literal, an absent key included, so dropping the key turns a correctly inert row
-into a button for a control that does not exist. There is no node toolchain on
-the reference VM and building on the workstation is not allowed. The row goes
-when the frontend is next built.
+**One thing is not finished.** `getInfo()` still reports a `uksm` field, pinned
+to `'unsupported'`. Removing it needs a frontend rebuild: the committed bundle
+draws a **live** toggle for any value that is not that literal, an absent key
+included, so dropping the key turns a correctly inert row into a button for a
+control that does not exist.
+
+This used to say the blocker was that no node toolchain existed on the reference
+VM. **That is no longer true** — the axios upgrade installed Node 22 there and
+rebuilt the bundles (see "Phase 02: axios" below), so the mechanical obstacle is
+gone and this is now just an unclaimed piece of work. It was deliberately not
+folded into the axios commit, so that one commit changes one thing.
 
 ### The tap leak, and the account it now pins
 
