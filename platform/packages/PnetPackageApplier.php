@@ -746,15 +746,27 @@ class PnetPackageApplier
         }
         $payload = json_encode(array('complete' => $complete, 'entries' => $this->journal));
         $tmp = $this->journalPath . '.tmp';
-        file_put_contents($tmp, $payload);
         // The journal has to be on disk before the operation it describes, or a
-        // kill between the two leaves a change nothing knows how to undo.
-        $fh = fopen($tmp, 'r');
-        if ($fh) {
-            fflush($fh);
-            fclose($fh);
+        // kill between the two leaves a change nothing knows how to undo. So
+        // every step of the write is checked, and a failure is an exception
+        // that stops the operation BEFORE it runs: an earlier revision ignored
+        // the write and the rename, and flushed a read handle, so a full disk
+        // or a permissions slip left the journal one entry behind the tree --
+        // exactly the entry recovery would then not know about.
+        $fh = @fopen($tmp, 'wb');
+        if ($fh === false || fwrite($fh, $payload) !== strlen($payload) || !fflush($fh)) {
+            if ($fh !== false) fclose($fh);
+            @unlink($tmp);
+            throw new PnetPackageError('cannot write the journal ' . PnetManifest::quote($tmp));
         }
-        rename($tmp, $this->journalPath);
+        if (function_exists('fsync')) {
+            fsync($fh);
+        }
+        fclose($fh);
+        if (!@rename($tmp, $this->journalPath)) {
+            @unlink($tmp);
+            throw new PnetPackageError('cannot publish the journal ' . PnetManifest::quote($this->journalPath));
+        }
     }
 
     /** Undo the journal, newest first. */
