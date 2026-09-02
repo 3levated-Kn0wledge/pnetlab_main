@@ -204,76 +204,89 @@ class DefaultController extends Controller
 
 
     /*
-     * WARNING — the binary this calls installs a passwordless root SSH key.
+     * Compute a dynamips idle-PC value for one template and one image.
      *
-     * `idlepc` is a 9.4 MB stripped PyInstaller bundle committed to this
-     * repository with no source and no licence. Its archive was unpacked and
-     * the entry script read. Before it computes anything it runs:
+     * WHAT THIS USED TO DO, AND WHY IT IS WORTH SPELLING OUT
+     *
+     * It ran, under sudo:
+     *
+     *     sudo /opt/unetlab/html/store/app/Console/Commands/idlepc
+     *          --option=<the template's dynamips_options> -f <image path>
+     *
+     * `idlepc` was a 9.4 MB stripped PyInstaller bundle committed to this
+     * repository with no source, no build recipe and no licence. Its archive
+     * was unpacked and the entry script read. Before it computed anything it
+     * ran:
      *
      *     ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa_dy
      *     cat /root/.ssh/id_rsa_dy.pub >> /root/.ssh/authorized_keys
      *
-     * and then paramiko-connects to root@127.0.0.1 with that key, purely to
-     * obtain a TTY so it can send Ctrl-] to dynamips and trigger dynamips' own
-     * idle-pc computation. Pressing this button therefore leaves a standing
-     * passwordless root key on the appliance — the same thing this fork
-     * deleted from docker_wrapper by allocating a PTY instead of shelling out
-     * to root@localhost.
+     * and then paramiko-connected to root@127.0.0.1 with that key. So pressing
+     * this button left a standing passwordless root SSH key on the appliance —
+     * the same key this fork had already deleted from docker_wrapper by giving
+     * it a PTY instead of a loopback SSH hop.
      *
-     * It is kept for now because deleting it would remove a working capability
-     * and leave a hole, and because a replacement cannot be verified without a
-     * Cisco IOS image that this project does not carry. It is recorded as a
-     * tracked gap in docs/LICENSING.md section 3, it gates making this
-     * repository public, and the replacement design is written out there: an
-     * `unl_wrapper -a idlepc` action that drives dynamips directly, taking a
-     * template name rather than an option string so the existing
-     * argument-injection surface is not widened across the sudo boundary.
+     * It did all of that for a terminal. The computation is dynamips' own, and
+     * the blob ran dynamips with no -T, which puts the console on stdin. With
+     * `-T <port>` the same Ctrl-] monitor console is reachable over a plain TCP
+     * socket, so the replacement needs no terminal, no SSH and no key.
      *
-     * Do not build on this method. It is scheduled for removal with the binary.
+     * WHAT CROSSES NOW: two names. The option string does not. This method used
+     * to read `dynamips_options` out of the template and hand it over sudo;
+     * template option strings are argument injection by design (item 4 of
+     * docs/HANDOVER.md), and on this path the far side is root. The wrapper
+     * action reads the option string from the template file itself and accepts
+     * an allowlist of options, so an operator who can edit a template can no
+     * longer choose a root process's argv through this button.
+     *
+     * NOT PROVEN AGAINST AN IMAGE. The calibration needs a real Cisco IOS image
+     * for dynamips and this project deliberately carries none — the same
+     * position as iol_wrapper. Everything up to that point is covered by
+     * tests/Security/IdlePcTest.php; the console conversation is derived from
+     * dynamips' own source and has not been run against an image.
+     * docs/LICENSING.md section 3 says the same thing at greater length.
      */
     public function idlepc(Request $req){
         if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        set_time_limit(180);
+        // The wrapper bounds itself — a connect timeout, a boot timeout and a
+        // calibration timeout — and this has to outlast the sum of them, or PHP
+        // kills the request while dynamips is still running. The action's own
+        // shutdown guard reaps it in that case; this is here so the ordinary
+        // path does not depend on the guard.
+        set_time_limit(300);
 
+        $ios = $req->input('ios', '');
+        $template = $req->input('template', '');
 
-        $ios = secureCmd($req->input('ios', ''));
-        $template = secureCmd($req->input('template', ''));
-
-        if($ios == '' || $template == ''){
+        if(!is_string($ios) || !is_string($template) || $ios === '' || $template === ''){
             Reply::finish(false, 'Data is empty');
         }
 
-        $dynamipFolder = '/opt/unetlab/addons/dynamips';
-        $tempFolder = '/opt/unetlab/html/templates';
+        // No secureCmd(). There is no shell on this path any more, and
+        // secureCmd() is a blocklist that passes backticks, $( ), spaces and
+        // quotes — it was never what made this safe, and leaving it here would
+        // imply it was. Wrapper::idlepc() checks both names against an anchored
+        // allowlist pattern and UnlIdlePc checks them again, as root.
+        $result = Wrapper::idlepc($template, $ios);
+        if(empty($result['ok']) || !isset($result['idlepc']) || $result['idlepc'] === null){
+            Reply::finish(false, 'Can not get Idle-PC: {data}',
+                ['data' => isset($result['error']) && $result['error'] !== null
+                    ? $result['error'] : 'the wrapper returned no value']);
+        }
+        $idlepc = $result['idlepc'];
 
-        $file = $tempFolder . '/'. $template.'.yml';
+        // Built from the name the PRIVILEGED side accepted and echoed back,
+        // never from the request field. If those two could disagree, the
+        // wrapper's is the one that decided which template dynamips was
+        // configured from, so it is the one this write has to follow.
+        $tempFolder = '/opt/unetlab/html/templates';
+        $file = $tempFolder . '/' . $result['template'] . '.yml';
         if(!is_file($file)){
             Reply::finish(false, '{data} not found', ['data' => $file]);
         }
         $content = file_get_contents($file);
         $p = yaml_parse_file($file);
 
-        $option = secureCmd(get($p['dynamips_options'], ''));
-
-        $cmd = 'sudo /opt/unetlab/html/store/app/Console/Commands/idlepc --option=' . escapeshellarg($option)
-            . ' -f ' . escapeshellarg($dynamipFolder . '/' . $ios);
-       
-        exec($cmd, $o, $r);
-
-        if($r != 0){
-            Reply::finish(false, 'Can not get Idle-PC');
-        }
-        $idlepc = '';
-        foreach($o as $output){
-            if(preg_match('/idle-pc=(\w+)/', $output, $matches)){
-                $idlepc = $matches[1];
-            }
-        }
-        if($idlepc == ''){
-            Reply::finish(false, 'Can not get Idle-PC');
-        }
-
-        
         if(!isset($p['idlepc'])){
             $content = preg_replace('/^name\s?:\s?(.+)$/m', 'name: $1\nidlepc: "'.$idlepc.'"', $content);
         }else{

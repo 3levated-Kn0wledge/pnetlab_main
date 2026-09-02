@@ -331,7 +331,7 @@ what each one costs us:
 | Glyphicons Halflings | — | via Bootstrap | Retain Bootstrap notice | Met. |
 | PrimeReact / PrimeIcons + Open Sans | 3.3.2 | MIT (Open Sans: Apache-2.0) | Retain notice | npm metadata records no licence for primereact 3.3.2; upstream is MIT. |
 | ~~`ARIALBD.TTF`~~ | — | Proprietary (Monotype) | Cannot be redistributed | **Removed.** Replaced by a free-font candidate list; see section 3. |
-| **`idlepc`** (prebuilt ELF) | — | **Unknown; embeds LGPL-2.1 `paramiko`** | Cannot be satisfied without source | **In the tree — gap G3.** Also installs a root SSH key; see section 3. |
+| ~~**`idlepc`** (prebuilt ELF)~~ | — | **Unknown; embedded LGPL-2.1 `paramiko`** | Could not be satisfied without source | **Removed.** Replaced by `unl_wrapper -a idlepc`; see section 3. |
 | SheetJS `xlsx`, `chart.js`, `jszip`, React 16, react-router, redux, laravel-mix… | see `package-lock.json` | Apache-2.0 / MIT / dual | Build-time; retain notice where bundled | 1273 lockfile entries. |
 | Composer tree | see `store/composer.lock` | 61 MIT, 32 BSD-3, 1 Apache-2.0, 2 tri-licensed (`nette/utils`, `nette/schema`: BSD-3 **or** GPL-2 **or** GPL-3) | Retain notices | `store/vendor/` is not committed. Both nette packages can be taken under BSD-3. |
 
@@ -508,7 +508,12 @@ That is a judgement call about risk appetite — leave it, or rewrite history
 before the first public push, which is far cheaper now than later. It is on the
 section 10 checklist as an owner decision.
 
-### `store/app/Console/Commands/idlepc` — **open, and worse than it looked**
+### `store/app/Console/Commands/idlepc` — **closed: replaced, not deleted**
+
+**Gone from the tree, and the capability kept.** What follows is the record of
+what it was and what replaced it; the "what the replacement is" section below is
+now a description of `platform/wrappers/actions/UnlIdlePc.php` rather than a
+design.
 
 9.4 MB. A stripped x86-64 ELF, PyInstaller-packed, built against Python 3.5,
 embedding `paramiko`, `bcrypt`, `cryptography 3.1.1`, PyNaCl and OpenSSL. No
@@ -571,64 +576,113 @@ PyInstaller bundle with no accompanying source does not obviously satisfy that.
 The other embedded libraries are Apache-2.0 or BSD and want notices we do not
 carry. And nobody here built it, nobody can rebuild it, and it runs as root.
 
-#### Why it is still in the tree
+#### The open question, settled: no PTY is needed
 
-Because deleting it removes a working capability and leaves a hole, and because
-the replacement **cannot be verified here**. A replacement has to drive a real
-dynamips against a real Cisco IOS image, and this project carries neither — by
-design. Landing an unverifiable emulator driver and calling it a replacement
-would be the same hole with a better name.
+The design that used to sit here left one thing open — whether dynamips honours
+the Ctrl-] monitor escape on the TCP console its `-T <port>` option opens, or
+only on a real terminal. It was settled by reading dynamips 0.2.14, the version
+Ubuntu 24.04 ships in `multiverse`, rather than by guessing.
 
-So it stays, annotated in three places — the sudo policy, the controller call
-site, and here — and it is a **tracked gap that gates publication** (section 6,
-section 10). The sudo grant stays with it; `tests/Security/SudoersPolicyTest.php`
-enforces drift in both directions, so the binary, its call site and the grant
-must land or leave together, which is the forcing function.
+It does. In `common/dev_vtty.c` there is **one** input state machine and every
+console type feeds it:
+
+```
+vtty_thread_main()
+  case VTTY_TYPE_TCP:  fd_pool_check_input(..., vtty_tcp_input, vtty)
+                         -> vtty_read_and_store()
+  default (TERM, SERIAL):  vtty_read_and_store()
+
+vtty_read_and_store():
+  case VTTY_INPUT_TEXT:
+      case 0x1d: if (ctrl_code_ok == 1) input_state = VTTY_INPUT_REMOTE;
+      case IAC:  input_state = VTTY_INPUT_TELNET;
+  case VTTY_INPUT_REMOTE:  remote_control(vtty, c)
+      case 'i':  cpu0->get_idling_pc(cpu0);
+```
+
+`vtty_create()` sets `terminal_support = 1` for every type except `SERIAL`, and
+`ctrl_code_ok` is 1 unless `--noctrl` is passed. That `IAC` case is the tell:
+telnet option negotiation is only meaningful on a TCP console, so the state
+machine that handles Ctrl-] is demonstrably the one the TCP console uses.
+
+The blob needed a TTY because it ran dynamips with **no `-T`**, and dynamips with
+no `-T` puts the console on stdin as `VTTY_TYPE_TERM`. That is the whole reason
+for the SSH hop, and it is a two-character fix.
+
+One further detail, which changes the shape of the reader: the answer does not
+come back on the console socket. `stable/mips64.c:271` and `stable/ppc32.c:234`
+print it with `printf()` —
+
+```c
+printf("Restart the emulator with \"--idle-pc=0x%llx\" (for example)\n", ...);
+```
+
+— i.e. on dynamips' own **stdout**, which under `proc_open()` is a pipe. So the
+action reads two streams: the socket to know when IOS has booted, and stdout for
+the result. `mips64_get_idling_pc()` also refuses outright when an idle PC is
+already set ("You already use an idle PC, using the calibration would give
+incorrect results"), which is why no `--idle-pc` is passed at all.
 
 #### What the replacement is
 
 `unl_wrapper -a idlepc`, an action beside `fixperms`, `set-proxy`,
-`iol-keepalive` and `image-commit` in `platform/wrappers/actions/`. The shape,
-so it can be built without re-doing this investigation:
+`iol-keepalive` and `image-commit` in `platform/wrappers/actions/`, implemented
+in `UnlIdlePc.php`:
 
-- **Inputs: `--template <name>` and `--image <name>`, nothing else.** Not the
-  option string. The current call site passes `dynamips_options` through
-  `secureCmd()` and `escapeshellarg()` across the sudo boundary, and template
-  option strings are the known argument-injection surface item 4 of
-  `docs/HANDOVER.md` calls out. The wrapper should read the option string from
-  `templates/<name>.yml` itself, exactly as `UnlIolKeepalive` computes the uid
-  rather than accepting one. Both names validate as `[A-Za-z0-9_.-]+` with no
-  separators, and the image must resolve under `/opt/unetlab/addons/dynamips`.
-- **Start dynamips directly, exec'd from an argv array**, with the template's
-  options tokenised in the wrapper, `--idle-pc 0x0`, and the image path.
-- **Obtain a console.** This is the one open question and it should be settled
-  first, because it decides the shape of everything else:
-  - `devices/dynamips/device_dynamips.php` already starts dynamips with
-    `-T <port>`, a TCP console listener. If dynamips honours the Ctrl-] escape
-    on that listener, the action needs no PTY at all — connect, wait for boot,
-    send `\x1d` then `i`, read. That is the cheap outcome and it should be
-    tested before anything is written.
-  - If the escape is only honoured on a real terminal, use the PTY machinery
-    this project already owns: `platform/wrappers/src/child.c` and `console.c`
-    exist precisely because `docker_wrapper` needed a PTY without SSH.
-  - Under no circumstances reintroduce an SSH loopback.
-- **Parse** `"--idle-pc=(0x[0-9a-fA-F]+)"` from the console stream.
-- **Terminate by pid**, held from the spawn — never `pkill -f` on a pattern,
-  which matches any process whose command line happens to contain the string.
+- **Inputs: `--template <name>` and `--image <name>`, nothing else.** Both are
+  anchored slugs (`\z`, not `$`) that cannot contain a separator, so no path is
+  ever received; both roots are constants in the action and every path is built
+  there and required to be a real file, not a symlink, resolving to exactly the
+  path that was built.
+- **The option string is read by the action, from the template file.** The old
+  call site read `dynamips_options` in the web layer and passed it across
+  `sudo`; template option strings are the argument-injection-by-design surface
+  item 4 of `docs/HANDOVER.md` names, and on this path the far side is root. The
+  action reads it itself and accepts an **allowlist** of options by name, each
+  with its own value pattern — so a template cannot name a log file, a
+  startup-config, a ROM, a ghost file, a pid file or a second console, and
+  cannot disable the escape or pre-set an idle PC. Every shipped dynamips
+  template passes that allowlist, and a test asserts it.
+- **dynamips is exec'd from an argv array** through `proc_open()`, with the
+  template's own `ram`/`nvram`, a console port from a dedicated 61000–61999
+  range (clear of the 30000–40000 node ports, their 40000+ secondaries and the
+  ephemeral range), and a private working directory so the log file lands
+  somewhere the action owns.
+- **Bounded, and terminated by pid.** A connect timeout, a boot timeout and a
+  calibration timeout; `finally` on the ordinary paths and a shutdown function
+  for the ones `finally` cannot cover. Because the argv is an array there is no
+  intervening shell, so the pid `proc_open()` returns *is* dynamips — which is
+  what makes killing by pid possible at all. `pkill -9 -f "dynamips ..."`, what
+  the blob did, would have taken every other running node with it.
 - **The template write stays in the controller**, behind
-  `Wrapper::fixperms('templates')`, exactly as it is today. Only the privileged
-  emulator run moves.
+  `Wrapper::fixperms('templates')`, exactly as before — but it now builds the
+  path from the name the privileged side accepted and echoed back.
+- **No SSH, no key, no PTY, anywhere.** `tests/Security/IdlePcTest.php` asserts
+  that as a property of the whole tree, not of one file: no code line outside a
+  comment may mention `ssh-keygen`, `authorized_keys`, `id_rsa_dy` or
+  `paramiko`.
 
-The unit-testable parts — name validation, option tokenising, the output
-parser, the timeout — can be covered without dynamips, in the style of
-`platform/wrappers/src/wrapper_test.c`. The part that needs an image is whether
-the escape works on the `-T` listener, and that is one afternoon for anyone who
-has a c3725 image.
+#### What is NOT proven, and will not be here
 
-When it lands: delete the binary, delete the sudo grant, delete the controller
-method's `exec()`, and remove the React calculator button in
-`store/resources/react/components/lab/node/NodeForm.js` at the same frontend
-rebuild. `SudoersPolicyTest` and `LicenceTest` will both hold that together.
+The calibration itself. It needs a real Cisco IOS image for dynamips and this
+project carries none, by design — the same position as `iol_wrapper`, and stated
+the same way. What is tested is everything up to the point an image would be
+needed: the validators, the traversal and symlink refusals, the repeated-option
+refusal, the template reader, the option allowlist, the argv, the result parser,
+the bounded lifetime, and the clean specific failure when no image is present,
+which is the only path this project can exercise. The console conversation —
+boot banner, decline the `[yes/no]` dialog, Ctrl-] then `i`, read stdout — is
+derived from the source quoted above and **has not been run against an image**.
+Anyone with a c3725 image can close that in an afternoon.
+
+That is a smaller claim than "it works", and it is deliberately the one being
+made. Removing a passwordless root key from every appliance was not contingent
+on proving the replacement; leaving the key in place until someone found an
+image would have been the worse trade.
+
+The React calculator button in
+`store/resources/react/components/lab/node/NodeForm.js` **stays**: the feature
+was replaced, not deleted, so the button still has something to call.
 
 ---
 
@@ -717,8 +771,9 @@ $ git ls-files | grep -icE '\.(qcow2|vmdk|bin|iso|ova|img|vhd)$'
 0
 ```
 
-The largest tracked files are `store/app/Console/Commands/idlepc` (9.4 MB), an
-Ace editor worker (3.4 MB) and the React `lab.js` bundle (1.9 MB). No disk
+The largest tracked files are an Ace editor worker (3.4 MB) and the React
+`lab.js` bundle (1.9 MB) — the 9.4 MB `idlepc` blob that used to head this list
+is gone, see section 3. No disk
 image, no IOL binary, no appliance ISO. `docs/HANDOVER.md` records that even the
 CirrOS image the QEMU integration test needs lives on the reference VM and not in
 the tree.
@@ -784,11 +839,15 @@ bundles in CI or at install time and consuming a release artefact instead of a
 tracked one — see section 2.4 for why simply deleting them is not available.
 Self-contained; does not require touching the frontend.
 
-**G3 · `store/app/Console/Commands/idlepc`.** Unlicensed, unbuildable, embeds
-LGPL-2.1 `paramiko` with no source — and installs a passwordless root SSH key
-when the admin presses a button. Closed by `unl_wrapper -a idlepc`, designed in
-section 3. **Also a security finding in its own right**, and the security queue
-should not wait for the licensing one.
+**G3 · `store/app/Console/Commands/idlepc` — CLOSED.** It was unlicensed,
+unbuildable, embedded LGPL-2.1 `paramiko` with no source, and installed a
+passwordless root SSH key when the admin pressed a button. It is deleted, its
+sudo grant with it, and the capability is now `unl_wrapper -a idlepc` — section
+3 has what was landed and what remains unproven. The security half went first
+and did not wait for the licensing one, which is the right order.
+
+*Note on history:* as with the Monotype font, deleting the blob from `HEAD` does
+not remove it from `07ef833`. That remains the owner decision in section 10.
 
 ### Housekeeping
 
@@ -1017,8 +1076,9 @@ that restoring them is both necessary and sufficient.
 > - [ ] **G2** · CKEditor GPL-2.0+ in committed bundles — bundles built in CI
 >       or at install time, or accepted and named (currently: **named**, in
 >       `LICENSE`, pending a decision to close it properly)
-> - [ ] **G3** · `idlepc` — replaced by `unl_wrapper -a idlepc`, or accepted
->       and named
+> - [x] **G3** · `idlepc` — **closed.** Blob deleted, sudo grant removed,
+>       replaced by `unl_wrapper -a idlepc`. The calibration path is
+>       implemented but unproven without an IOS image; section 3 says so.
 > - [ ] Owner has read section 9 and decided whether to take legal advice first
 
 ### Done in this commit
@@ -1037,6 +1097,11 @@ that restoring them is both necessary and sufficient.
 - [x] Unpack and read the `idlepc` archive; record what it does — including the
       passwordless root SSH key — in the sudo policy, the controller call site
       and section 3. Keep the capability and the grant; design the replacement.
+- [x] *(after that commit)* Land the replacement: `unl_wrapper -a idlepc` in
+      `platform/wrappers/actions/UnlIdlePc.php`, delete the blob, remove the
+      sudo grant, rewire the controller. `tests/Security/IdlePcTest.php` covers
+      everything an IOS image is not needed for, and asserts against the whole
+      tree that no code path can create an SSH key or write `authorized_keys`.
 - [x] Correct the "no source-level derivative work" sentence in
       `install/vendor/guacamole/README.md`, and attribute
       `install/sql/schema/guacdb.sql` to Apache-2.0.
