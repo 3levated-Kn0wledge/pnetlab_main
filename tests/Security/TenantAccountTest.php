@@ -474,6 +474,25 @@ assert_true(substr_count($wrapper, 'reapAll()') === 2,
 assert_true(strpos($wrapper, "unl_single_option(\$options, 'S')") !== false,
     'the session arrives through unl_single_option, so a repeated -S is refused');
 
+// start() takes a Lab and a node id, and does $lab->getNodes()[$id] itself.
+// The start-all loop used to hand it a Node, which is a fatal on the first
+// non-IOL node in the lab -- invisible from the UI, because apiStartLabNode()
+// always sends -D <id> and takes the single-node path. The two loops exist at
+// all because IOL drops privileges in-process and has to be postponed, so this
+// guard belongs with the tenant work rather than off on its own.
+$wrapperSrc = code_only($root . '/platform/wrappers/unl_wrapper');
+$startCalls = [];
+if (preg_match_all('/=\s*start\(([^)]*)\)/', $wrapperSrc, $m)) {
+    $startCalls = array_map('trim', $m[1]);
+}
+assert_true(count($startCalls) >= 3, 'the wrapper still calls start() from its start action');
+$badStart = [];
+foreach ($startCalls as $args) {
+    if (strpos($args, '$lab') !== 0) $badStart[] = $args;
+}
+assert_same([], $badStart,
+    'every start() call passes the LAB first, not a Node -- $lab->getNodes()[$id] is done inside');
+
 $device = code_without_comments($root . '/devices/device.php');
 assert_true(strpos($device, 'reap-tenant') !== false,
     'device::stop() reaps the tenant account');

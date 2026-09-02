@@ -784,7 +784,20 @@ switch ($action) {
 			foreach ($lab->getNodes() as $node_id => $node) {
 				if ($node->getNType() != 'iol') {
 					// IOL nodes drop privileges, so need to be postponed
-					$rc = start($node, $node_id, $tenant, $lab->getNetworks(), $lab->getScriptTimeout());
+					//
+					// start() takes the LAB and a node id -- it does
+					// $lab->getNodes()[$id] itself. This branch passed the NODE,
+					// plus three arguments the function does not take, and so
+					// died with "Call to undefined method Node::getNodes()" on
+					// the first non-IOL node in the lab. The IOL branch below
+					// always had it right, which is why the bug survived: the
+					// two loops are three lines apart and only one was wrong.
+					//
+					// Not reachable from the UI, which is the other reason it
+					// lasted: apiStartLabNode() always sends -D <id> and takes
+					// the single-node path above. `unl_wrapper -a start` with no
+					// -D, the operator's start-the-whole-lab, is the broken one.
+					$rc = start($lab, $node_id);
 					if ($rc !== 0) {
 						// Failed to start the node
 						error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][$rc]);
@@ -798,7 +811,7 @@ switch ($action) {
 			foreach ($lab->getNodes() as $node_id => $node) {
 				if ($node->getNType() == 'iol') {
 					// IOL nodes drop privileges, so need to be postponed
-					$rc = start($lab, $node_id, $tenant);
+					$rc = start($lab, $node_id);
 					if ($rc !== 0) {
 						// Failed to start the node
 						error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][$rc]);
