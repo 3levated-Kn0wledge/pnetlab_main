@@ -484,6 +484,24 @@ $functions = code_without_comments($root . '/includes/functions.php');
 assert_true(strpos($functions, 'reap-tenant') !== false,
     'destroyBrokenLabSession() reaps too — it never calls device::stop()');
 
+// ...and in an order the reaper can accept. It refuses while a vunl<N>_* tap
+// exists or while node_sessions still reports the node as running, so the
+// taps have to be released and the rows deleted BEFORE it is called. The
+// first revision called it straight after the kill, so every call refused
+// and the leak stayed open behind a comment saying it was closed.
+$fnStart = strpos($functions, 'function destroyBrokenLabSession');
+$fnBody = substr($functions, $fnStart);
+$fnBody = substr($fnBody, 0, strpos($fnBody, "\nfunction ") ?: strlen($fnBody));
+$reapAt = strpos($fnBody, 'reap-tenant');
+$tapsAt = strpos($fnBody, 'unl_session_taps(');
+$rowsAt = strpos($fnBody, 'DELETE FROM node_sessions');
+assert_true($tapsAt !== false && $tapsAt < $reapAt,
+    'destroyBrokenLabSession() releases the taps before it reaps');
+assert_true($rowsAt !== false && $rowsAt < $reapAt,
+    'and deletes the node_sessions rows before it reaps');
+assert_true(strpos($fnBody, 'delTap(') !== false,
+    'the taps go through delTap(), the same path device::releaseTaps() uses');
+
 $cli = code_without_comments($root . '/includes/cli.php');
 assert_true(strpos($cli, 'UnlTenantAccount') !== false,
     'checkUsername() creates the account through the shared action');

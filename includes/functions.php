@@ -1489,18 +1489,17 @@ function destroyBrokenLabSession($lab_session)
 				exec($cmd, $o, $rc);
 			}
 
-			// Reap the tenant account. This path does NOT go through
-			// device::stop(), which is where the ordinary reap lives — it kills
-			// the processes itself, precisely because the lab is too broken to
-			// build Node objects for — so without this call, destroying a broken
-			// session is the one teardown that still leaks an account.
-			//
-			// After the kill, never before it: the account owns the taps and the
-			// running directory. The wrapper re-checks that for itself and keeps
-			// the account if anything is still alive under it.
-			$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a reap-tenant'
-				. ' -S ' . (int) $node['node_session_id'] . ' > /dev/null 2>&1';
-			exec($cmd, $o, $rc);
+			// The node's taps. device::stop() releases these through
+			// releaseTaps(); this path never builds a Node object, so it has
+			// to do the same by hand, from the host's interface list rather
+			// than the lab's -- a start that died inside prepare() created a
+			// prefix of the lab's list, and an interface removed from the lab
+			// after a start left a tap the list no longer names.
+			foreach (unl_session_taps($node['node_session_id']) as $tap) {
+				if (delTap($tap) !== 0) {
+					error_log(date('M d H:i:s ') . 'ERROR: could not remove ' . $tap);
+				}
+			}
 		}
 
 		$query = 'DELETE FROM node_sessions WHERE node_session_lab = :node_session_lab';
@@ -1508,6 +1507,24 @@ function destroyBrokenLabSession($lab_session)
 		$statement->execute([
 			'node_session_lab' => $lab_session,
 		]);
+
+		// Reap the tenant accounts. This path does NOT go through
+		// device::stop(), which is where the ordinary reap lives -- it kills
+		// the processes itself, precisely because the lab is too broken to
+		// build Node objects for -- so without this, destroying a broken
+		// session is the one teardown that still leaks an account.
+		//
+		// ORDER IS THE WHOLE POINT. The reaper refuses while a process runs as
+		// the uid, while a vunl<N>_* tap still exists, or while node_sessions
+		// still reports the node as running. An earlier revision called it
+		// after the kill but BEFORE the taps were deleted and BEFORE the rows
+		// were, so it refused every time, silently, and the leak this comment
+		// claimed to close stayed open. It now runs after all three.
+		foreach ($result as $node) {
+			$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a reap-tenant'
+				. ' -S ' . (int) $node['node_session_id'] . ' > /dev/null 2>&1';
+			exec($cmd, $o, $rc);
+		}
 
 		$query = 'DELETE FROM lab_sessions WHERE lab_session_id = :lab_session_id';
 		$statement = $db->prepare($query);
