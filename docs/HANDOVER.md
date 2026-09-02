@@ -1,11 +1,19 @@
 # Handover
 
-**State at end of session, 2026-09-02.** Branch `phase-02-shell-hardening`,
-90 commits ahead of `main`, none pushed. Nothing uncommitted.
+**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 28
+commits ahead of `main` (which now carries the merged `phase-02-shell-hardening`),
+none pushed. Nothing uncommitted.
+
+**The Phase 04 exit gate is clear.** `docs/PHASE-04-EXIT-FIXES.md` named fifteen
+defects found by reviewing the work that closed Phase 04, seven of them critical,
+plus fifteen secondary findings. All fifteen are fixed, one commit each, and
+verified on the reference VM through the installer; twelve of the secondary
+findings are fixed and three carry written deferrals in that file. See "Phase 04:
+the exit gate" at the foot of this document for what each fix measured and the
+two things a reviewer should know before merging.
 
 **Phase 02's dependency bullet is closed**: axios is 1.20.0 and the committed
-bundles were rebuilt against it — see "Phase 02: the axios upgrade" below. That
-was the last item standing between here and Phase 05.
+bundles were rebuilt against it — see "Phase 02: the axios upgrade" below.
 
 **Roadmap phases 00 through 04 are done**, with three deliberate redefinitions,
 each recorded in its own document:
@@ -368,12 +376,11 @@ review and several had been shipping for years.
 
 ## Suggested next steps, in order
 
-1. **Review and merge.** 53 commits is a lot, but each is individually scoped
-   and its message explains the reasoning. Note that two commits carry files
-   they do not describe: `iol.c` landed inside the Guacamole commit `dfc1764`
-   because parallel work shared one index. `8707cbc` is an empty commit
-   recording that. Content is correct and verified; only the attribution is
-   wrong. Rewriting that history is a reasonable pre-merge tidy if you want it.
+1. **Review and merge `phase-04-exit-fixes`.** 28 commits, each individually
+   scoped, each message carrying the reasoning and what was measured. One
+   commit (`9bcff23`) closes two gate items at once because they are two
+   findings on the same allowlist and the same test. Then open Phase 05:
+   nothing gates it any more.
 2. **IOL, with a licensed image.** Everything else is proven; this is the only
    feature claim resting on unit tests alone.
 3. **Finish the sudo migration.** `rm` is the last of the file-mutation grants,
@@ -969,3 +976,88 @@ control; the fix is not taken on trust.
    it was removed.** `code_only()` in `tests/bootstrap.php` strips comments with
    `token_get_all()` for exactly this; the house style of writing down what went
    away is otherwise in tension with the tests that enforce it.
+
+---
+
+## Phase 04: the exit gate
+
+`docs/PHASE-04-EXIT-FIXES.md` is the record: every item with the commit that
+fixed it and what was measured. This section is what that file does not say —
+the shape of the work, and what to watch for.
+
+**The ordering the file prescribed was right.** Items 1, 4 and 5 (the `fail()`
+narrowing, the two `set -e` aborts) were done first, and the rest could then be
+verified by running rather than reading. The pre-change `PackageRun` really does
+fatal — `Access level to …::fail() must be public` — which means every `php
+artisan` invocation on a deployed box had been fatalling, scheduler included.
+
+**Three fixes are bigger than their line numbers suggest.**
+
+  - *Item 6, the image-commit TOCTOU*, could not be fixed by checking harder:
+    the header qemu-img reads is in a file the tenant owns. The fix hands
+    qemu-img the checked chain as a `json:` block spec with `backing` explicit,
+    so the header's pointer is never dereferenced for a write. That was
+    measured both ways on qemu-img 8.2 before the code was written; the `json:`
+    form rather than `--image-opts` because `"backing": null` (open with NO
+    backing file) is only expressible there.
+  - *Item 12, the fixperms TOCTOU*, could not be fixed in PHP at all: no
+    `fchownat()`, so no race-free walk. GNU `chown -R -h -P` does it correctly
+    (openat traversal, `AT_SYMLINK_NOFOLLOW`, dev/ino re-check), and the action
+    now delegates to it. The test's oracle is chown's own `-v` log, which is
+    what lets it assert "never visited" without planting a link to a root-owned
+    file — important because the suite may run as root, and a regression would
+    then chown `/etc/shadow`.
+  - *Item 15, the lost SIGTERM*, is the classic self-pipe. It is not testable
+    deterministically in a unit test; it is verified by construction and by the
+    wrapper suites still passing.
+
+**Two things a reviewer should know.**
+
+  - `?relicense=1` (item 9) was sent by nothing in this tree. The `CsrfTest`
+    comment that named `error_helper.js:88` as its outbound leg described code
+    that is not there; the parameter was set by the upstream store's redirect,
+    which Phase 05 severs. If a relicense-after-purchase flow is ever wanted
+    again, it POSTs to `admin/default/relicense`.
+  - `Query::make()` rewrites **every** upstream URL from https to http, and
+    always has — login credentials to `user.pnetlab.com` go in the clear. This
+    session pinned the package download to https and left the rewrite for the
+    upstream calls, on the record, because removing it is what Phase 05 does
+    and a TLS failure today would look like a login outage. Phase 05 should
+    delete the rewrite with the calls.
+
+**One trap this session added to the list.** `fork/.claude/worktrees/` holds
+nine full copies of the tree from earlier agent sessions. Every tree walker
+and `php-lint.sh` crawled them: the sudoers test reported grants for call
+sites that only exist in an old copy, the escaping sweep reported dozens of
+NEW values, and the lint took minutes. All of them prune `.claude/` now, and
+so should any new walker — and `rsync --exclude .claude` when copying the
+tree to the VM.
+
+**Verification, on the reference VM against a clean `git archive` of the
+branch head:**
+
+```
+sudo bash install/install.sh --server-name pnetlab.test
+→ INSTALLER-EXIT=0, every step, all verification checks green
+
+bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
+bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/db-backup-restore.sh→ 67 assertions, 0 failed
+bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
+bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
+bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
+bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
+make -C platform/wrappers/src test         → 253 unit assertions, 0 failed (248 before; also clean under ASan+UBSan)
+tools/run-tests.sh (as root)               → 1778 assertions across 31 files, 0 failed
+tools/php-lint.sh (8.4 and 7.4)            → 352 files, 0 failed
+sudo policy                                → 23 grants, unchanged in number; shutdown/reboot now argument-pinned
+```
+
+`lab-functional.sh` and `node-types.sh` each failed once during this session,
+and both failures were state left on the host by a hand-driven check earlier
+in the session (a lab whose session was never destroyed shifted every node
+session id by one, so the console the suite expected on `:30001` was on
+`:30002`). Both passed on a cleaned host. Worth knowing because the symptom —
+"console connection refused" on the first node — does not say "stale
+session" anywhere: check `lab_sessions` and `node_sessions` before reading
+code.

@@ -10,9 +10,11 @@ because "are we done with phase N" was a question nothing in the repo could
 answer.
 
 **Phases 05, 06 and 07 are not started** and are not audited here. Phase 05
-is additionally gated: `docs/PHASE-04-EXIT-FIXES.md` carries fifteen blocking
-fixes found by reviewing the work that closed Phase 04, and must be clear
-before 05 opens.
+was additionally gated on `docs/PHASE-04-EXIT-FIXES.md`, the fifteen blocking
+fixes found by reviewing the work that closed Phase 04. **That gate is clear
+as of 2026-09-02**: all fifteen are fixed and verified on the reference VM,
+and every secondary finding is fixed or carries a written deferral in that
+file.
 
 Two bullets are **declined by decision** rather than outstanding. They are
 marked as such, with the reasoning, because a deferred item that looks like an
@@ -286,25 +288,34 @@ The bullets below are assessed against what was actually built.
 |---|---|
 | Migrate `brctl`/`tunctl`/`ifconfig` to iproute2 | **deferred** — see below |
 | Validate 32-bit IOL via i386 multiarch | **blocked.** Needs a licensed IOL image, which this project deliberately does not carry |
-| Fix what the review of this work found | **open** — see `docs/PHASE-04-EXIT-FIXES.md` |
+| Fix what the review of this work found | **done** — `docs/PHASE-04-EXIT-FIXES.md`, all fifteen, one commit each, verified on the VM |
 
-### Blocking: the review findings gate Phase 05
+### Cleared: the review findings that gated Phase 05
 
 Every bullet above is met. A full review of the work that met them is not the
 same question, and it found defects the bullet-level audit cannot catch — a
 bullet asks whether the thing was built, a review asks whether it works.
-Fifteen of them block, seven at critical.
+Fifteen of them blocked, seven at critical.
 
-They are listed with evidence in **`docs/PHASE-04-EXIT-FIXES.md`**, which is the
-exit gate for this phase. Two of the fifteen defeat changes made in this branch:
-the read-only allowlist omits the session keep-alive, so admins are silently
-logged out after an hour, and three actions on that same allowlist take
-`?relicense=1` and perform a cross-origin write — the exact hole the allowlist
-was written to close. One blocks the rest: a private `fail()` in `PackageRun`
-illegally narrows `Command::fail()`, so every `php artisan` invocation fatals
-and nothing downstream can be verified by running it.
+They are listed with evidence, and now with the commit that fixed each and
+what was measured, in **`docs/PHASE-04-EXIT-FIXES.md`**. Two of the fifteen
+defeated changes made in this branch: the read-only allowlist omitted the
+session keep-alive, so admins were silently logged out after an hour, and
+three actions on that same allowlist took `?relicense=1` and performed a
+cross-origin write — the exact hole the allowlist was written to close. One
+blocked the rest: a private `fail()` in `PackageRun` illegally narrowed
+`Command::fail()`, so every `php artisan` invocation fatalled and nothing
+downstream could be verified by running it.
 
-**Phase 04 is not past until that file is clear.**
+Three secondary findings are deferred rather than fixed, each with the
+condition that reopens it written beside it: the legacy API's origin guard
+behind a Host-rewriting proxy (the shipped vhost is the supported
+deployment), the IOL start unwind (gated, like everything IOL, on a licensed
+image), and `Query::make()`'s https→http rewrite for upstream calls (Phase
+05 removes the calls).
+
+**Phase 04 is past.** What remains under it is the iproute2 deferral and the
+IOL bullet, both below.
 
 ### Correction: what was actually wrong with KSM
 
