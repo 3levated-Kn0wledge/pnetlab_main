@@ -35,7 +35,7 @@ $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, Filesy
 foreach ($it as $file) {
     if ($file->getExtension() !== 'php') continue;
     $path = str_replace('\\', '/', $file->getPathname());
-    foreach (['/.git/', '/store/vendor/', '/node_modules/', '/tests/', '/tools/'] as $skip) {
+    foreach (['/.git/', '/.claude/', '/store/vendor/', '/node_modules/', '/tests/', '/tools/'] as $skip) {
         if (strpos($path, $skip) !== false) continue 2;
     }
     foreach (file($path) as $line) {
@@ -64,13 +64,33 @@ foreach ($unused as $u) echo "        policy grants but code never invokes: $u\n
 
 // --- the grants that must never come back ----------------------------------
 $text = file_get_contents($policy);
-foreach ([
-    '/^\s*www-data\s+ALL=\(ALL\)\s+NOPASSWD:\s*ALL/mi'      => 'www-data blanket NOPASSWD:ALL',
-    '/^\s*%www-data\s+ALL=.*NOPASSWD:\s*ALL/mi'             => '%www-data blanket NOPASSWD:ALL',
-    '/^\s*%unl\s+ALL=.*NOPASSWD:\s*ALL/mi'                  => '%unl blanket NOPASSWD:ALL',
-] as $re => $what) {
-    assert_true(!preg_match($re, $text), "policy does not reinstate: $what");
+
+/**
+ * A blanket grant, in any spelling: user or group, any host, any runas (or
+ * none), NOPASSWD or not, a command list that is ALL or contains a glob.
+ * The first version of this check matched only `ALL=(ALL) NOPASSWD: ALL`
+ * literally, so `ALL=(root) NOPASSWD: ALL` -- the shape every real grant in
+ * this file takes -- would have passed it. It passed vacuously.
+ */
+function blanket_grants($text)
+{
+    $hits = [];
+    foreach (preg_split('/\R/', $text) as $line) {
+        $t = trim($line);
+        if ($t === '' || $t[0] === '#') continue;
+        if (!preg_match('/^%?(?:www-data|unl)\s+\S+\s*=\s*(?:\([^)]*\)\s*)?(?:[A-Z]+:\s*)*(.*)$/i', $t, $m)) continue;
+        $cmds = trim($m[1]);
+        if (preg_match('/^ALL\b/i', $cmds) || preg_match('/[*?]/', $cmds)) $hits[] = $t;
+    }
+    return $hits;
 }
+assert_same([], blanket_grants($text), 'the policy carries no blanket or wildcard grant for www-data or unl');
+
+// Negative control: the shapes the appliance shipped, and the one the first
+// version of this check could not see, are all caught.
+$control = "www-data ALL=(ALL) NOPASSWD: ALL\n%www-data ALL=(ALL:ALL) NOPASSWD: ALL\n%unl ALL=(ALL) NOPASSWD:ALL\n"
+    . "www-data ALL=(root) NOPASSWD: ALL\nwww-data ALL=(root) NOPASSWD: /usr/bin/*\nwww-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/unl_wrapper\n";
+assert_same(5, count(blanket_grants($control)), 'the blanket-grant check can fail: five of six control lines are caught');
 
 assert_true(strpos($text, '/opt/unetlab/wrappers/unl_wrapper') !== false,
     'the platform wrapper is still permitted');
