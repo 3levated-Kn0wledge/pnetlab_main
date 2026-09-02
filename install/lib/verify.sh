@@ -67,6 +67,59 @@ http_code() {
 }
 
 
+# --- Docker and the cgroup hierarchy ---------------------------------------
+#
+# The appliance ran Docker 20.10 on cgroup **v1** with the `cgroupfs` driver.
+# Every current LTS is v2-only, and the fork has only ever been run there:
+# measured on the reference host, `stat -fc %T /sys/fs/cgroup` is `cgroup2fs`
+# and Docker 29.1.3 reports `Cgroup Version: 2`, `Cgroup Driver: systemd`.
+#
+# THIS WORKS. Nothing here is a fix; these checks exist because nothing asserted
+# it. The failure they are for is not "Docker is broken" -- it is a host that
+# presents v1, or a hybrid host, or a daemon started with
+# --exec-opt native.cgroupdriver=cgroupfs against a v2 kernel. Each of those
+# produces containers that start and then behave differently under resource
+# pressure, and the symptom surfaces as a lab that misbehaves rather than as an
+# installer that failed. Discovering it here costs one line of output.
+#
+# Two of the three are soft. The hierarchy itself is a hard failure because
+# nothing in this tree has ever run on v1 and saying so is the point; the
+# driver is a warning because a `cgroupfs` driver on a v2 host is a real
+# configuration smell but not one this installer set or should silently change.
+_cgroup_v2()        { [[ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" == 'cgroup2fs' ]]; }
+# A hybrid host mounts v1 controllers under /sys/fs/cgroup/<controller>. On a
+# pure v2 host those directories do not exist.
+_cgroup_not_hybrid() { ! mount | grep -q '^cgroup on /sys/fs/cgroup/'; }
+_docker_cgroup_v2() { docker info 2>/dev/null | grep -q 'Cgroup Version: 2'; }
+_docker_cgroup_drv(){ docker info 2>/dev/null | grep -q 'Cgroup Driver: systemd'; }
+# The web layer reaches the daemon over the unix socket and by group
+# membership; `docker info` succeeding as root does not prove WEB_USER can.
+_docker_socket_usable() { sudo -u "$WEB_USER" docker -H=unix:///var/run/docker.sock info; }
+
+verify_docker() {
+	info "docker and cgroups"
+
+	if ! have docker; then
+		printf '    %s[info]%s docker is not installed; Docker-backed nodes are unavailable.\n' \
+			"$C_YELLOW" "$C_RESET"
+		return 0
+	fi
+
+	check      "/sys/fs/cgroup is cgroup2fs (v2), not v1"    _cgroup_v2
+	check      "no v1 controllers are mounted alongside it"  _cgroup_not_hybrid
+
+	if ! systemctl is-active --quiet docker.service 2>/dev/null; then
+		printf '    %s[warn]%s docker.service is not running; skipped the daemon checks\n' \
+			"$C_YELLOW" "$C_RESET"
+		return 0
+	fi
+
+	check      "the daemon reports Cgroup Version: 2"        _docker_cgroup_v2
+	check_soft "and Cgroup Driver: systemd"                  _docker_cgroup_drv
+	check      "${WEB_USER} reaches the daemon on the unix socket" _docker_socket_usable
+
+}
+
 # --- HTML5 consoles --------------------------------------------------------
 #
 # The step is optional, so every check here has to know the difference between
@@ -181,6 +234,7 @@ step_verify() {
 	fi
 
 	verify_http
+	verify_docker
 	verify_guacamole
 	verify_php_settings
 
