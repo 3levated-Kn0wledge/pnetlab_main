@@ -91,4 +91,16 @@ return [
     // which is why CsrfTest.php asserts it is there.
     'admin/labs/uploader',
 
+    // store/public/assets/js/default.js:169,171 -- $.get on window.onload and
+    // every 20 minutes after, from every page of both UIs. It re-issues the
+    // caller's own 60-minute token cookie and stamps the caller's own row
+    // with the time. This was missing when the list was first written, and
+    // the effect was invisible: the refusal came back with a 200-class
+    // status to a call with no .fail handler, so nothing complained and the
+    // cookie simply expired -- every admin was bounced to login after about
+    // an hour of continuous work. What a cross-origin GET could do with it
+    // is extend the victim's OWN session by the same amount the victim's own
+    // page load would; it reads no data and writes nobody else's.
+    'admin/default/refreshToken',
+
 ];

@@ -255,20 +255,27 @@ $mutators = [
 
 /**
  * The state changes that are accepted on a GET, with the reason, and pinned to
- * the exact call that is accepted. Anything else in these methods, or any new
+ * the exact calls that are accepted. Anything else in these methods, or any new
  * entry here, is a decision someone has to make on purpose.
  *
- * All three are page renders that refresh the box's license when the store
- * sends the browser back with ?relicense=1 (helpers/error_helper.js:88 is the
- * outbound leg). They have to be GET -- they are what the address bar points at
- * -- and the side effect is a license refresh against APP_CENTER, initiated by
- * this box, which an attacker gains nothing by triggering.
+ * An earlier revision of this list accepted 'License::' on three page renders,
+ * for a ?relicense=1 query parameter. That was wrong, and this test is what
+ * let it through: License::relicense() POSTs to the central server and writes
+ * USER_LICENSE to the user row, which is state, and SameSite=Lax made it
+ * reachable from a bare `location =` on any site. The parameter is gone from
+ * all three; the trigger is admin/default/relicense, POST-only. Nothing that
+ * reaches an external service or writes a row belongs on this list again.
+ *
+ * What remains is the session keep-alive: it re-issues the CALLER's token
+ * cookie and stamps the CALLER's online time. Triggered cross-origin it
+ * extends the victim's own session by exactly what the victim's own page load
+ * would. No data is read back and no other row is written.
  */
 $acceptedGetSideEffects = [
-    'admin/main/view'     => 'License::',
-    'admin/labs/store'    => 'License::',
-    'admin/versions/view' => 'License::',
+    'admin/default/refreshtoken' => ['->edit(', 'Cookie::', 'AuthCookie::'],
 ];
+$neverAcceptedOnGet = ['License::', 'Query::center(', 'Query::boxCenter(', 'Query::make(',
+    'exec(', 'shell_exec', 'passthru(', 'proc_open(', 'system(', 'popen('];
 
 foreach ($readOnly as $action) {
     assert_true(isset($methods[$action]),
@@ -291,12 +298,24 @@ foreach ($readOnly as $action) {
     }
 
     if (isset($acceptedGetSideEffects[$action])) {
-        assert_same([$acceptedGetSideEffects[$action]], $hits,
-            "GET-reachable '$action' still does only its one accepted side effect");
+        $accepted = $acceptedGetSideEffects[$action];
+        sort($accepted); sort($hits);
+        assert_same($accepted, $hits,
+            "GET-reachable '$action' still does only its accepted side effects");
+        assert_same([], array_values(array_intersect($hits, $neverAcceptedOnGet)),
+            "and none of them reaches a shell or an external service");
         continue;
     }
 
     assert_same([], $hits, "GET-reachable '$action' changes no state");
+}
+
+// The parameter itself must not come back under another name: no allowlisted
+// method reads a request input and branches to a mutator on it.
+foreach ($readOnly as $action) {
+    if (!isset($methods[$action])) continue;
+    assert_true(strpos($methods[$action], "'relicense'") === false,
+        "GET-reachable '$action' no longer looks for ?relicense");
 }
 
 // A route that serves GET straight into a controller, outside the three guarded

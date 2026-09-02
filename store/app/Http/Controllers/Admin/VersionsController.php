@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Helpers\Auth\Role;
-use App\Helpers\Box\License;
 use App\Helpers\DB\Models;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
@@ -139,8 +138,7 @@ class VersionsController extends Controller
     
     public function view(Request $request)
     {
-        $relicense = $request->input('relicense', false);
-        if($relicense) License::relicense(false, Auth::user());
+        // No ?relicense=1 here any more; see Admin\MainController::view().
         return view($this->viewblade);
     }
 

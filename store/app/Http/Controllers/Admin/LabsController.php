@@ -2,7 +2,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Helpers\Auth\Role;
-use App\Helpers\Box\License;
 use App\Helpers\DB\Models;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
@@ -172,10 +171,7 @@ class LabsController extends Controller
 
     public function store(Request $request) 
     {
-
-        $relicense = $request->input('relicense', false);
-        if($relicense) License::relicense(false, Auth::user());
-
+        // No ?relicense=1 here any more; see Admin\MainController::view().
         if(!Role::checkRoot()) return redirect('/');
         return view($this->viewblade);
     }
