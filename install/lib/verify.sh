@@ -67,6 +67,53 @@ http_code() {
 }
 
 
+# --- AppArmor ---------------------------------------------------------------
+#
+# The fork ships NO AppArmor profile of its own. docs/APPARMOR.md says why, and
+# what one would have to cover.
+#
+# What these checks are for is the other half of that: upstream's answer to
+# AppArmor was `apparmor=0` on the kernel command line, with AppArmor confirmed
+# off at runtime on the appliance. Nothing in install/ touches GRUB, the
+# apparmor service or the userns sysctl -- and the point of asserting it here is
+# that "we did not disable it" is a claim that decays silently. If somebody
+# fixes a node-start failure by turning AppArmor off, this is where it shows up.
+#
+# Every one of these is soft. The fork does not require AppArmor and works
+# without it; what it must not do is switch it off. A host whose operator
+# disabled it deliberately gets a warning, not a failed install.
+_apparmor_enabled()   { [[ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" == 'Y' ]]; }
+_apparmor_not_off()   { ! grep -qw 'apparmor=0' /proc/cmdline; }
+# 1 means unprivileged user namespaces are AppArmor-restricted, which is
+# Ubuntu's 24.04 default and what the container and browser sandboxes rely on.
+_userns_restricted()  { [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null)" == '1' ]]; }
+# Docker ships its own profile and applies it to every container it starts.
+# It is the only AppArmor confinement any part of this stack currently has.
+_docker_default_profile() {
+	have docker || return 0
+	aa-status 2>/dev/null | grep -q '^   docker-default$'
+}
+
+verify_apparmor() {
+	info "apparmor"
+
+	if ! [[ -d /sys/module/apparmor ]]; then
+		printf '    %s[info]%s this kernel has no AppArmor; nothing to check.\n' \
+			"$C_YELLOW" "$C_RESET"
+		return 0
+	fi
+
+	check_soft "AppArmor is enabled in the kernel"           _apparmor_enabled
+	check_soft "apparmor=0 is NOT on the kernel command line" _apparmor_not_off
+	check_soft "unprivileged user namespaces are restricted" _userns_restricted
+	if have docker; then
+		check_soft "docker-default is loaded (containers are confined)" _docker_default_profile
+	fi
+
+	printf '    %s[info]%s this fork ships no profile of its own; see docs/APPARMOR.md\n' \
+		"$C_YELLOW" "$C_RESET"
+}
+
 # --- Docker and the cgroup hierarchy ---------------------------------------
 #
 # The appliance ran Docker 20.10 on cgroup **v1** with the `cgroupfs` driver.
@@ -234,6 +281,7 @@ step_verify() {
 	fi
 
 	verify_http
+	verify_apparmor
 	verify_docker
 	verify_guacamole
 	verify_php_settings

@@ -185,5 +185,15 @@ of the host.**
 - systemd units, currently hand-placed in `/etc/systemd/system`.
 - HTTPS. The vhost is plain `*:80`; TLS is a deployment decision the installer
   does not make for you.
-- AppArmor profile. Upstream's answer to AppArmor was `apparmor=0` on the kernel
-  command line; a profile carrying a `userns,` rule is new work, not a port.
+- AppArmor profile. Still not shipped, but the gap is now measured rather than
+  assumed: `docs/APPARMOR.md`. AppArmor is **enabled** on the reference host and
+  nothing in this installer disables it — no GRUB edit, no service stop, no
+  userns sysctl — and `--only verify` now asserts that, because upstream's
+  answer was `apparmor=0` on the kernel command line and that is the regression
+  worth catching. The `userns,` rule the roadmap asks for is largely already
+  there: 24.04 ships `unprivileged_userns` enforcing with
+  `kernel.apparmor_restrict_unprivileged_userns=1`, and `docker-default` confines
+  every container a Docker node starts. What is unconfined is the fork's own
+  layer, and `unl_wrapper` cannot usefully be confined at all — it manufactures
+  Unix accounts, drives the data plane and execs template-supplied command
+  lines. QEMU can be, and the document says what that profile has to cover.
