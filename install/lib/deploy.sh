@@ -50,6 +50,24 @@ step_deploy() {
 	ensure_dir "${BASE_DIR}/data/Logs"      "${WEB_USER}:${WEB_GROUP}" 0755
 	ensure_dir "${BASE_DIR}/data/Exports"   "${WEB_USER}:${WEB_GROUP}" 0755
 
+	# --- the database backup directory -------------------------------------
+	# 0700 root:root, and that is load-bearing rather than tidy. These hold
+	# `mysqldump --databases pnetlab_db guacdb`: the whole users table with every
+	# password digest, and every Guacamole console connection with its
+	# parameters. A world-readable backup directory is a database leak that
+	# outlives every other control in this tree, and www-data has no business
+	# reading it — `unl_wrapper -a backupdb` and `-a restoredb` run as root.
+	#
+	#   remote/       a staging area for a dump copied from ANOTHER host.
+	#                 Nothing in this tree writes it; it is read by
+	#                 `-a restoredb --source remote`, which is what the retired
+	#                 `-a restoredb_remote` used to do.
+	#   pre-restore/  the safety dump `-a restoredb` takes of the CURRENT
+	#                 databases before it overwrites them. One generation.
+	ensure_dir "${BASE_DIR}/backup_database"             root:root 0700
+	ensure_dir "${BASE_DIR}/backup_database/remote"      root:root 0700
+	ensure_dir "${BASE_DIR}/backup_database/pre-restore" root:root 0700
+
 	# .user.ini points error_log here. PHP-FPM will not create the file if the
 	# directory is not writable by the pool user, and a silent logging failure
 	# is exactly the thing you need when something else breaks.

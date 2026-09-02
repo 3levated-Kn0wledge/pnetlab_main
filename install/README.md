@@ -34,7 +34,7 @@ Steps, in order, each independently re-runnable with `--only`:
 |---|---|
 | `preflight` | Checks the host, and checks that `BASE_DIR` and the database credentials in the source still match what the installer assumes |
 | `packages` | `apache2`, `mariadb-server`, PHP 8.4 from `ppa:ondrej/php` under **FPM** |
-| `deploy` | Creates `/opt/unetlab/{labs,tmp,addons,scripts,wrappers,data/Logs,data/Exports}` and rsyncs the web layer to `/opt/unetlab/html` |
+| `deploy` | Creates `/opt/unetlab/{labs,tmp,addons,scripts,wrappers,data/Logs,data/Exports}`, the 0700 root-only `/opt/unetlab/backup_database{,/remote,/pre-restore}`, and rsyncs the web layer to `/opt/unetlab/html` |
 | `sudoers` | Validates the policy with `visudo -cf`, installs it 0440 root:root, removes `/etc/sudoers.d/unetlab`, re-validates the whole tree and rolls back if it broke |
 | `database` | Creates `pnetlab_db` and `guacdb` and their users, imports a schema if you supplied one, applies the offline seed |
 | `apache` | Modules, vhost, `configtest` **before** restart |
