@@ -49,9 +49,15 @@ readonly PLATFORM_GID=32768
 #      is visible — but the drop-in adds After/Wants=docker.service so the daemon
 #      is up (and the socket exists) before the pool that talks to it.
 step_platform_docker() {
+	# install.sh runs under `set -e`, so a bare apt_install that fails would
+	# abort the whole installer here -- before the PHP-FPM drop-in below is
+	# installed, which is the step that lets ANY node start. Docker is one
+	# node type; its absence is a warning, not a dead host.
 	if ! have docker; then
 		note "installing docker.io for container-backed nodes"
-		apt_install docker.io
+		if ! apt_install docker.io; then
+			warn "docker.io could not be installed; Docker-backed nodes will not start"
+		fi
 	fi
 
 	if ! have docker; then
@@ -85,11 +91,19 @@ step_platform_docker() {
 	note "         daemon socket on 127.0.0.1:4243, both of which were worse."
 
 	if have systemctl; then
+		# run_ok returns the command's status rather than dying, but under
+		# `set -e` a non-zero return in statement position still aborts the
+		# script. It has to be tested, as packages.sh does, or the warning
+		# branch below is unreachable.
 		if ! systemctl is-enabled --quiet docker.service 2>/dev/null; then
-			run_ok systemctl enable docker.service
+			if ! run_ok systemctl enable docker.service; then
+				warn "could not enable docker.service"
+			fi
 		fi
 		if ! systemctl is-active --quiet docker.service; then
-			run_ok systemctl start docker.service
+			if ! run_ok systemctl start docker.service; then
+				warn "could not start docker.service"
+			fi
 		fi
 		if systemctl is-active --quiet docker.service; then
 			ok "docker.service is running"
