@@ -3,25 +3,21 @@
  * Two host-level properties the installer must not quietly give away.
  *
  * 1. APPARMOR STAYS ON. Upstream's answer to AppArmor was `apparmor=0` on the
- *    kernel command line, alongside the whole host-hardening set, off, for VM
- *    density. The fork ships no profile of its own (docs/APPARMOR.md says why)
- *    but it must never be the thing that turns AppArmor off, and "we did not"
- *    is a claim that decays the first time somebody debugs a node-start failure
- *    and finds that disabling it helps.
+ *    kernel command line, alongside `mitigations=off pti=off spectre_v2=off
+ *    nopti l1tf=off nospec_store_bypass_disable no_stf_barrier` -- the whole
+ *    host-hardening set, off, for VM density. The fork ships no profile of its
+ *    own (docs/APPARMOR.md says why) but it must never be the thing that turns
+ *    AppArmor off, and "we did not" is a claim that decays the first time
+ *    somebody debugs a node-start failure and finds that disabling it helps.
  *
- * 2. DOCKER IS ON CGROUP V2, ASSERTED AT INSTALL TIME.
+ * 2. DOCKER IS ON CGROUP V2, ASSERTED AT INSTALL TIME. The appliance ran
+ *    Docker 20.10 on cgroup v1 with the cgroupfs driver; the reference host is
+ *    v2 with the systemd driver and it works. Nothing checked it, and a host
+ *    that presents v1 produces containers that start and then behave
+ *    differently under pressure -- a lab that misbehaves rather than an install
+ *    that failed.
  *
- * The appliance ran Docker 20.10 on cgroup **v1** with the `cgroupfs` driver.
- * The reference host is v2 with the systemd driver and it works -- measured:
- * `stat -fc %T /sys/fs/cgroup` is `cgroup2fs`, `docker info` reports
- * `Cgroup Version: 2` and `Cgroup Driver: systemd`, and node-types.sh passes.
- * Nothing checked any of it.
- *
- * The failure this defends against is not "Docker is broken". It is a host that
- * presents v1, a hybrid host, or a daemon started with
- * --exec-opt native.cgroupdriver=cgroupfs against a v2 kernel -- each of which
- * produces containers that start and then behave differently under resource
- * pressure. The symptom is a lab that misbehaves, discovered weeks later.
+ * 3. THE OFFLINE IMAGE SEED PATH EXISTS AND NEVER PULLS.
  *
  * These are source assertions, not host assertions: the suite runs against a
  * bare interpreter on any machine, and what is being defended is the
@@ -31,7 +27,6 @@
 require_once __DIR__ . '/../bootstrap.php';
 
 $root = realpath(__DIR__ . '/../..');
-$verify = file_get_contents($root . '/install/lib/verify.sh');
 
 // -------------------------------------------------- nothing disables apparmor
 
@@ -147,5 +142,43 @@ assert_true(preg_match('/\bcheck\s+"\/sys\/fs\/cgroup is cgroup2fs/', $verify) =
 assert_true(preg_match('/check_soft\s+"and Cgroup Driver: systemd"/', $verify) === 1,
     'the cgroup driver is a soft check');
 
+// ------------------------------------------------- the offline image seed path
+
+$installer = file_get_contents($root . '/install/install.sh');
+assert_true(strpos($installer, 'docker-images') !== false,
+    'docker-images is a step of the installer');
+assert_true(preg_match('/ALL_STEPS=.*\bdocker-images\b/', $installer) === 1,
+    'and is in ALL_STEPS, so a plain install run does it');
+// The step name carries a hyphen, which a bash function name cannot, so the
+// dispatcher translates. Without this the step is dispatched as a command that
+// does not exist and the install dies at that step.
+assert_true(strpos($installer, '"step_${s//-/_}"') !== false,
+    'the dispatcher maps a hyphenated step name onto an underscored function');
+
+$seed = file_get_contents($root . '/install/lib/docker_images.sh');
+assert_true(preg_match('/^step_docker_images\(\)/m', $seed) === 1,
+    'and the function the dispatcher will call exists');
+assert_true(strpos($seed, 'docker load') !== false,
+    'the step loads staged archives rather than pulling');
+// Never EXECUTES a pull. It prints one, as the instruction for the connected
+// machine an operator stages images on, and that is the point of the step --
+// so the assertion is about a command, not about the string.
+$pulls = [];
+foreach (explode("\n", $seed) as $n => $line) {
+    $t = ltrim($line);
+    if ($t === '' || $t[0] === '#') continue;
+    if (preg_match('/(^|[;&|]|\$\()\s*(sudo\s+)?docker\s+pull\b/', $t)) $pulls[] = $n + 1;
+}
+assert_same([], $pulls,
+    'and never runs docker pull: there is no registry on the host this is for');
+assert_true(strpos($seed, 'addons/docker') !== false,
+    'images are staged under addons/, beside the qemu, iol and dynamips trees');
+
+// docs/PACKAGES.md's docker_pull verb is the one verb in the package format
+// that needs the network. Whoever removes this assertion should be replacing
+// it with install_docker_image, not deleting the note.
+$packages = file_get_contents($root . '/docs/PACKAGES.md');
+assert_true(strpos($packages, 'install_docker_image') !== false,
+    'PACKAGES.md records that docker_pull cannot work offline and names its replacement');
 
 test_summary();

@@ -66,7 +66,7 @@ SKIP=''
 
 # guacamole sits after apache because it needs the vhost and the proxy modules
 # in place, and after database because guacdb must already have its schema.
-readonly ALL_STEPS='preflight packages deploy sudoers database apache platform guacamole store verify'
+readonly ALL_STEPS='preflight packages deploy sudoers database apache platform docker-images guacamole store verify'
 
 usage() {
 	cat <<'EOF'
@@ -83,6 +83,12 @@ Steps, in order:
               one is available, and apply the offline seed
   apache      enable the modules, render and enable the vhost, restart
   platform    emulators, the /opt layout the code hardcodes, the unl group
+  docker-images
+              load any images staged in /opt/unetlab/addons/docker into the
+              local daemon. Docker-backed nodes have no other source on an
+              offline host: node start runs `docker create <image>` with no
+              registry to fall back on. Does nothing if the directory is
+              empty, which is the normal state. See docs/DOCKER-IMAGES.md
   guacamole   HTML5 consoles: guacd, jetty9, the Guacamole web app at /html5.
               Skipped, without failing the install, if the artefacts have not
               been staged by tools/vendor-guacamole.sh
@@ -158,6 +164,8 @@ done
 # shellcheck source=lib/sudoers.sh
 . "${LIB_DIR}/sudoers.sh"
 . "${LIB_DIR}/platform.sh"
+# shellcheck source=lib/docker_images.sh
+. "${LIB_DIR}/docker_images.sh"
 # shellcheck source=lib/database.sh
 . "${LIB_DIR}/database.sh"
 # shellcheck source=lib/apache.sh
@@ -346,10 +354,13 @@ main() {
 		SERVER_NAME="$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo pnetlab)"
 	fi
 
+	# The step NAME is what a user types after --only, so it is allowed a
+	# hyphen; the function name is not, so it gets an underscore. Translating
+	# here keeps `--only docker-images` reading like the rest of the CLI.
 	local s
 	for s in $ALL_STEPS; do
 		if should_run "$s"; then
-			"step_${s}"
+			"step_${s//-/_}"
 		else
 			dim "(skipping ${s})"
 		fi

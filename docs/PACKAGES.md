@@ -197,6 +197,25 @@ dockerimage   lowercase name[/name][:tag], no shell characters at all
 **There is no `run_script` verb and there will not be one.** That is the whole
 point: a supplier can say "put this qcow2 here", not "run this".
 
+### `docker_pull` does not work on the hosts this is for
+
+It is `docker pull <image>`: a registry fetch, in a fork that has adopted
+offline-only (`docs/OFFLINE-FIRST.md`). Every other verb here delivers its
+content out of the signed payload; this one is the single verb that requires the
+network, and on an air-gapped appliance it fails. A device package for a
+Docker-backed node can therefore declare a template, an icon and a config script
+and still not deliver the one artefact without which the node cannot start —
+node start runs `docker create <image>`, which has no local fallback.
+
+The missing verb is `install_docker_image`: a payload member, sha256'd and
+size-bounded by the manifest exactly like every other payload member, handed to
+`docker load`. It needs an uninstall that records the reference the archive
+carried, and it is not written yet. Until it is, images are staged out of band
+into `/opt/unetlab/addons/docker` by `install/lib/docker_images.sh` — which has
+no signature check at all, and says so. `docs/DOCKER-IMAGES.md` has the
+measurements and the design. **When `install_docker_image` lands, `docker_pull`
+should be removed rather than kept beside it.**
+
 ### Why `install_config_script` is here anyway, and what it costs
 
 A configuration script *does* execute later, as root, when a node is configured.

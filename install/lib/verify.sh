@@ -165,6 +165,21 @@ verify_docker() {
 	check_soft "and Cgroup Driver: systemd"                  _docker_cgroup_drv
 	check      "${WEB_USER} reaches the daemon on the unix socket" _docker_socket_usable
 
+	# Images. There is no registry on an offline host, so a Docker node type is
+	# only selectable if an image is already local. Information, not a failure:
+	# an install with no Docker nodes is a perfectly good install.
+	local n
+	n="$(docker image ls -q 2>/dev/null | wc -l)"
+	if [[ "${n:-0}" -gt 0 ]]; then
+		printf '    %s[ ok ]%s %s docker image(s) available locally\n' "$C_GREEN" "$C_RESET" "$n"
+	else
+		printf '    %s[info]%s no docker images on this host, so no Docker node can start.\n' \
+			"$C_YELLOW" "$C_RESET"
+		printf '           Stage them with tools/docker-images.sh save on a connected\n'
+		printf '           machine, copy into %s/addons/docker, then\n' "$BASE_DIR"
+		printf '           sudo install/install.sh --only docker-images.\n'
+		printf '           See docs/DOCKER-IMAGES.md.\n'
+	fi
 }
 
 # --- HTML5 consoles --------------------------------------------------------
