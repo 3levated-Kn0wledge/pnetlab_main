@@ -62,8 +62,15 @@ _guac_db_reachable() { _db_reachable_as "$GUAC_DB_USER" "$GUAC_DB_PASS" "$GUAC_D
 
 # http_code <path> — a request to ourselves over the loopback. Not an external
 # call; this does not violate docs/OFFLINE-FIRST.md.
+#
+# Always returns 0. curl exits non-zero on a refused connection or a timeout,
+# and every caller assigns the output -- `code="$(http_code ...)"` -- which
+# under install.sh's `set -e` made the assignment itself fatal. So the one
+# case these checks exist for, Apache not answering, aborted the installer
+# before the [fail] line could be printed. curl still writes '000' on
+# failure, which the callers report as-is.
 http_code() {
-	curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1$1" 2>/dev/null
+	curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1$1" 2>/dev/null || true
 }
 
 
@@ -169,7 +176,7 @@ verify_docker() {
 	# only selectable if an image is already local. Information, not a failure:
 	# an install with no Docker nodes is a perfectly good install.
 	local n
-	n="$(docker image ls -q 2>/dev/null | wc -l)"
+	n="$(docker image ls -q 2>/dev/null | wc -l || true)"
 	if [[ "${n:-0}" -gt 0 ]]; then
 		printf '    %s[ ok ]%s %s docker image(s) available locally\n' "$C_GREEN" "$C_RESET" "$n"
 	else
@@ -380,7 +387,7 @@ verify_php_settings() {
 		sudo -u "$WEB_USER" test -w "${BASE_DIR}/data/Logs/php_errors.txt"
 
 	local mods
-	mods="$("$php" -m 2>/dev/null | tr '\n' ' ')"
+	mods="$("$php" -m 2>/dev/null | tr '\n' ' ' || true)"
 	local m
 	for m in pdo_mysql mbstring curl gd zip xml intl bcmath; do
 		if [[ " $mods " == *" $m "* ]]; then
