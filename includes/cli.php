@@ -784,6 +784,15 @@ function usage()
 	$output = '';
 	$output .= "Usage: " . $argv[0] . " -a <action> <options>\n";
 	$output .= "-a <s>     Action can be:\n";
+	// backupdb and restoredb are listed because, unlike every other action
+	// here, they have no caller in the application at all: an operator runs
+	// them by hand, so this text is the only place they are discoverable.
+	$output .= "           - backupdb: dump pnetlab_db and guacdb to\n";
+	$output .= "                     /opt/unetlab/backup_database (0700, root)\n";
+	$output .= "           - restoredb: restore both schemas from that directory.\n";
+	$output .= "                     DESTRUCTIVE; refuses while a lab is running.\n";
+	$output .= "                     --source remote reads the remote/ subdirectory\n";
+	$output .= "                     (what -a restoredb_remote used to do)\n";
 	$output .= "           - delete: delete a lab file even if it's not valid\n";
 	$output .= "                     requires -T, -F\n";
 	$output .= "           - export: export a runnign-config to a file\n";

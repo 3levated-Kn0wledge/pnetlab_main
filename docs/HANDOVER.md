@@ -16,6 +16,12 @@ recorded in "Phase 03: Laravel 10 -> 12" at the foot of this document. `store/`
 is Laravel 12.69.1 now, not 10.50.3. Everything above and below that section was
 measured before the upgrade and re-measured after it; the numbers did not move.
 
+**Amended again for Phase 04's last item**, backup and restore, recorded in
+"Phase 04: backup and restore" at the very foot. `-a backupdb` and `-a restoredb`
+are real actions now; `-a restoredb_remote` is retired into `--source remote`.
+The suite counts in "Where this got to" below predate it — the current ones are
+in that section.
+
 ---
 
 ## Where this got to
@@ -311,8 +317,10 @@ review and several had been shipping for years.
    relicenses against pnetlab.com and `Query::boxCenter()` still ships an
    encrypted machine UUID upstream. The signed-package work makes this cheaper
    than it was.
-8. **Backup and restore** (`unl_wrapper backupdb`/`restoredb`) is a shipped
-   feature no plan has ever priced, and it moves with the `guacdb` schema.
+8. ~~**Backup and restore**~~ — done, and recorded in "Phase 04: backup and
+   restore" at the foot of this document. What is left of it is
+   `store/app/Console/Commands/MysqlRecovery.php`, which is a second copy of the
+   same defects against a different directory.
 
 ---
 
@@ -454,3 +462,132 @@ in a scratch copy of `store/` rather than by `install/install.sh --only store`,
 because that step returns early when `vendor/autoload.php` already exists and so
 cannot perform an upgrade. Making it able to is small and is the honest next
 step for the installer.
+
+
+---
+
+## Phase 04: backup and restore
+
+`unl_wrapper -a backupdb` and `-a restoredb` are real now. They were not.
+
+**What was there.** Three cases in `unl_wrapper`, nine lines, four defects, no
+callers — there is none in `store/`, none in `includes/`, none in the crontab,
+and none on a stock 5.3.13 appliance either.
+
+```php
+case "backupdb":
+    shell_exec("mysqldump -uroot -ppnetlab ... --databases pnetlab_db > /opt/unetlab/backup_database/pnetlab_db.sql ; mysqldump ... guacdb > ...");
+case "restoredb":
+    shell_exec("cat .../pnetlab_db.sql | /usr/bin/mysql --password=pnetlab pnetlab_db ; ...");
+case "restoredb_remote":
+    shell_exec("cat .../remote/pnetlab_db.sql | ...");
+```
+
+**It never wrote a byte, and the reason is not the one it looks like.**
+`/opt/unetlab/backup_database` does not exist. Nothing in the tree created it —
+not the installer, not the wrapper — and a stock appliance does not have it
+either. Measured, running that exact string as root with the directory absent:
+
+```
+sh: 1: cannot create /opt/unetlab/backup_database/pnetlab_db.sql: Directory nonexistent
+shell_exec() returned NULL
+```
+
+and the case then fell through to `break` and exit 0. `-a backupdb` reported
+success and produced nothing.
+
+**Be careful how you test the password claim.** The obvious reading is that
+`-ppnetlab` cannot authenticate, because `install/lib/database.sh` administers
+MariaDB over the unix_socket root account and deliberately does not set a root
+password. That reading is wrong as stated: **the unix_socket plugin
+authenticates root by peer uid and IGNORES the password supplied**, so
+`mysqldump -uroot -ppnetlab` run as root SUCCEEDS on this host, and unl_wrapper
+is always root. Measured both ways — as root it dumps; as `nobody` or `labadmin`
+it is `ERROR 1698 (28000)`. So the argument buys nothing here and costs the
+appliance credential to `ps` for the life of the dump; on an appliance, where
+root does have that password, it is the real one.
+
+**What replaced it.** `platform/wrappers/actions/UnlBackupDatabase.php`, in the
+established style. Contract:
+
+```
+unl_wrapper -a backupdb                        exit 48 on failure
+unl_wrapper -a restoredb [--source local|remote]   exit 49 on failure
+unl_wrapper -a restoredb_remote                exit 50, retired, names its replacement
+```
+
+  - `--protocol=socket -uroot`, matching `mysql_root()`. No password on any
+    command line and no defaults file, because socket auth has no credential to
+    keep. There is deliberately no option on the class through which one could
+    be supplied.
+  - `proc_open()` with an argv array; the dump file is opened by PHP and its
+    descriptor handed to the child as fd 1, fd 0 on restore. No shell, no `;`,
+    no `|`, no `>`.
+  - every exit status checked, and the shape of the output too: a dump is
+    written to a 0600 temporary file and renamed into place only after
+    mysqldump exited 0, the file is over 512 bytes, its `USE` names the schema
+    it claims, and it carries mysqldump's `-- Dump completed` trailer. **Both
+    schemas are renamed only if both succeeded**, so guacdb failing cannot leave
+    a new `pnetlab_db.sql` beside a stale `guacdb.sql`. `--skip-comments` is gone
+    because it stripped the trailer, which is the only truncation marker there
+    is.
+  - restore **refuses while any lab or node session exists**, and refuses when it
+    cannot read the session tables at all. It takes a safety dump of the current
+    databases into `/opt/unetlab/backup_database/pre-restore/` first and will not
+    proceed if that fails. One generation, overwritten by each restore.
+
+**`restoredb_remote` was not imaginary, and it is not dropped.** The writer of
+`/opt/unetlab/backup_database/remote/` is `/opt/unetlab/scripts/migrate_new_host.sh`
+on a 5.3.13 appliance — an appliance-to-appliance migration helper that this
+repository does not ship, which rsyncs a dump from another host over `sshpass`
+root SSH. It was dead code even there: the script writes ONE combined
+`remotedb.sql` while `restoredb_remote` read two per-schema files nothing
+creates, and the script restores inline rather than calling the wrapper. The
+capability is kept as `-a restoredb --source remote` rather than as its own
+action, because a separate action is exactly how it came to rot.
+
+**The installer creates the directory**, `0700 root:root`, with `remote/` and
+`pre-restore/` beside it. That mode is load-bearing: these dumps hold the whole
+`users` table with every password digest, and guacdb holds every console
+connection with its parameters.
+
+Measured on the reference VM:
+
+```
+tools/integration/db-backup-restore.sh   67 passed, 0 failed, 0 skipped
+tools/integration/lab-functional.sh      55 shell, 8 data-plane, 0 failed
+tools/integration/node-types.sh          30 passed, 0 failed, 1 skipped (IOL)
+tools/run-tests.sh                       1315 assertions across 27 files, 0 failed
+tools/php-lint.sh (8.4 and 7.4)          347 files, 0 failed
+sudo policy                              25 grants, unchanged
+```
+
+`db-backup-restore.sh` is the one that matters: it creates a lab, starts a VPCS
+node, opens its HTML5 console link so `html5AddSession()` writes a real `guacdb`
+row, tears the session down, backs up, **deletes the marker user and every
+guacdb connection**, restores, and asserts both halves are back — the guacdb
+rows by digest, not merely by count. It then proves the refusal by starting a
+node and running `-a restoredb` under it. What it CANNOT prove: that a dump of a
+large, busy database is consistent (both schemas are entirely InnoDB and the
+dump is `--single-transaction`, but nothing here writes concurrently); that a
+restore survives a schema change between backup and restore; or anything at all
+about a host whose MariaDB root is password-authenticated, since the suite skips
+loudly when socket root does not work.
+
+Two traps worth keeping:
+
+  - **`DROP DATABASE` does not drop the grants on that database.** They live in
+    `mysql.db` and survive, so the application can still connect afterwards.
+    That was measured rather than assumed, because if it were false a restore
+    would silently break every other suite on the host.
+  - **`node_sessions` rows survive a node STOP**; only `factory/destroy` clears
+    them. A restore attempted between the two is refused, correctly, and that is
+    asserted.
+
+**Not done, and it is the same bug again.**
+`store/app/Console/Commands/MysqlRecovery.php` runs `mysqldump -uroot -ppnetlab`
+and `mysql -uroot -ppnetlab` against `/opt/unetlab/database_backup` — a second
+directory nothing creates — with `exec(... 2>/dev/null)` and `rm -rf`. It is
+Laravel-side, has no scheduled caller, and `install/lib/database.sh` already
+warns about it. It should be deleted or pointed at this action; it was left
+alone here so that one commit changes one thing.

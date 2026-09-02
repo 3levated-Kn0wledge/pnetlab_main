@@ -43,7 +43,7 @@ umask(0002);
 // marker file, checked below — one switch that the web layer could ever reach
 // is not a gate).
 $options = getopt('oT:D:S:F:P:I:a:', array('allow-unsigned', 'state:', 'type:', 'name:',
-	'scope:', 'proxy-host:', 'proxy-port:', 'proxy-user:', 'proxy-pass-stdin', 'clear'));
+	'scope:', 'source:', 'proxy-host:', 'proxy-port:', 'proxy-user:', 'proxy-pass-stdin', 'clear'));
 
 /**
  * One value for an option, or null.
@@ -750,15 +750,103 @@ switch ($action) {
 			}
 		}
 		break;
-	case "backupdb":
-        shell_exec("mysqldump -uroot -ppnetlab --add-drop-database --skip-comments  --databases pnetlab_db > /opt/unetlab/backup_database/pnetlab_db.sql ; mysqldump -uroot -ppnetlab --add-drop-database --skip-comments  --databases guacdb > /opt/unetlab/backup_database/guacdb.sql");
-        break;
-    case "restoredb":
-        shell_exec("cat /opt/unetlab/backup_database/pnetlab_db.sql | /usr/bin/mysql --password=pnetlab pnetlab_db ; cat /opt/unetlab/backup_database/guacdb.sql | /usr/bin/mysql --password=pnetlab guacdb");
-        break;
-    case "restoredb_remote":
-        shell_exec("cat /opt/unetlab/backup_database/remote/pnetlab_db.sql | /usr/bin/mysql --password=pnetlab pnetlab_db; cat /opt/unetlab/backup_database/remote/guacdb.sql | /usr/bin/mysql --password=pnetlab guacdb");
-        break;
+	case 'backupdb':
+		// Dump pnetlab_db and guacdb into /opt/unetlab/backup_database.
+		//
+		// What this replaces is written out in full at the top of
+		// actions/UnlBackupDatabase.php:
+		//     shell_exec("mysqldump -uroot -ppnetlab ... > .../pnetlab_db.sql
+		//               ; mysqldump -uroot -ppnetlab ... > .../guacdb.sql");
+		//
+		// THAT NEVER WROTE A BYTE. /opt/unetlab/backup_database does not exist —
+		// nothing in this tree ever created it, and a stock appliance does not
+		// have it either — so the redirect failed, shell_exec() returned NULL,
+		// the case fell through to `break`, and the action reported success.
+		// The installer creates the directory now, 0700 root:root.
+		//
+		// The rest was no better: the `;` ran the second dump whatever the first
+		// did, `>` truncated the destination before mysqldump produced anything,
+		// and the return was discarded. AUTHENTICATION IS NOW THE INSTALLER'S:
+		// unix-socket root, exactly what mysql_root() in install/lib/database.sh
+		// uses. No password reaches a command line, because there is no
+		// password. Both schemas are dumped to temporary files and renamed into
+		// place only if BOTH succeeded, so a half-finished backup cannot present
+		// itself as a whole one.
+		require_once(__DIR__ . '/actions/UnlBackupDatabase.php');
+
+		$backupDb = new UnlBackupDatabase();
+		$backupResult = $backupDb->backup();
+		echo 'BACKUPDB-RESULT ' . json_encode($backupResult) . "\n";
+		if (!$backupResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: backupdb: ' . $backupResult['error']);
+			exit(48);
+		}
+		break;
+	case 'restoredb':
+		// Restore both schemas from a backup directory. DESTRUCTIVE.
+		//
+		// `--source remote` is what `-a restoredb_remote` was. That action read
+		// /opt/unetlab/backup_database/remote/, which nothing in this tree
+		// writes; on a 5.3.13 appliance the writer is
+		// /opt/unetlab/scripts/migrate_new_host.sh, which is not shipped here and
+		// which writes ONE combined remotedb.sql rather than the two per-schema
+		// files restoredb_remote read — so it was dead code even there. The
+		// capability is kept as one word of argument rather than dropped; see
+		// the header of actions/UnlBackupDatabase.php for the reasoning.
+		//
+		// THE ACTION REFUSES WHILE A LAB IS RUNNING, and fails closed if it
+		// cannot tell. The dumps carry DROP DATABASE, so a restore under a live
+		// session deletes the lab_sessions and node_sessions rows out from under
+		// running emulators — which leaves taps and tenant accounts that nothing
+		// can find to reap. It also takes a safety dump of the current databases
+		// into <backup root>/pre-restore/ first, and will not proceed if that
+		// dump fails.
+		require_once(__DIR__ . '/actions/UnlBackupDatabase.php');
+
+		$restoreDb = new UnlBackupDatabase(array(
+			// Counted here rather than in the action, because the action must
+			// not know how this application stores its sessions. Any failure
+			// returns null and the action refuses — see its restore().
+			'sessions' => function () {
+				try {
+					$db = checkDatabase();
+					if (!$db) return null;
+					$labs  = $db->query('SELECT COUNT(*) FROM ' . LAB_SESSIONS_TABLE);
+					$nodes = $db->query('SELECT COUNT(*) FROM ' . NODE_SESSIONS_TABLE);
+					if ($labs === false || $nodes === false) return null;
+					return array('labs'  => (int) $labs->fetchColumn(),
+					             'nodes' => (int) $nodes->fetchColumn());
+				} catch (Exception $e) {
+					return null;
+				}
+			},
+		));
+
+		// A repeated --source must be refused, not resolved. unl_single_option()
+		// returns null for a repeated option and null also means "not given",
+		// which here would DEFAULT TO LOCAL — a quiet resolution of exactly the
+		// kind that function exists to prevent. The two cases are separated
+		// before the value is used.
+		$restoreSource = unl_single_option($options, 'source');
+		if ($restoreSource === null && isset($options['source'])) {
+			error_log(date('M d H:i:s ') . 'ERROR: -a restoredb takes one --source, not several');
+			exit(49);
+		}
+
+		$restoreResult = $restoreDb->restore($restoreSource);
+		echo 'RESTOREDB-RESULT ' . json_encode($restoreResult) . "\n";
+		if (!$restoreResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: restoredb: ' . $restoreResult['error']);
+			exit(49);
+		}
+		break;
+	case 'restoredb_remote':
+		// Retired, loudly rather than silently. It is `-a restoredb --source
+		// remote` now — same directory, same files, but with the session check,
+		// the safety dump and the exit statuses the old case had none of.
+		error_log(date('M d H:i:s ') . 'ERROR: -a restoredb_remote is retired; '
+			. 'use -a restoredb --source remote');
+		exit(50);
 	case 'wipe':
 		// Removing temporary files
 		if ($session_id == null) return;
