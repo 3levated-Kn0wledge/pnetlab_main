@@ -44,6 +44,7 @@ $workspace = sys_get_temp_dir() . '/iolka-test-' . getmypid();
 $tmpRoot   = $workspace . '/opt/unetlab/tmp';
 $addons    = $workspace . '/opt/unetlab/addons/iol/bin';
 mkdir($tmpRoot . '/7/42', 0777, true);
+mkdir($tmpRoot . '/7/48', 0777, true);
 mkdir($addons, 0755, true);
 file_put_contents($addons . '/keepalive.pl', "#!/usr/bin/perl\n");
 // The workspace copy the old call site executed. Nothing here may ever run it.
@@ -66,16 +67,18 @@ $rows = [
     44 => ['lab' => 7, 'type' => 'iol',    'iol_id' => 3],   // account holds the wrong uid
     46 => ['lab' => 7, 'type' => 'iol',    'iol_id' => 3],   // no workspace on disk
     47 => ['lab' => 7, 'type' => 'iol',    'iol_id' => 0],   // never got an IOL id
+    48 => ['lab' => 7, 'type' => 'iol',    'iol_id' => 3],   // account has the wrong primary group
 ];
 
 /** passwd, with 42 and 45 present and 44 deliberately holding the wrong uid. */
 $passwd = [
-    'unl42' => ['uid' => 32768 + 42],
-    'unl43' => ['uid' => 32768 + 43],
-    'unl44' => ['uid' => 1000],          // an account of that name that is not ours
-    'unl45' => ['uid' => 32768 + 45],
-    'unl46' => ['uid' => 32768 + 46],
-    'unl47' => ['uid' => 32768 + 47],
+    'unl42' => ['uid' => 32768 + 42, 'gid' => 32768],
+    'unl43' => ['uid' => 32768 + 43, 'gid' => 32768],
+    'unl44' => ['uid' => 1000, 'gid' => 1000],   // an account of that name that is not ours
+    'unl45' => ['uid' => 32768 + 45, 'gid' => 32768],
+    'unl46' => ['uid' => 32768 + 46, 'gid' => 32768],
+    'unl47' => ['uid' => 32768 + 47, 'gid' => 32768],
+    'unl48' => ['uid' => 32768 + 48, 'gid' => 100],  // the right uid, the wrong primary group
 ];
 
 function ka(array $extra = [])
@@ -176,7 +179,10 @@ $c = $k->commands[0];
 assert_same([$addons . '/keepalive.pl', '-i', '3', '-p', '3', '-n', '42_3'], $c['argv'],
     'argv is an array, fixed script first, then -i/-p/-n');
 assert_same(32768 + 42, $c['uid'], 'drops to uid 32768 + session');
-assert_same(32768, $c['gid'], 'drops to the unl group');
+assert_same(32768, $c['gid'], 'drops to the unl group, as read from the passwd entry');
+assert_true(!empty($c['initgroups']),
+    'and sets the supplementary groups from the passwd database before the drop, '
+    . 'as device::spawnAsTenant() does -- this was the one drop site that skipped it');
 assert_same($tmpRoot . '/7/42', $c['cwd'], 'runs in the node workspace');
 assert_same($tmpRoot . '/7/42/keepalive.log', $c['log'], 'logs inside the node workspace');
 assert_true($c['bin'] === '/usr/bin/perl', 'the interpreter is a fixed absolute path');
@@ -187,6 +193,14 @@ assert_true($c['argv'][0] !== $tmpRoot . '/7/42/keepalive.pl',
     'never executes the copy of keepalive.pl inside the writable workspace');
 
 // A workspace with no directory on disk is not a workspace.
+// The gid is read from the passwd entry and checked against the platform
+// group, not assumed: an account called unl<N> with the right uid but some
+// other primary group is not the platform's, and is refused rather than
+// dropped into a group it was never meant to be in.
+$r = ka()->up(48, 0);
+assert_true(!$r['ok'], 'refuses a tenant whose primary group is not unl');
+assert_true(strpos($r['error'], 'platform group') !== false, '...saying so');
+
 $r = ka()->up(46, 0);
 assert_true(!$r['ok'], 'refuses when the node workspace does not exist');
 

@@ -146,6 +146,22 @@ class UnlIolKeepalive
         return $expected;
     }
 
+    /**
+     * The tenant's primary gid, read from its passwd entry, and refused if it
+     * is not the platform group. useradd -g unl is what creates these, so a
+     * different primary group means the account is not the platform's -- the
+     * same reasoning UnlTenantAccount applies before it will remove one.
+     * Returned rather than hard-coded so the drop below and the check here
+     * cannot disagree.
+     */
+    private function tenantGid($session)
+    {
+        $entry = $this->passwd('unl' . $session);
+        if (!is_array($entry) || !isset($entry['gid'])) return null;
+        if ((int) $entry['gid'] !== self::TENANT_GID) return null;
+        return (int) $entry['gid'];
+    }
+
     /** The node workspace, or null if it is not exactly where it should be. */
     private function runningPath($session, $labSession)
     {
@@ -186,6 +202,8 @@ class UnlIolKeepalive
 
         $uid = $this->tenantUid($session);
         if ($uid === null) return $fail('tenant account unl' . $session . ' is missing or holds the wrong uid');
+        $gid = $this->tenantGid($session);
+        if ($gid === null) return $fail('tenant account unl' . $session . ' is not in the platform group');
 
         $cwd = $this->runningPath($session, $labSession);
         if ($cwd === null) return $fail('node workspace is missing, or is not where it should be');
@@ -204,7 +222,7 @@ class UnlIolKeepalive
         if (!$this->runCommands) {
             $this->commands[] = array(
                 'bin' => $this->perl, 'argv' => $argv, 'uid' => $uid,
-                'gid' => self::TENANT_GID, 'cwd' => $cwd, 'log' => $log,
+                'gid' => $gid, 'initgroups' => true, 'cwd' => $cwd, 'log' => $log,
             );
             return array('ok' => true, 'error' => null, 'pid' => null);
         }
@@ -223,7 +241,12 @@ class UnlIolKeepalive
             // AFTER the drop, so a symlink planted in the (mode 777) workspace
             // can only reach what the tenant account could reach anyway.
             posix_setsid();
-            if (!posix_setgid(self::TENANT_GID) || !posix_setuid($uid)) {
+            // Supplementary groups first, exactly as device::spawnAsTenant()
+            // does it: without initgroups the child keeps ROOT's supplementary
+            // groups across the uid drop, and after setuid() there is no way
+            // back to fix that. This was the one drop site that skipped it.
+            if (function_exists('posix_initgroups')) posix_initgroups('unl' . $session, $gid);
+            if (!posix_setgid($gid) || !posix_setuid($uid)) {
                 exit(126);
             }
             @chdir($cwd);
