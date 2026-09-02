@@ -91,9 +91,19 @@ if (in_array($action, array('delete', 'export', 'start', 'stop', 'wipe'))) {
 }
 
 // Checking -S (Session ID)
+//
+// createNodeSession() allocates ids modulo 30000, so session 0 EXISTS as a
+// node session id, and its tenant account is unl0. The `> 0` check below is
+// the legacy one and every legacy action wants it (a session of 0 is "no
+// session" to them); reap-tenant reads -S for itself through
+// unl_single_option() and bounds it in UnlTenantAccount, whose MIN_SESSION is
+// 0 for exactly this reason -- so it is let through here, or unl0 could never
+// be removed.
 if (isset($options['S'])) {
 	if ((int) $options['S'] > 0) {
 		$session_id = (int) $options['S'];
+	} elseif (isset($options['a']) && $options['a'] === 'reap-tenant' && $options['S'] === '0') {
+		$session_id = null;
 	} else {
 		usage();
 		error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][8]);
