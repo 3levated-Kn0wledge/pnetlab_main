@@ -1,6 +1,6 @@
 # Handover
 
-**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 34
+**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 38
 commits ahead of `main` (which now carries the merged `phase-02-shell-hardening`),
 none pushed. Nothing uncommitted.
 
@@ -51,7 +51,7 @@ compiles the console wrappers from source as one of its steps.
 Every line below was measured **from scratch**: a VM rolled back to its
 post-provision snapshot, a clean `git archive` of this commit unpacked onto it,
 and `install/install.sh` run end to end. No step was carried over from an
-earlier session, and no state on the host predated the run except the four
+earlier session, and no state on the host predated the run except the
 preconditions listed in "Deploying onto a clean host" below.
 
 ```
@@ -66,7 +66,7 @@ bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
 bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
 make -C platform/wrappers/src test         → 253 unit assertions, 0 failed
-tools/run-tests.sh (as root)               → 1842 assertions across 32 files, 0 failed
+tools/run-tests.sh (as root)               → 1844 assertions across 32 files, 0 failed
 tools/php-lint.sh (8.4)                    → 353 files, 0 failed
 ```
 
@@ -96,7 +96,7 @@ Read this before claiming a deploy works.
 | **A stale `node_modules` silently downgraded axios** | Rebuilding the bundles against whatever `node_modules` held, rather than after `npm ci`, produced bundles carrying axios 0.19.2 against a lockfile pinning 1.20.0, reverting the CSRF hardening. `CsrfTest` caught it. **Fixed**; the lesson is that regenerating build output *is* a behavioural change and the suite has to be re-run after one. |
 | **The snapshot itself had an interrupted `dpkg`** | `apache2` was unpacked but not configured, and the preflight correctly refused to start: `FATAL: dpkg has an interrupted transaction`. One `sudo dpkg --configure -a` clears it. This is a property of the snapshot, not of this repository, so it recurs on every rollback to that snapshot until the snapshot is retaken. |
 
-### The four preconditions
+### The preconditions
 
 Only the first is a product requirement; the rest are what the *verification*
 needs, and none of them was written down before.
@@ -162,6 +162,28 @@ before the first `-`, while `device_qemu.php` matches disks against
 `hd[a-z]+.qcow2`. So `linux-cirros/hda.qcow2` means template `linux`, image
 `linux-cirros`, disk `hda`. Rename either half and the suite skips, or starts
 a node with no disk.
+
+**5. IOL, if you want the one node type that has never run.** Three things
+have to be on the host, none of them in this repository and none of them
+supplied by the installer:
+
+| | |
+|---|---|
+| the image | a 32-bit IOL binary under `/opt/unetlab/addons/iol/bin/` |
+| `keepalive.pl` | `device_iol::prepare()` symlinks it into the node workspace |
+| `iourc` | the Cisco licence, keyed to the host's `hostname` and `hostid` |
+
+The installer now enables i386 multiarch and installs `libc6:i386` and
+`libgcc-s1:i386`, which it previously did not — every IOL image Cisco published
+is a 32-bit ELF, so without those the image cannot exec at all and the error
+names a binary that plainly exists. That half is done and proven: an L3 image
+staged on the reference VM loads and reaches its licence check.
+
+`CiscoIOUKeygen.py` is **not** shipped here and `refreshIolLicense()` expects it
+on the host. Note that it is Python 2 and prefers `/usr/bin/python3`, so on any
+supported host it runs under Python 3, hits a `SyntaxError` and silently
+returns false. The licence path is therefore broken on 24.04 independently of
+whether an image is present, and this project does not generate licences.
 
 ### What a repeat deploy will and will not hit
 
@@ -557,7 +579,7 @@ review and several had been shipping for years.
 
 ## Suggested next steps, in order
 
-1. **Review and merge `phase-04-exit-fixes`.** 34 commits, each individually
+1. **Review and merge `phase-04-exit-fixes`.** 38 commits, each individually
    scoped, each message carrying the reasoning and what was measured. One
    commit (`9bcff23`) closes two gate items at once because they are two
    findings on the same allowlist and the same test. Then open Phase 05:
