@@ -150,7 +150,12 @@ class PackageClient
             return array('result' => false, 'message' => 'Cannot write into ' . PACKAGE_INCOMING_DIR);
         }
         $lastReport = 0;
-        $options = array('file' => $fp);
+        // strict_transport: Query::make() otherwise rewrites https to http
+        // before the request is made, and follows a redirect to any scheme.
+        // A package is verified by its signature, not by its transport, but
+        // there is no reason to hand the URL of a root-applied artefact to
+        // the network in the clear when the marketplace gave it as https.
+        $options = array('file' => $fp, 'strict_transport' => true);
         if ($progress !== null) {
             $options['process'] = function ($resource, $downloadSize = 0, $downloaded = 0, $uploadSize = 0, $uploaded = 0)
                 use ($progress, &$lastReport) {
