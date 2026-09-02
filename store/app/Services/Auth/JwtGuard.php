@@ -207,7 +207,13 @@ class JwtGuard implements Guard
         if(!$user['result'] || !isset($user['data'][0])) return false;
         $user = new JwtGenericUser((array)$user['data'][0]);
 
-        if($user->{USER_ROLE} != 0){
+        // Role::isRootRole(), not `!= 0`: the seeded role is the string
+        // 'admin', and 'admin' != 0 is FALSE on PHP 7 and TRUE on PHP 8. The
+        // bare comparison sent the built-in admin through the status and
+        // expiry gates below on PHP 8, and locked it out of any box whose
+        // admin row has user_status 0 or NULL -- the same trap this branch
+        // fixed in Role.php and LoginController, missed here.
+        if(!\App\Helpers\Auth\Role::isRootRole($user->{USER_ROLE})){
             if(!isset($user->{USER_STATUS}) || $user->{USER_STATUS} != USER_STATUS_ACTIVE) throw new AuthenticationException('You do not have access');
 
             $currentTime = time();
