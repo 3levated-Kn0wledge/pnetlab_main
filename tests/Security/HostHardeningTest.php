@@ -181,4 +181,48 @@ $packages = file_get_contents($root . '/docs/PACKAGES.md');
 assert_true(strpos($packages, 'install_docker_image') !== false,
     'PACKAGES.md records that docker_pull cannot work offline and names its replacement');
 
+// ------------------------------- the docroot stays hardened after Fix Permissions
+//
+// install/lib/deploy.sh makes /opt/unetlab/html root:root and not writable by
+// www-data, with store/.env at root:www-data 0640 and only store/storage and
+// store/bootstrap/cache owned by the web user. `unl_wrapper -a fixpermissions`
+// -- the admin UI's Fix Permissions button -- used to run the appliance's
+// recipe over the same tree: chmod -R 777 html/store and chown -R www-data
+// html. One press undid the hardening and left APP_KEY world-readable. The
+// wrapper now applies deploy.sh's recipe; this pins both halves to each other.
+
+/** The fixpermissions case of unl_wrapper, code only. */
+function fixpermissions_case($root)
+{
+    $src = code_only($root . '/platform/wrappers/unl_wrapper');
+    $start = strpos($src, "case 'fixpermissions':");
+    $end = strpos($src, "case 'stopall':", $start);
+    return substr($src, $start, $end - $start);
+}
+$fixperms = fixpermissions_case($root);
+assert_true(strlen($fixperms) > 100, 'the fixpermissions case is readable');
+
+foreach ([
+    '777 /opt/unetlab/html'                   => 'no chmod 777 anywhere under the docroot',
+    'chown -R www-data:www-data /opt/unetlab/html' => 'the docroot is not handed to the web user',
+    'chmod -R 755 /opt/unetlab/html'          => 'and not blanket-755d (store/.env must stay 0640)',
+] as $needle => $what) {
+    assert_true(strpos($fixperms, $needle) === false, "fixpermissions: $what");
+}
+assert_true(preg_match('/chown -R root:root/', $fixperms) === 1,
+    'fixpermissions: the docroot is root:root, as deploy.sh makes it');
+assert_true(strpos($fixperms, 'u=rwX,go=rX') !== false,
+    'fixpermissions: the docroot is not writable by anyone but root');
+assert_true(strpos($fixperms, "store/.env") !== false && strpos($fixperms, '0640') !== false
+    && strpos($fixperms, 'root:www-data') !== false,
+    'fixpermissions: store/.env is restored to root:www-data 0640');
+assert_true(strpos($fixperms, 'store/storage') !== false && strpos($fixperms, 'store/bootstrap/cache') !== false,
+    'fixpermissions: only Laravel\'s two writable directories go back to the web user');
+
+$deploy = file_get_contents($root . '/install/lib/deploy.sh');
+assert_true(strpos($deploy, 'chown -R root:root "$WEB_ROOT"') !== false,
+    'deploy.sh still makes the docroot root:root (if this moves, move the wrapper with it)');
+assert_true(strpos($deploy, 'chmod 0640 "${WEB_ROOT}/store/.env"') !== false,
+    'deploy.sh still keeps store/.env at 0640');
+
 test_summary();
