@@ -21,6 +21,25 @@
  * @return  Array                       Return code (JSend data)
  */
 function apiAddFolder($name, $path) {
+	// apiAddFolder() validated NOTHING, and the other two routes in this file
+	// validated their paths — so the three disagreed about what a folder name is.
+	// A name containing '&' or '#' could be created here and then could not be
+	// renamed or deleted, because apiEditFolder() and apiDeleteFolder() refused
+	// it. That asymmetry predates this change (the old blocklist refused
+	// [#;|&] and '..'); what is new is that the three routes now agree.
+	//
+	// The trade is stated rather than hidden: SECURE_PATH is narrower than the
+	// old blocklist, so a folder name carrying a quote, a '%' or a '~' is no
+	// longer creatable either. That is deliberate — these routes no longer build
+	// a shell command at all, so the shape is a belt against a future regression
+	// rather than the control, and a coherent set of legal names is worth more
+	// than an exotic one. Widening it is one character class in secureCmd().
+	secureCmd($path, SECURE_PATH);
+	secureCmd($name, SECURE_PATH);
+	// SECURE_PATH permits '/', because a path has them. A NAME does not.
+	if ($name === '' || strpos($name, '/') !== false) {
+		throw new Exception('Folder name is not valid');
+	}
 	$rc = checkFolder(BASE_LAB.$path);
 	if ($rc === 2) {
 		// Folder is not valid
@@ -72,7 +91,11 @@ function apiAddFolder($name, $path) {
  * @return  Array                       Return code (JSend data)
  */
 function apiDeleteFolder($path) {
-	secureCmd($path);
+	// SECURE_PATH: a folder path off the request, so the shape is a path and not
+	// a command line. It is the belt — the braces are the argv array below, which
+	// reaches no shell at all — but the '..' half of it is still load-bearing,
+	// because $path is concatenated onto BASE_LAB and never canonicalised.
+	secureCmd($path, SECURE_PATH);
 	$rc = checkFolder(BASE_LAB.$path);
 	checkLabFolder(BASE_LAB.$path);
 
@@ -98,9 +121,32 @@ function apiDeleteFolder($path) {
 		return $output;
 	}
 
-	// Deleting the folder
-	$cmd = 'rm -rf "'.BASE_LAB.$path.'" 2>&1';
-	exec($cmd, $o, $rc);
+	// Deleting the folder.
+	//
+	// This used to be exec('rm -rf "' . BASE_LAB . $path . '" 2>&1'). The double
+	// quotes stop word splitting and NOTHING else — $( ) and a backtick both
+	// expand inside them — and secureCmd()'s old blocklist was five characters
+	// that did not include a dollar or a backtick. So this reads like a call site
+	// that was correct only because of secureCmd().
+	//
+	// IT WAS NOT, AND THE REAL ANSWER IS WORTH WRITING DOWN. checkFolder(), two
+	// lines above, is
+	//     preg_match('/^\/[\/A-Za-z0-9_\s-]*$/', $s)
+	// in devices/functions.php — an allowlist, applied to the whole path before
+	// the exec ever ran, and stricter than anything in this file. It is what
+	// actually stopped the injection, and nothing said so. Measured on the
+	// reference host against the parent commit: a folder named
+	// `x$(touch pnet_rce_proof)y` CAN be created — apiAddFolder() validated
+	// nothing at all — and deleting it is then refused by checkFolder() with
+	// "Requested folder is not valid (60009)", with nothing executed.
+	//
+	// So the fix here is defence in depth on a path that was already held, and
+	// the fix that bites is the one in apiAddFolder() above: the unvalidated
+	// half was the one that let the payload onto the disk in the first place.
+	// An argv array execs rm(1) directly with no shell, so there is nothing left
+	// to escape. `--` terminates option parsing, so a path beginning with '-'
+	// cannot become a flag.
+	$rc = unl_exec_argv(array('rm', '-rf', '--', BASE_LAB . $path), $o);
 
 	if ($rc == 0) {
 		$output['code'] = 200;
@@ -124,8 +170,8 @@ function apiDeleteFolder($path) {
  * @return  Array                       Return code (JSend data)
  */
 function apiEditFolder($s, $d) {
-	secureCmd($s);
-	secureCmd($d);
+	secureCmd($s, SECURE_PATH);
+	secureCmd($d, SECURE_PATH);
 	$rc = checkFolder(BASE_LAB.$s);
 	if ($rc === 2) {
 		// Folder is not valid
@@ -156,12 +202,13 @@ function apiEditFolder($s, $d) {
 		return $output;
 	}
 
-	// Moving the folder
-	$cmd = 'mv "'.BASE_LAB.$s.'" "'.BASE_LAB.$d.'" 2>&1';
+	// Moving the folder. Same shape as the rm in apiDeleteFolder() above, and the
+	// same fix: two request-supplied paths that were interpolated into a
+	// double-quoted shell string are now two elements of an argv array.
 	$search = $s;
-	$replacement=$d;
-	
-	exec($cmd, $o, $rc);
+	$replacement = $d;
+
+	$rc = unl_exec_argv(array('mv', '--', BASE_LAB . $s, BASE_LAB . $d), $o);
 	if ($rc == 0) {
 
 		if($s[-1] != '/') $search .= '/';

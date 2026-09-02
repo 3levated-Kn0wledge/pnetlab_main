@@ -289,7 +289,7 @@ class device_qemu_directly extends device
                 $patterns[0] = '/^megasas([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
-                $lun = (int) ord(strtolower($disk_id)) - 97;
+                $lun = (int) (ord(strtolower($disk_id)) - 97);
                 $flags .= ' -device ' . escapeshellarg('scsi-disk,bus=scsi0.0,scsi-id=' . $lun . ',drive=drive-scsi0-0-' . $lun . ',id=scsi0-0-' . $lun . ',bootindex=' . $lun);  // Define SCSI disk
                 $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=none,id=drive-scsi0-0-' . $lun . ',cache=none');                        // Define SCSI file
             } else if (preg_match('/^lsi[a-z]+.qcow2$/', $filename)) {
@@ -297,7 +297,7 @@ class device_qemu_directly extends device
                 $patterns[0] = '/^lsi([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
-                $lun = (int) ord(strtolower($disk_id)) - 97;
+                $lun = (int) (ord(strtolower($disk_id)) - 97);
                 $flags .= ' -device ' . escapeshellarg('scsi-disk,bus=scsi0.0,scsi-id=' . $lun . ',drive=drive-scsi0-0-' . $lun . ',id=scsi0-0-' . $lun . ',bootindex=' . $lun);  // Define SCSI disk
                 $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=none,id=drive-scsi0-0-' . $lun . ',cache=none');                        // Define SCSI file
             } else if (preg_match('/^hd[a-z]+.qcow2$/', $filename)) {
@@ -305,7 +305,7 @@ class device_qemu_directly extends device
                 $patterns[0] = '/^hd([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
-                $flags .= ' -hd' . $disk_id . ' ' . escapeshellarg($filename);
+                $flags .= ' ' . escapeshellarg('-hd' . $disk_id) . ' ' . escapeshellarg($filename);
                 if ($this->getTemplate() == 'nxosv9k') {
                     $flags .= ' -bios /opt/qemu/share/qemu/OVMF.fd -drive file=hda.qcow2,if=ide,index=2';
                 }
@@ -314,7 +314,7 @@ class device_qemu_directly extends device
                 $patterns[0] = '/^virtide([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
-                $disk_num = (int) ord(strtolower($disk_id)) - 97;
+                $disk_num = (int) (ord(strtolower($disk_id)) - 97);
                 $flags .= ' -device ' . escapeshellarg('virtio-blk-pci,scsi=off,drive=idedisk' . $disk_num . ',id=hd' . $disk_id . ',bootindex=1');
                 $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=none,id=idedisk' . $disk_num . ',format=qcow2,cache=none');
             } else if (preg_match('/^virtio[a-z]+.qcow2$/', $filename)) {
@@ -322,21 +322,21 @@ class device_qemu_directly extends device
                 $patterns[0] = '/^virtio([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
-                $lun = (int) ord(strtolower($disk_id)) - 97;
+                $lun = (int) (ord(strtolower($disk_id)) - 97);
                 $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=virtio,bus=0,unit=' . $lun . ',cache=none');
             } else if (preg_match('/^scsi[a-z]+.qcow2$/', $filename)) {
                 // SCSI
                 $patterns[0] = '/^scsi([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
-                $lun = (int) ord(strtolower($disk_id)) - 97;
+                $lun = (int) (ord(strtolower($disk_id)) - 97);
                 $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=scsi,bus=0,unit=' . $lun . ',cache=none');
             } else if (preg_match('/^sata[a-z]+.qcow2$/', $filename)) {
                 //SATA
                 $patterns[0] = '/^sata([a-z]+).qcow2$/';
                 $replacements[0] = '$1';
                 $disk_id = preg_replace($patterns, $replacements, $filename);
-                $disk_id = (int) ord(strtolower($disk_id)) - 97;
+                $disk_id = (int) (ord(strtolower($disk_id)) - 97);
                 $flags .= ' -device ' . escapeshellarg('ahci,id=ahci' . $disk_id . ',bus=pci.0');
                 $flags .= ' -drive ' . escapeshellarg('file=' . $filename . ',if=none,id=drive-sata-disk' . $disk_id . ',format=qcow2');
                 $flags .= ' -device ' . escapeshellarg('ide-drive,bus=ahci' . $disk_id . '.0,drive=drive-sata-disk' . $disk_id . ',id=drive-sata-disk' . $disk_id . ',bootindex=' . ($disk_id + 1));
@@ -362,7 +362,7 @@ class device_qemu_directly extends device
         //     $cmd .= ' -x';
         // }
 
-        $cmd = $bin . $flags . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt') . ' 2>&1 &';
+        $cmd = escapeshellarg($bin) . $flags . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt') . ' 2>&1 &';
 
         return $cmd;
     }
@@ -516,7 +516,7 @@ class device_qemu_directly extends device
 
                 if ($rc == 0 && isset($tpid) && count($tpid) > 0) {
                     error_log(date('M d H:i:s ') . 'INFO: qemu pid is ' . $tpid[0]);
-                    exec("cgclassify -g pids:/cpulimit " . $tpid[0], $ro, $rc);
+                    exec("cgclassify -g pids:/cpulimit " . (int) $tpid[0], $ro, $rc);
                 }
             }
             return 0;

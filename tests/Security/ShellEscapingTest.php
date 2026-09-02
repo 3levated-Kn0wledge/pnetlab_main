@@ -620,7 +620,16 @@ foreach (file($baselineFile, FILE_IGNORE_NEW_LINES) as $l) {
 // took the whole QEMU commit flow out of Node_sessionsController, 73 once
 // `-a set-proxy` took the four proxy fields out of Query::setProxy() — which was
 // the only entry in this file that was a root RCE rather than a route to one.
-const SWEEP_BASELINE_MAX = 73;
+//
+// 47 with the shell-layer pass that inverted secureCmd(). Twenty-six entries, in
+// the roadmap's triage order: the two Laravel SystemHelper sites and
+// LabsController's `sudo qemu-img` first (that one also retired a sudo grant),
+// then the API-reachable folder and lab-import handlers in includes/, then the
+// QEMU binary path — the entry this file called its highest-severity one — and
+// the disk-flag and pid arithmetic around it. One entry was RENAMED rather than
+// retired: `includes/functions.php $cmd` is now `$value`, because secureCmd()'s
+// parameter was renamed. It still belongs here and the count is honest about it.
+const SWEEP_BASELINE_MAX = 47;
 assert_true(count($baseline) <= SWEEP_BASELINE_MAX,
     sprintf('the known-unfixed baseline has not grown (%d of %d)', count($baseline), SWEEP_BASELINE_MAX));
 

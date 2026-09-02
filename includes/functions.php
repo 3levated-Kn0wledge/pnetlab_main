@@ -780,9 +780,16 @@ function addWireshark($lab, $node_id, $interface_id)
 
 function addWiresharkSystem($lab, $node_id, $interface_id)
 {
-	$node_id = secureCmd($node_id);
-	$interface_id = secureCmd($interface_id);
+	// The emptiness test comes FIRST now. secureCmd()'s allowlist refuses an empty
+	// string, so leaving it second would have replaced 'Missing data' with a
+	// less useful message for the commonest bad request on this route.
+	//
+	// SECURE_TOKEN: both of these are ids, not command lines. They are used as
+	// array keys two lines below and never reach a shell on this path at all, so
+	// this is a shape assertion rather than a shell defence.
 	if ($interface_id === '' || $node_id === '') throw new Exception('Missing data');
+	$node_id = secureCmd($node_id, SECURE_TOKEN);
+	$interface_id = secureCmd($interface_id, SECURE_TOKEN);
 
 	$lab_session = $lab->getSession();
 	if ($lab_session == null) throw new Exception('No Lab Session');
@@ -1682,7 +1689,13 @@ function getNodeStatus($session, $type, $running_path, $port)
 
 function createRunningPath($lab_session, $node_session)
 {
-	return BASE_TMP . '/' . $lab_session . '/' . $node_session;
+	// Both are int(11) columns — lab_sessions.lab_session_id is AUTO_INCREMENT
+	// and node_sessions.node_session_id is allocated modulo 30000 by
+	// createNodeSession(). The cast says so, and it is what makes the workspace
+	// path this returns provably free of shell syntax: it is interpolated into
+	// emulator command lines all over devices/ through getRunningPath(), and it
+	// was the last unescaped value on several of them.
+	return BASE_TMP . '/' . (int) $lab_session . '/' . (int) $node_session;
 }
 
 
@@ -2195,13 +2208,256 @@ function loadLanguage($lang)
 }
 
 
-function secureCmd($cmd){
-	$re = '/[#;|&]|\.{2,}/m';
-	if(preg_match($re, $cmd, $matches)){
-		print_r($matches);
-		throw new Exception("The command contains dangerous characters [" . join(" ", $matches) . "]");
+/**
+ * exec() without a shell.
+ *
+ * proc_open() given an ARRAY execs the binary directly on PHP >= 7.4: there is
+ * no /bin/sh anywhere on the path, so nothing in $argv can be a metacharacter,
+ * a redirect or a second command, and no escaping is needed or possible. That
+ * is a stronger statement than escapeshellarg() makes, and it is the shape
+ * tests/Security/ShellEscapingTest.php can actually prove — see its
+ * argv_literal/argv_param fixtures.
+ *
+ * The signature mirrors exec()'s on purpose, so converting a call site is one
+ * line and the surrounding `if ($rc != 0)` keeps working. stderr is folded into
+ * $output because every caller converted so far logged the two together.
+ *
+ * The same helper exists on the Laravel side as System\Wrapper::run() and in
+ * platform/wrappers/actions/. It is duplicated rather than shared because
+ * includes/ is loaded by the legacy API with no autoloader.
+ *
+ * @param  array  $argv    program then arguments; never a string
+ * @param  array  $output  filled with the combined output, one line per element
+ * @return int             the exit status, or 127 if the program could not run
+ */
+function unl_exec_argv(array $argv, &$output = null)
+{
+	$output = array();
+	if (count($argv) === 0) return 127;
+
+	$desc = array(
+		0 => array('pipe', 'r'),
+		1 => array('pipe', 'w'),
+		2 => array('pipe', 'w'),
+	);
+	$pipes = array();
+	$proc = @proc_open($argv, $desc, $pipes);
+	if (!is_resource($proc)) {
+		error_log(date('M d H:i:s ') . 'ERROR: cannot run ' . $argv[0]);
+		return 127;
 	}
-	return $cmd;
+
+	fclose($pipes[0]);
+	$out = stream_get_contents($pipes[1]);
+	$err = stream_get_contents($pipes[2]);
+	fclose($pipes[1]);
+	fclose($pipes[2]);
+	$rc = proc_close($proc);
+
+	$combined = rtrim($out . $err, "\n");
+	if ($combined !== '') $output = explode("\n", $combined);
+	return $rc;
+}
+
+
+/**
+ * secureCmd() — an ALLOWLIST, and deliberately not the control.
+ *
+ * WHAT IT USED TO BE
+ *
+ *     $re = '/[#;|&]|\.{2,}/m';
+ *     if (preg_match($re, $cmd, $matches)) throw ...;
+ *     return $cmd;
+ *
+ * Five characters and a traversal check, applied to whole command lines on some
+ * paths and to bare values on others. tests/Security/SecureCmdTest.php measured
+ * what it let through: backticks, $( ), a newline, > and < redirects, a bare
+ * space, $HOME, quotes and globs — ten working injections, each asserted
+ * individually. A denylist of five characters cannot describe a shell.
+ *
+ * WHAT IT IS NOW
+ *
+ * Three named shapes, each an allowlist, and every call site has to say which
+ * one it means. That is the substantive half of the change: the old function
+ * was asked to judge `x86_64` and
+ * `sudo unl_wrapper -a start -T 'x' -S '1' 2>> /path/log` with one regex, and
+ * the answer that is right for a bare identifier is wrong for a command line.
+ *
+ *   SECURE_TOKEN  one shell word — an interface name, a session id, a port, a
+ *                 username. [A-Za-z0-9_] then [A-Za-z0-9_.:=@,+-]. No space, no
+ *                 metacharacter, and it may not begin with '-' so a value can
+ *                 never be read as an option.
+ *
+ *   SECURE_PATH   a path fragment beneath a fixed base — a lab or folder path
+ *                 off the request. Letters and digits in any script, plus
+ *                 space and _ . / @ + , = ( ) [ ] - and no '..' anywhere.
+ *                 Unicode is allowed because lab names are user-facing text and
+ *                 no shell metacharacter lives above U+007F; invalid UTF-8 is
+ *                 refused, because a string PCRE cannot decode is a string
+ *                 nothing downstream can reason about either.
+ *
+ *   SECURE_LINE   a whole command line. Parsed, not pattern-matched: the line
+ *                 must consist of single-quoted runs (what escapeshellarg()
+ *                 emits, including its '\'' joiner), double-quoted runs that
+ *                 contain no expansion, and unquoted text drawn from a safe
+ *                 class. Redirections are permitted, `2>&1` included, because
+ *                 the call sites build them.
+ *
+ * WHAT SECURE_LINE PROVES, AND WHAT IT DOES NOT
+ *
+ * It proves the string cannot spawn a second command: no $( ), no backtick, no
+ * ; | & newline, no unquoted glob or brace, no ~ or $ expansion. It does NOT
+ * prove the arguments are the intended ones. An unquoted space is still a word
+ * separator, so a value interpolated raw can still become several arguments.
+ *
+ * That distinction is the whole reason this function is defence in depth and
+ * not defence. The control is escapeshellarg() at the interpolation, or
+ * proc_open() with an argv array and no shell at all. Where a call site is
+ * correct only because this function ran, that is a bug in the call site, and
+ * two were found and fixed when this was written — see the commit.
+ *
+ * NON-STRING INPUT IS AN ERROR, NOT A PASS
+ *
+ * device_qemu::command() returns array(False, False) when it cannot resolve an
+ * architecture. The old body handed that to preg_match(), a TypeError on PHP 8
+ * reached before any caller's emptiness check — a QEMU node with an
+ * unresolvable template took the request down with a fatal and left its taps
+ * behind. Integers are accepted and stringified for SECURE_TOKEN, because ports
+ * and session ids arrive as ints; everything else is refused by name.
+ */
+const SECURE_TOKEN = 'token';
+const SECURE_PATH  = 'path';
+const SECURE_LINE  = 'line';
+
+/**
+ * Unquoted bytes a command line may contain. No shell metacharacter is in it:
+ * no $ ` ; | & < > ( ) { } [ ] * ? ~ ! # ^ " ' \ and no control byte. The
+ * operators the call sites genuinely build are handled separately below.
+ */
+const SECURE_LINE_PLAIN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 \t_./:=@,+-%";
+
+function secureCmd($value, $shape = SECURE_TOKEN)
+{
+	// $v, and NOT `$value = (string) $value`. That self-assignment is invisible to
+	// the tokenizer sweep in tests/Security/ShellEscapingTest.php: resolving
+	// $value finds an assignment whose right-hand side is $value, and the cycle
+	// guard that stops the walk looping also stops it reporting. Writing it that
+	// way silently retired `includes/functions.php $cmd` from the baseline —
+	// which would have been a lie, because this function still hands its argument
+	// back unescaped and devices/device.php still interpolates the result.
+	// Assigning to a second name keeps the chain resolvable and the entry honest.
+	//
+	// The default shape is the strictest one on purpose: a call site added
+	// without declaring what it is fails closed rather than being waved through.
+	// Written as an if/else rather than a ternary for the same reason: a call in
+	// the assigned expression becomes its own baseline entry, so `is_int()` on the
+	// right-hand side would report as a second violation that means nothing.
+	if (is_int($value)) {
+		$v = (string) $value;
+	} else {
+		$v = $value;
+	}
+	if (!is_string($v)) {
+		throw new Exception('secureCmd() needs a string, got ' . gettype($value));
+	}
+
+	switch ($shape) {
+		case SECURE_TOKEN:
+			// \z, not $. Without it PCRE's $ also matches before a trailing
+			// newline, so "vnet1_1\n" would pass and then be two words to
+			// anything reading line by line. The same trap is recorded on
+			// unl_valid_ifname() in includes/cli.php.
+			if (preg_match('/\A[A-Za-z0-9_][A-Za-z0-9_.:=@,+-]*\z/', $v) !== 1) {
+				throw new Exception('not a permitted token: ' . json_encode($v));
+			}
+			return $v;
+
+		case SECURE_PATH:
+			if (strpos($v, '..') !== false) {
+				throw new Exception('path traversal: ' . json_encode($v));
+			}
+			// preg_match() returns false, not 0, on malformed UTF-8 under /u.
+			// Both are refusals here, which is why this tests for !== 1.
+			if (preg_match('#\A[\p{L}\p{N}_ ./@+,=()\[\]-]*\z#u', $v) !== 1) {
+				throw new Exception('not a permitted path: ' . json_encode($v));
+			}
+			return $v;
+
+		case SECURE_LINE:
+			secure_line_parse($v);
+			return $v;
+	}
+
+	throw new Exception('secureCmd() called with an unknown shape: ' . json_encode($shape));
+}
+
+/**
+ * Walk a command line and refuse anything that is not literal text, a quoted
+ * run, or one of the redirections the call sites build.
+ *
+ * Written as a scanner rather than a regex because the question is stateful:
+ * a byte's meaning depends on whether a quote is open, and that is exactly the
+ * distinction the old denylist could not make. Inside single quotes the shell
+ * expands nothing, so a run is opaque; inside double quotes it still expands
+ * $ and backtick, so those two are refused there and nowhere else is different.
+ */
+function secure_line_parse($cmd)
+{
+	$n = strlen($cmd);
+	for ($i = 0; $i < $n; $i++) {
+		$c = $cmd[$i];
+
+		// No shell metacharacter is above U+007F, and node and lab names are
+		// user-facing text. High bytes are literal wherever they appear.
+		if (ord($c) >= 0x80) continue;
+
+		if ($c === "'") {
+			$end = strpos($cmd, "'", $i + 1);
+			if ($end === false) {
+				throw new Exception('unterminated single quote: ' . json_encode($cmd));
+			}
+			$i = $end;
+			continue;
+		}
+
+		if ($c === '"') {
+			$j = $i + 1;
+			for (; $j < $n && $cmd[$j] !== '"'; $j++) {
+				if ($cmd[$j] === '$' || $cmd[$j] === '`' || $cmd[$j] === '\\') {
+					throw new Exception('expansion inside double quotes: ' . json_encode($cmd));
+				}
+				if (ord($cmd[$j]) < 0x20) {
+					throw new Exception('control byte inside double quotes: ' . json_encode($cmd));
+				}
+			}
+			if ($j >= $n) {
+				throw new Exception('unterminated double quote: ' . json_encode($cmd));
+			}
+			$i = $j;
+			continue;
+		}
+
+		// escapeshellarg() splices an embedded apostrophe as '\'' — close,
+		// escaped quote, reopen. The backslash is legal only in that one place.
+		if ($c === '\\') {
+			if ($i + 1 < $n && $cmd[$i + 1] === "'") { $i++; continue; }
+			throw new Exception('backslash outside an escaped quote: ' . json_encode($cmd));
+		}
+
+		// Redirections. `>` and `>>` write a file, which the call sites do on
+		// purpose (wrapper.txt, unl_wrapper.txt); `&` is permitted only as the
+		// `>&` of `2>&1`, never as a separator or a background operator.
+		if ($c === '>') continue;
+		if ($c === '&') {
+			if ($i > 0 && $cmd[$i - 1] === '>') continue;
+			throw new Exception('& is a command separator here: ' . json_encode($cmd));
+		}
+
+		if (strpos(SECURE_LINE_PLAIN, $c) !== false) continue;
+
+		throw new Exception('not permitted in a command line: ' . json_encode($c)
+			. ' in ' . json_encode($cmd));
+	}
 }
 
 

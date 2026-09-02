@@ -24,36 +24,39 @@
 #   Don't. A new entry is a new way for request data to reach a shell. If it is
 #   genuinely unavoidable it belongs behind a `// sweep-exempt: <reason>` marker
 #   at the call site, naming the value — not in here.
-
-
-# --- 1. The QEMU binary path is built from request-controlled template fields ---
 #
-# devices/qemu/device_qemu.php:195-198 builds
+# WHAT IS LEFT, IN ONE SENTENCE
+#   With one exception the whole of this file is now devices/ — the emulator
+#   command lines built from template option strings and per-interface flags,
+#   which are argument injection BY DESIGN and are a design decision the fork
+#   still owes rather than a bug anyone can escape their way out of. Everything
+#   that was a route from request data to a shell through an ordinary API
+#   handler has gone.
+
+
+# --- 1. The QEMU binary path built from request-controlled template fields ---
+#
+# GONE, and it was the highest-severity entry in this file. device_qemu.php built
 #     $bin .= '/opt/qemu-' . $qversion . '/bin/qemu-system-' . $qarch;
-# $qarch/$qversion come from $this->qemu_arch / $this->qemu_version, or from the
-# template array $p when those are empty. Both properties are set in editParams()
-# straight off the JSON request body with a (string) cast and nothing else.
-# $bin flows into $cmd and is executed via devices/device.php. The only filter on
-# the path is secureCmd(), which does not block backticks or $( ) — see group 8
-# and tests/Security/SecureCmdTest.php. A qemu_arch of "x86_64 `id`" is stopped by
-# nothing. This is the highest-severity entry in this file.
-devices/qemu/device_qemu.php $this->qemu_arch
-devices/qemu/device_qemu.php $this->qemu_version
-devices/qemu/device_qemu.php $p['qemu_arch']
-devices/qemu/device_qemu.php $p['qemu_version']
-devices/qemu/device_qemu_directly.php $this->qemu_arch
-devices/qemu/device_qemu_directly.php $this->qemu_version
-devices/qemu/device_qemu_directly.php $p['qemu_arch']
-devices/qemu/device_qemu_directly.php $p['qemu_version']
+# from $this->qemu_arch / $this->qemu_version, both set in editParams() straight
+# off the JSON request body with a (string) cast and nothing else, and then
+#     $cmd = $bin . $flags . ' > ' . escapeshellarg(...);
+# put it at the head of the command line raw. The only filter was secureCmd(),
+# whose blocklist did not contain a backtick or a dollar, so a qemu_arch of
+# "x86_64 `id`" was stopped by nothing.
+#
+# $bin is one path and always was, so it is one argument:
+# escapeshellarg($bin) at the point it enters $cmd, which is what
+# device_qemu_wp.php already did and the other two did not. Eight entries.
+
 
 # --- 2. Template option strings: exempt by design, but the marker names the ---
 # --- wrong symbol, so the marker no longer applies ---
 #
 # qemu_options / dynamips_options ARE argument injection by design (handover
 # point 4) and would legitimately carry a sweep-exempt marker. The markers that
-# exist do not cover these sites: at device_qemu.php:380 the marker sits on
-# `$flags .= ' ' . $qoptions;` while the value is assigned on the line ABOVE it,
-# and device_dynamips.php:57 has no marker at all. Fixing that means editing
+# exist do not cover these sites: the marker sits on `$flags .= ' ' . $qoptions;`
+# while the value is assigned on the line ABOVE it. Fixing that means editing
 # devices/, so they are listed here rather than silently absorbed.
 devices/qemu/device_qemu.php $this->qemu_options
 devices/qemu/device_qemu.php $p['qemu_options']
@@ -94,21 +97,26 @@ devices/interfc.php $this->socket_file
 
 # --- 4. Disk-image names in the three QEMU backends ---
 #
-# $disk_id = preg_replace('/^hd([a-z]+).qcow2$/', '$1', $filename) and friends,
-# concatenated into -hd/-drive/-device flags. In practice each is reached only
-# after a preg_match() of the same shape, so the value is [a-z]+ — but that is an
-# argument from the surrounding code, not a property of the value, and the sweep
-# cannot see it. str_replace()/ord() on the same paths are the same shape.
-# Cheapest real fix in this file: escape the built flag, or (int) the lun.
-devices/qemu/device_qemu.php preg_replace()
+# Mostly gone. Two shapes were reported here and only one was real:
+#
+#   $lun = (int) ord(strtolower($disk_id)) - 97;
+# already had a cast, but the cast bound to ord() and not to the subtraction, so
+# the sweep walked into ord() and reported it. Parenthesised as
+# (int) (ord(...) - 97) it means what it always meant. Three entries.
+#
+#   $flags .= ' -hd' . $disk_id . ' ' . escapeshellarg($filename);
+# was the one genuinely raw disk flag — every sibling built its flag inside
+# escapeshellarg() and this one built it outside. Now
+# escapeshellarg('-hd' . $disk_id), which is what the neighbours do. That
+# retired the preg_replace() entry in each of the three files with it.
+#
+# str_replace() is what is left, and it is a different thing wearing the same
+# name: `$flags = str_replace('%NICDRIVER%', $qnic, $flags)` substitutes into the
+# template's own flag string, so what it returns is group 2's problem, not a disk
+# name. It goes when the option strings go.
 devices/qemu/device_qemu.php str_replace()
-devices/qemu/device_qemu.php ord()
-devices/qemu/device_qemu_directly.php preg_replace()
 devices/qemu/device_qemu_directly.php str_replace()
-devices/qemu/device_qemu_directly.php ord()
-devices/qemu/device_qemu_wp.php preg_replace()
 devices/qemu/device_qemu_wp.php str_replace()
-devices/qemu/device_qemu_wp.php ord()
 devices/docker/device_docker.php preg_replace()
 
 # --- 5. The TiMOS family: template fields straight into the command line ---
@@ -133,75 +141,107 @@ devices/qemu/device_timosiom.php $this->timos_license
 # getSession()/getPort()/getRunningPath() return properties loaded from the
 # database. Not attacker-controlled on any path found so far, but not escaped
 # either, and they are the values every emulator command is built around.
+#
+# Four of these are GONE and the reason is the same each time — the schema says
+# the column is an int, so the code can say so too:
+#   createRunningPath($lab_session, $node_session) now casts both. They are
+#   lab_sessions.lab_session_id (AUTO_INCREMENT) and node_sessions.node_session_id
+#   (allocated modulo 30000), both int(11), and the workspace path it builds is
+#   interpolated into emulator command lines all over devices/.
+#   $tpid[0] was a pid read back out of a previous exec() and handed to
+#   `cgclassify -g pids:/cpulimit`; it is (int) now, in all three QEMU backends.
+#   device_qemu_wp.php's $this->delay was the one raw value on a line that
+#   escaped its other six.
+#
+# The three that remain are the ACCESSORS themselves, and they are left
+# deliberately. Retiring them means `return (int) $this->session;` inside
+# getSession(), which has 173 call sites and would turn a null session into 0 for
+# every one of them — including six `== null` guards that read as "no session".
+# That is a behaviour change to buy three lines in this file, and the values are
+# int(11) columns either way.
 includes/__lab.php $this->session
 includes/__node.php $this->session
 includes/__node.php $this->port
-includes/functions.php $lab_session
-includes/functions.php $node_session
-devices/qemu/device_qemu.php $tpid[0]
-devices/qemu/device_qemu_directly.php $tpid[0]
-devices/qemu/device_qemu_wp.php $tpid[0]
-devices/qemu/device_qemu_wp.php $this->delay
 
 # --- 7. Legacy API filesystem commands ---
 #
-# api_folders.php:102  exec('rm -rf "' . BASE_LAB . $path . '" 2>&1')  and :160
-# the mv of $s to $d — folder paths taken off the request. Double quotes do not
-# stop $( ) or a backtick. These are the folder create/rename/delete routes the
-# functional suite does not cover either.
+# ALL GONE. api_folders.php ran
+#     exec('rm -rf "' . BASE_LAB . $path . '" 2>&1')
+# and the mv of $s to $d on folder paths taken straight off the request. The
+# double quotes stopped word splitting and nothing else — $( ) and a backtick
+# both expand inside them. Both are proc_open() with an argv array now, with
+# `--` terminating option parsing; there is no shell left.
+#
+# What these entries were NOT is worth recording, because the obvious reading is
+# wrong. They look like sites held up only by secureCmd()'s blocklist. They were
+# not: checkFolder() in devices/functions.php is
+#     preg_match('/^\/[\/A-Za-z0-9_\s-]*$/', $s)
+# an allowlist applied to the whole path before the exec, stricter than anything
+# in api_folders.php, and undocumented anywhere. Measured against the parent
+# commit on the reference host: a folder named `x$(touch pnet_rce_proof)y` can be
+# created, because apiAddFolder() validated nothing at all, and deleting it is
+# then refused by checkFolder() with 60009 and nothing runs.
+#
+# The half that was genuinely open was apiAddFolder(), which is now validated
+# too — so the three routes agree about what a folder name is, which they never
+# did before.
+#
+# api_labs.php's $user['pod'] was the `rm -rf /tmp/import_<pod>` on the import
+# route, and went the same way. The unzip beside it went with it, which also
+# fixed a latent bug: its `*.unl` member pattern was unquoted, so the SHELL
+# globbed it against the current directory and it reached unzip intact only
+# because no .unl file was ever there.
+#
 # The $pid / $o[0] entries were values read back from a previous exec's output
-# and fed to kill(1) without a cast. All three are GONE: they were the IOL
-# keepalive teardown, which ran `ps -aux | grep keepalive | ... | cut -d " " -f 2`
-# and passed each field to `sudo kill -9`. unl_wrapper -a iol-keepalive --state
-# down resolves those pids itself, from /proc, by the tenant uid that owns them,
-# so there is no shell left to escape into.
-includes/api_folders.php $path
-includes/api_folders.php $s
-includes/api_folders.php $d
-includes/api_labs.php $user['pod']
+# and fed to kill(1) without a cast. All three went earlier, with
+# `unl_wrapper -a iol-keepalive`.
 
 # --- 8. secureCmd() returns its input unescaped ---
 #
-# includes/functions.php `return $cmd;`. Several call sites treat secureCmd() as
-# the escape step; it is a blocklist of [#;|&] and '..' and lets through
-# backticks, $( ), newline, > and spaces. tests/Security/SecureCmdTest.php pins
-# exactly what it does and does not stop. Any call site reached through it —
-# including Admin/DefaultController.php's `sudo chown` on a template name —
-# is represented by this one entry.
-includes/functions.php $cmd
+# includes/functions.php `return $v;`, reported on the parameter it came from.
+# This entry used to read `$cmd` and now reads `$value`; that is a RENAME, not a
+# new violation — the parameter was renamed when the function became an
+# allowlist, and identity in this file is path plus symbol.
+#
+# It is still correct that it is here. secureCmd() is no longer a blocklist —
+# it is three named allowlist shapes, and tests/Security/SecureCmdTest.php pins
+# what each one permits — but validating a value is not escaping it, and the
+# function still hands its argument back unchanged. One live path reaches a shell
+# through it: devices/device.php interpolates the validated emulator command line
+# into exec(). That line is group 2 and group 3's surface, so this entry goes
+# when those do.
+includes/functions.php $value
 
 # --- 9. The Laravel half, which the original sweep never reached at all ---
 #
-# None of these files was on the old 16-file list. Node_sessionsController runs
-# sudo mkdir/cp/mv/rm/chown on paths built from request input; Query.php
-# interpolates Guacamole proxy credentials into a command line.
+# EMPTY, and it started at seventeen entries.
 #
-# DevicesController's two entries are GONE, and they are the first to go: it ran
-# `sudo <file>` on a script downloaded from upstream, and decoded that script
-# with htmlspecialchars_decode() on the way. Signed packages replaced it, so
-# there is no longer a shell there to escape into.
+# DevicesController ran `sudo <file>` on a script downloaded from upstream, and
+# decoded that script with htmlspecialchars_decode() on the way. Signed packages
+# replaced it.
 #
-# Node_sessionsController's ELEVEN entries are gone too. They were the QEMU
-# commit flow — qemu-img/mkdir/cp/mv/rm/chown on paths concatenated from
-# $request->input('node_image') — which is now `unl_wrapper -a image-commit`:
-# a session id, a type word from a closed set and a slug, with every path built
-# on the far side of the boundary. The docker half of the same controller kept
-# its exec() calls, because talking to the daemon socket needs no sudo, but
-# every value in them is escaped now: socket access is root-equivalent on this
-# host, so an image name that can become a second command was worth exactly what
-# the sudo was.
+# Node_sessionsController's ELEVEN were the QEMU commit flow —
+# qemu-img/mkdir/cp/mv/rm/chown on paths concatenated from
+# $request->input('node_image') — which is now `unl_wrapper -a image-commit`.
 #
-# Query.php's FOUR entries are gone, and they were the worst four in the file.
-# setProxy() concatenated proxy_ip, proxy_port, proxy_username and proxy_password
-# — all four straight off the request body — into
-#     exec("echo '".$proxyAddr."' | sudo tee ".$file);
-# a SINGLE-quoted shell string, so one apostrophe ended the quoting; and $file is
-# /etc/apt/apt.conf.d/00proxy, which can carry APT::Update::Pre-Invoke and run as
-# root at the next apt run. It is now `unl_wrapper -a set-proxy`: four separately
-# validated options, the password on stdin, and a file the action writes itself
-# with no shell anywhere on the path.
-store/app/Helpers/Admin/SystemHelper.php $path
-store/app/Helpers/Admin/SystemHelper.php $nodeSession->{}
+# Query.php's FOUR were the worst four in the file: setProxy() concatenated four
+# raw request fields into a SINGLE-quoted `echo ... | sudo tee
+# /etc/apt/apt.conf.d/00proxy`, a file that can carry APT::Update::Pre-Invoke.
+# Now `unl_wrapper -a set-proxy`.
+#
+# SystemHelper's TWO are the last to go. FolderSize() ran
+# `/usr/bin/du -sb <workspace>` and getNodeDisk() ran a `docker ... inspect`
+# with the session id interpolated into a double-quoted shell string. Access to
+# the docker socket is root-equivalent by design, so an id that could become a
+# second command was worth exactly what a sudo was. Both are argv arrays now.
+#
+# Not listed here but retired in the same pass: Admin/LabsController::getDepends()
+# ran `sudo qemu-img info --backing-chain <path> | grep image` with the path
+# unescaped, where the path came from the `image` attribute of an uploaded lab's
+# XML. It never appeared in this file under its own name because the sweep
+# resolved it through secureCmd() and reported it as entry 8. It is an argv array
+# now, and without the sudo — reading a qcow2 header needs no privilege, which
+# retired the /usr/bin/qemu-img grant from install/sudoers.d/pnetlab.
 
 # --- 10. Manual root-only probes, not shipped code ---
 #

@@ -718,12 +718,23 @@ class device
             return $this->abandonStart(80046);
         }
         if ($cmd === '') return 0;
-        // secureCmd() THROWS. It is a blocklist with documented bypasses and is
-        // not the control here, but a template option string carrying '..' or
-        // '&' does reach it, and an uncaught throw from this point leaves the
-        // taps behind exactly as the returns above did.
+        // secureCmd() THROWS, and an uncaught throw from this point leaves the
+        // taps behind exactly as the returns above did, so it stays wrapped.
+        //
+        // SECURE_LINE is the shape: this is a whole emulator command line. What
+        // that shape proves is that the line cannot spawn a second command —
+        // no $( ), no backtick, no ; | & newline, no unquoted glob. What it does
+        // NOT prove is that the arguments are the intended ones, because the
+        // line is NOT fully escaped: qemu_options, dynamips_options and
+        // getFlag() are concatenated raw, and they exist to supply several
+        // arguments (handover point 4, and the sweep-exempt markers in
+        // devices/qemu/). An unquoted space is still a word separator here.
+        //
+        // So this is defence in depth over a surface the fork has decided to
+        // keep. The containment that matters is device::spawnAsTenant(): for
+        // VPCS and QEMU the line runs as unl<session>, not root.
         try {
-            $cmd = secureCmd($cmd);
+            $cmd = secureCmd($cmd, SECURE_LINE);
         } catch (Exception $e) {
             error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80046] . ' ' . $e->getMessage());
             return $this->abandonStart(80046);
@@ -733,7 +744,7 @@ class device
         error_log(date('M d H:i:s ') . 'INFO: CWD is ' . getcwd());
         error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
         // Clean TCP port
-        exec("fuser -k -n tcp " . ($this->getPort()));
+        exec("fuser -k -n tcp " . (int) $this->getPort());
 
         if ($this->runsAsTenant()) {
             $rcp = $this->spawnAsTenant($cmd . ' 2>&1');

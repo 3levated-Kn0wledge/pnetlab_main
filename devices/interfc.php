@@ -465,7 +465,7 @@ class Interfc
 		if ($this->type == 'serial') return 0;
 		$vunl = 'vunl' . $this->if_session[IF_SESSION_NODE] . '_' . $this->id;
 		$cmd = 'sudo tc qdisc del dev ' . escapeshellarg($vunl) . ' root';
-		secureCmd($cmd);
+		secureCmd($cmd, SECURE_LINE);
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
 			// Failed to set delay and jitter on interface

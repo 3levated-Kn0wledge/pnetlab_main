@@ -21,11 +21,13 @@
  * name this application generates satisfies it: vnet{tenant}_{id} for bridges,
  * vunl{session}_{interface} for taps, plus pnet0-9, nat0 and docker0.
  *
- * This is an allowlist, and it is the control. secureCmd() is a blocklist with
- * verified bypasses — backtick, $( ), newline and redirect all pass it — so it
- * cannot be relied on. Call sites additionally pass every value through
- * escapeshellarg(), so a name reaches the shell as one literal argument even if
- * this check is ever bypassed.
+ * This is an allowlist, and it is the control: it is tighter than anything
+ * generic, because it knows the names this application actually generates.
+ * secureCmd($name, SECURE_TOKEN) is a second, weaker allowlist applied by the
+ * functions below — it refuses every shell metacharacter but does not bound the
+ * length or the leading character the way IFNAMSIZ does. Call sites
+ * additionally pass every value through escapeshellarg(), so a name reaches the
+ * shell as one literal argument even if both checks are ever bypassed.
  *
  * @param   string  $name               Candidate interface name
  * @return  bool                        True if the name is safe to use
@@ -340,7 +342,7 @@ function addNetwork($p)
  */
 function addOvs($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	$cmd = 'ovs-vsctl add-br ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
@@ -370,8 +372,8 @@ function addOvs($s)
  */
 function addTap($s, $u)
 {
-	$s = secureCmd($s);
-	$u = secureCmd($u);
+	$s = secureCmd($s, SECURE_TOKEN);
+	$u = secureCmd($u, SECURE_TOKEN);
 	// TODO if already exist should fail?
 	//
 	// -g unl, NOT -g root. This one word decides whether an emulator can run as
@@ -439,14 +441,17 @@ function addTap($s, $u)
  */
 function checkUsername($i)
 {
-	$i = secureCmd($i);
-	if ((int) $i < 0) {
-		// Tenand ID is not valid
+	// This returns a bool, so an invalid id has to be an answer and not a throw.
+	// secureCmd() used to be called here and is not the right tool: it threw out
+	// of a predicate, and it never decided anything either, because the (int)
+	// cast two lines below is what actually makes the id safe. The cast is also
+	// the form the escaping sweep understands. is_numeric() first, so that a
+	// non-numeric id is refused rather than silently becoming 0.
+	if (!is_numeric($i) || (int) $i < 0) {
+		// Tenant ID is not valid
 		return False;
-	} else {
-		// Just to be sure
-		$i = (int) $i;
 	}
+	$i = (int) $i;
 
 	if (!is_dir('/opt/unetlab/users')) {
 		$cmd = 'mkdir /opt/unetlab/users > /dev/null 2>&1';
@@ -526,8 +531,8 @@ function checkUsername($i)
  */
 function connectInterface($n, $p)
 {
-	$n = secureCmd($n);
-	$p = secureCmd($p);
+	$n = secureCmd($n, SECURE_TOKEN);
+	$p = secureCmd($p, SECURE_TOKEN);
 	if (isBridge($n)) {
 		$cmd = 'sudo brctl addif ' . escapeshellarg($n) . ' ' . escapeshellarg($p) . ' 2>&1';
 		error_log(date('M d H:i:s ') . $cmd);
@@ -561,8 +566,8 @@ function connectInterface($n, $p)
 
 function disconnectInterface($n, $p)
 {
-	$n = secureCmd($n);
-	$p = secureCmd($p);
+	$n = secureCmd($n, SECURE_TOKEN);
+	$p = secureCmd($p, SECURE_TOKEN);
 	if (isBridge($n)) {
 		$cmd = 'sudo brctl delif ' . escapeshellarg($n) . ' ' . escapeshellarg($p) . ' 2>&1';
 		error_log(date('M d H:i:s ') . $cmd);
@@ -602,7 +607,7 @@ function disconnectInterface($n, $p)
  */
 function delBridge($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	// Need to deactivate it
 	$cmd = 'sudo ip link set dev ' . escapeshellarg($s) . ' down 2>&1';
 	exec($cmd, $o, $rc);
@@ -627,7 +632,7 @@ function delBridge($s)
  */
 function delOvs($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	$cmd = 'sudo ovs-vsctl del-br ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
@@ -648,7 +653,7 @@ function delOvs($s)
  */
 function delTap($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	if (isInterface($s)) {
 		// Remove interface from OVS switches
 		$cmd = 'sudo ip link set dev ' . escapeshellarg($s) . ' down 2>&1';
@@ -729,7 +734,7 @@ function export($n, $lab)
  */
 function isBridge($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	$o = array();
 	$cmd = 'brctl show ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
@@ -787,7 +792,7 @@ function unl_session_taps($session, $dir = '/sys/class/net')
  */
 function isInterface($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	// No sudo: reading link state is unprivileged. `ip link show` needs root to
 	// CHANGE a link, never to look at one.
 	$cmd = 'ip link show ' . escapeshellarg($s) . ' 2>&1';
@@ -801,7 +806,7 @@ function isInterface($s)
 
 function isInterfaceUp($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	// No sudo, for the same reason as isInterface() above.
 	$cmd = 'ip link show ' . escapeshellarg($s) . ' | grep UP';
 	exec($cmd, $o, $rc);
@@ -817,7 +822,7 @@ function isInterfaceUp($s)
  */
 function isOvs($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	$cmd = 'ovs-vsctl br-exists ' . escapeshellarg($s) . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc == 0) {
@@ -835,7 +840,7 @@ function isOvs($s)
  */
 function isRunning($p)
 {
-	$p = secureCmd($p);
+	$p = secureCmd($p, SECURE_TOKEN);
 	// If node is running, the console port is used
 	$cmd = 'fuser -n tcp ' . escapeshellarg($p) . ' 2>&1';
 	exec($cmd, $o, $rc);
@@ -854,7 +859,7 @@ function isRunning($p)
  */
 function isTap($s)
 {
-	$s = secureCmd($s);
+	$s = secureCmd($s, SECURE_TOKEN);
 	if (is_dir('/sys/class/net/' . $s)) {
 		// TODO can be bridge or OVS
 		return True;
