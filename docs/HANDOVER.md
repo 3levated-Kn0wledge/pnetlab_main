@@ -1,26 +1,21 @@
 # Handover
 
-**State at end of session, 2026-09-01.** Branch `phase-02-shell-hardening`,
-53 commits ahead of `main`, none pushed. Nothing uncommitted.
+**State at end of session, 2026-09-02.** Branch `phase-02-shell-hardening`,
+75 commits ahead of `main`, none pushed. Nothing uncommitted.
 
-The last three commits close out Phase 02's two remaining items: tenant
-accounts are reaped, and VPCS and QEMU nodes run as the tenant rather than as
-root. Read "Tenant accounts, and running nodes unprivileged" below before
-touching the node start path.
+**Roadmap phases 00 through 04 are done**, with two deliberate redefinitions,
+both recorded in their own documents:
 
-The previous handover is the commit before this one, if you want to see what
-changed and why.
+- the supported platform is **24.04, not 26.04** — 26.04 cannot be built or
+  tested here, and `guacamole-server` is absent from it entirely
+  (`docs/PLATFORM-SUPPORT.md`);
+- the licence is **adopted, not published** — BSD-3-Clause is declared and is
+  now the standard, but publishing is gated on the incompatible components
+  named in `docs/LICENSING.md`.
 
-**Amended for Phase 03**, which was done afterwards on its own branch and is
-recorded in "Phase 03: Laravel 10 -> 12" at the foot of this document. `store/`
-is Laravel 12.69.1 now, not 10.50.3. Everything above and below that section was
-measured before the upgrade and re-measured after it; the numbers did not move.
-
-**Amended again for Phase 04's last item**, backup and restore, recorded in
-"Phase 04: backup and restore" at the very foot. `-a backupdb` and `-a restoredb`
-are real actions now; `-a restoredb_remote` is retired into `--source remote`.
-The suite counts in "Where this got to" below predate it — the current ones are
-in that section.
+Phase 05 (severing the upstream dependency), 06 (frontend currency) and 07
+(maintainership) are not started, though the signed-package work makes 05
+cheaper than it was.
 
 ---
 
@@ -30,26 +25,27 @@ The fork **deploys to a brand-new Ubuntu 24.04 server on PHP 8.4, runs labs, and
 no longer needs anything from the upstream appliance image.** The installer
 compiles the console wrappers from source as one of its steps.
 
-Last verified run. The installer line is from the previous session's clean
-`git archive` onto a provisioned host and has NOT been re-run end to end since;
-the suite numbers below are from this session, on the reference VM, after
-`--only deploy,platform,sudoers` and from a host with zero pre-existing tenant
-accounts. A full clean install is still owed before the merge.
+Every line below was measured on the reference VM against a clean `git archive`
+of this commit, unpacked onto the provisioned host — including the installer,
+which was re-run end to end rather than carried over from an earlier session.
 
 ```
 sudo bash install/install.sh --server-name pnetlab.test
-→ INSTALLER-EXIT=0, every step, all verification checks green   (previous session)
+→ INSTALLER-EXIT=0, every step, all verification checks green
 
 bash tools/integration/lab-functional.sh   → 55 shell assertions, 8 data-plane checks, 0 failed
 bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/db-backup-restore.sh→ 67 assertions, 0 failed
 bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
 bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
 bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
 make -C platform/wrappers/src test         → 248 unit assertions, 0 failed
-tools/run-tests.sh                         → 983 assertions across 24 files, 0 failed
-tools/php-lint.sh (8.4 and 7.4)            → 343 files, 0 failed
+tools/run-tests.sh                         → 1480 assertions across 28 files, 0 failed
+tools/php-lint.sh (8.4 and 7.4)            → 349 files, 0 failed
 ```
+
+The sudo policy is at **24 grants**, down from 42.
 
 ---
 
@@ -183,7 +179,7 @@ a boundary below it that did not exist: VPCS and QEMU nodes run as their own
 tenant account, so a bug in an emulator or in a template's option string no
 longer starts from uid 0.
 
-Four root-code-execution paths were closed:
+**Five** root-code-execution paths were closed:
 
 - **The marketplace and self-updater** fetched a shell script from pnetlab.com
   and ran it as root. Replaced by signed packages — see `docs/PACKAGES.md`.
@@ -200,6 +196,14 @@ Four root-code-execution paths were closed:
 - **An unauthenticated Docker daemon** on `tcp://127.0.0.1:4243`, which the
   installer never even configured — so Docker nodes could not have worked. All
   31 call sites now use `/var/run/docker.sock`.
+- **The Idle-PC button installed a root backdoor.** `store/app/Console/Commands/idlepc`
+  was a 9.4 MB stripped PyInstaller blob run under `sudo`; its bytecode runs
+  `ssh-keygen`, appends the public key to `/root/.ssh/authorized_keys`, and SSHes
+  to `127.0.0.1`. It did that solely to obtain a TTY, which dynamips does not
+  require — `0x1d` over its `-T` console reaches the same handler. Replaced by
+  `unl_wrapper -a idlepc`. The key it planted, `id_rsa_dy`, is the same one
+  `docker_wrapper` consumed; that consumer was removed earlier on this branch,
+  and this was what created it.
 
 **CSRF protection is on.** The recorded blocker (CKEditor's upload adapter) did
 not exist: it is CKEditor 5's stock adapter, gated on a config key nothing sets,
