@@ -45,13 +45,18 @@ file_put_contents($tmpRoot . '/7/42/hda.qcow2.chain', 'image: ' . $addons . "/li
 // A stand-in for qemu-img. `info --backing-chain` reports the file plus
 // whatever <file>.chain says; convert copies; commit succeeds. It also records
 // its own argv, so the test can prove nothing arrives as a shell string.
+//
+// commit and convert are handed a `json:` block-graph spec rather than a
+// filename (see UnlImageCommit::spec()); the stand-in pulls the top image's
+// filename back out of it, the way qemu would open it.
 $fake = $bin . '/qemu-img';
 file_put_contents($fake, "#!/bin/bash\n"
     . "printf '%s\\n' \"\$@\" >> \"\$(dirname \"\$0\")/argv.log\"\n"
+    . "top() { printf '%s' \"\$1\" | sed -n 's/^json:{\"driver\":\"[a-z0-9]*\",\"file\":{\"driver\":\"file\",\"filename\":\"\\([^\"]*\\)\".*/\\1/p'; }\n"
     . "case \"\$1\" in\n"
     . "  info) echo \"image: \$3\"; [ -f \"\$3.chain\" ] && cat \"\$3.chain\"; exit 0 ;;\n"
-    . "  convert) cp \"\$4\" \"\$5\"; exit 0 ;;\n"
-    . "  commit) exit 0 ;;\n"
+    . "  convert) src=\"\$(top \"\$4\")\"; [ -n \"\$src\" ] || exit 3; cp \"\$src\" \"\$5\"; exit 0 ;;\n"
+    . "  commit) [ -n \"\$(top \"\$2\")\" ] || exit 3; exit 0 ;;\n"
     . "esac\n"
     . "exit 1\n");
 chmod($fake, 0755);
@@ -226,6 +231,49 @@ assert_true(is_file($addons . '/linux-flat/hda.qcow2'), 'and produces a standalo
 // The template it was cloned from must be untouched by any of that.
 assert_same(4096, filesize($addons . '/linux-ubuntu/hda.qcow2'),
     'the original template is not modified by snapshot or new');
+
+// ------------------------------------- the header is never trusted twice
+//
+// chain() reads the qcow2 header to CHECK where the backing pointer goes. If
+// the commit then re-read that header, a `qemu-img rebase -u` slipped in
+// between -- the header lives in the tenant's mode-777 workspace -- would have
+// root commit the delta into any file on the host, with the check having
+// passed. So the commit and the convert must carry the checked chain
+// explicitly and never a bare filename for qemu to dereference.
+echo "  -- commit and convert name the checked chain, not the header\n";
+
+$k = ic(['run_commands' => false]);
+// run_commands=false short-circuits chain() to the top image alone, so this
+// exercises the "no backing file" shape: existed must refuse, and new must
+// open the source with backing explicitly null.
+$r = $k->run(42, 'existed');
+assert_true(!$r['ok'], 'existed refuses an image whose checked chain has no backing file');
+
+$argvLog = file($bin . '/argv.log', FILE_IGNORE_NEW_LINES);
+$commits = [];
+$converts = [];
+for ($i = 0; $i < count($argvLog); $i++) {
+    if ($argvLog[$i] === 'commit')  $commits[]  = $argvLog[$i + 1];
+    if ($argvLog[$i] === 'convert') $converts[] = $argvLog[$i + 3];
+}
+assert_true(count($commits) >= 1, 'a commit was recorded by the stand-in');
+foreach ($commits as $spec) {
+    assert_true(strpos($spec, 'json:{') === 0, 'commit receives a json: block spec, not a filename');
+    $node = json_decode(substr($spec, 5), true);
+    assert_same($tmpRoot . '/7/42/hda.qcow2', $node['file']['filename'], 'the spec opens the node disk');
+    assert_same($addons . '/linux-ubuntu/hda.qcow2', $node['backing']['file']['filename'],
+        'and names the CHECKED template as the backing file, explicitly');
+}
+assert_true(count($converts) >= 1, 'a convert was recorded by the stand-in');
+foreach ($converts as $spec) {
+    assert_true(strpos($spec, 'json:{') === 0, 'convert receives a json: block spec, not a filename');
+    $node = json_decode(substr($spec, 5), true);
+    assert_true(array_key_exists('backing', $node), 'the spec always says what the backing file is');
+    assert_true($node['backing'] === null
+        || $node['backing']['file']['filename'] === $addons . '/linux-ubuntu/hda.qcow2',
+        'either the checked template, or explicitly none -- never left to the header');
+}
+
 
 // ------------------------------------------------- no shell, anywhere
 
