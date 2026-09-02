@@ -72,7 +72,7 @@ class PackageRun extends Command
     {
         $url = isset($job['url']) ? $job['url'] : '';
         if (!PackageClient::validUrl($url)) {
-            $this->fail($deviceId, 'The package location is not a usable URL.');
+            $this->abort($deviceId, 'The package location is not a usable URL.');
             return 1;
         }
 
@@ -87,7 +87,7 @@ class PackageRun extends Command
             ]);
         });
         if (!$download['result']) {
-            $this->fail($deviceId, $download['message']);
+            $this->abort($deviceId, $download['message']);
             return 1;
         }
 
@@ -98,12 +98,12 @@ class PackageRun extends Command
         // the file.
         if (!empty($job['sha256'])) {
             if (!preg_match('/^[0-9a-f]{64}$/', $job['sha256'])) {
-                $this->fail($deviceId, 'The advertised package digest is malformed.');
+                $this->abort($deviceId, 'The advertised package digest is malformed.');
                 return 1;
             }
             $actual = hash_file('sha256', $packagePath);
             if (!hash_equals($job['sha256'], $actual)) {
-                $this->fail($deviceId, 'The downloaded package does not match the advertised digest.');
+                $this->abort($deviceId, 'The downloaded package does not match the advertised digest.');
                 return 1;
             }
             PackageClient::appendLog($deviceId, 'Package digest matches the marketplace listing.');
@@ -115,7 +115,7 @@ class PackageRun extends Command
         PackageClient::appendLog($deviceId, $applied['log']);
 
         if (!$applied['result']) {
-            $this->fail($deviceId, 'The package was refused. See the log above.');
+            $this->abort($deviceId, 'The package was refused. See the log above.');
             return 1;
         }
         PackageClient::appendLog($deviceId, 'Done.');
@@ -126,14 +126,14 @@ class PackageRun extends Command
     {
         $packageId = isset($job['package']) ? $job['package'] : '';
         if (!PackageClient::validId($packageId)) {
-            $this->fail($deviceId, 'The installed-state record names an unusable package id.');
+            $this->abort($deviceId, 'The installed-state record names an unusable package id.');
             return 1;
         }
         $this->note($processModel, $deviceId, 'Removing');
         $removed = PackageClient::remove($packageId);
         PackageClient::appendLog($deviceId, $removed['log']);
         if (!$removed['result']) {
-            $this->fail($deviceId, 'The package could not be removed. See the log above.');
+            $this->abort($deviceId, 'The package could not be removed. See the log above.');
             return 1;
         }
         PackageClient::appendLog($deviceId, 'Done.');
@@ -149,7 +149,14 @@ class PackageRun extends Command
         ]);
     }
 
-    private function fail($deviceId, $message)
+    /**
+     * Not called fail(): Illuminate\Console\Command declares a public
+     * fail(Throwable|string|null $exception = null) since Laravel 11, and a
+     * private method of the same name is an illegal narrowing. PHP refuses to
+     * declare the class, and because artisan resolves every registered command
+     * at boot, that took `php artisan` down entirely -- not just this command.
+     */
+    private function abort($deviceId, $message)
     {
         $this->line('ERROR: ' . $message);
         PackageClient::appendLog($deviceId, 'ERROR: ' . $message);
