@@ -1,8 +1,15 @@
 # Handover
 
-**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 28
+**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 31
 commits ahead of `main` (which now carries the merged `phase-02-shell-hardening`),
 none pushed. Nothing uncommitted.
+
+**Everything below was measured on a host that was rolled back to its
+post-provision snapshot and built from nothing** — a clean `git archive` of the
+branch head, the installer, and two verified downloads. That is a stronger
+claim than this document has carried before, and it cost four defects to make:
+see "Deploying onto a clean host" for what a fresh host needs and what it
+caught.
 
 **The Phase 04 exit gate is clear.** `docs/PHASE-04-EXIT-FIXES.md` named fifteen
 defects found by reviewing the work that closed Phase 04, seven of them critical,
@@ -41,28 +48,126 @@ The fork **deploys to a brand-new Ubuntu 24.04 server on PHP 8.4, runs labs, and
 no longer needs anything from the upstream appliance image.** The installer
 compiles the console wrappers from source as one of its steps.
 
-Every line below was measured on the reference VM against a clean `git archive`
-of this commit, unpacked onto the provisioned host — including the installer,
-which was re-run end to end rather than carried over from an earlier session.
+Every line below was measured **from scratch**: a VM rolled back to its
+post-provision snapshot, a clean `git archive` of this commit unpacked onto it,
+and `install/install.sh` run end to end. No step was carried over from an
+earlier session, and no state on the host predated the run except the four
+preconditions listed in "Deploying onto a clean host" below.
 
 ```
 sudo bash install/install.sh --server-name pnetlab.test
-→ INSTALLER-EXIT=0, every step, all verification checks green
+→ INSTALLER-EXIT=0, every step, 0 [fail], all verification checks passed
 
 bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
 bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
-bash tools/integration/db-backup-restore.sh→ 67 assertions, 0 failed
+bash tools/integration/db-backup-restore.sh→ 67 passed, 0 failed, 0 skipped
 bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
 bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
 bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 75 assertions, 0 failed
-make -C platform/wrappers/src test         → 248 unit assertions, 0 failed
-tools/run-tests.sh                         → 1704 assertions across 31 files, 0 failed
-tools/php-lint.sh (8.4 and 7.4)            → 352 files, 0 failed
-npm run production (legacy provider)       → exit 0, bundles regenerated
+make -C platform/wrappers/src test         → 253 unit assertions, 0 failed
+tools/run-tests.sh (as root)               → 1778 assertions across 31 files, 0 failed
+tools/php-lint.sh (8.4)                    → 352 files, 0 failed
 ```
 
+**`tools/php-lint.sh` runs against 8.4 only on a clean host.** Nothing installs
+PHP 7.4; the two-version matrix in earlier revisions of this document was
+measured on a box where someone had installed it by hand. CI still covers 8.4
+and 8.5.
+
 The sudo policy is at **23 grants**, down from 42.
+
+---
+
+## Deploying onto a clean host
+
+The installer was, until this session, only ever run onto hosts that had
+already had it run on them. Doing it properly — snapshot rollback, fresh
+provision, clean `git archive`, nothing else — caught **four** defects that
+an accreted host hides, and established what a genuinely fresh host needs.
+Read this before claiming a deploy works.
+
+### What it caught
+
+| | |
+|---|---|
+| **No C compiler** | `step_platform()` compiles the three console wrappers from source and died with `FATAL: no C compiler found`. Nothing in the installer had ever installed one; every host it had run on already carried gcc. **Fixed** — `build-essential` is now in the platform step's own package list. |
+| **The captcha is ON for a fresh install** | Not fixed; see below. |
+| **A stale `node_modules` silently downgraded axios** | Rebuilding the bundles against whatever `node_modules` held, rather than after `npm ci`, produced bundles carrying axios 0.19.2 against a lockfile pinning 1.20.0, reverting the CSRF hardening. `CsrfTest` caught it. **Fixed**; the lesson is that regenerating build output *is* a behavioural change and the suite has to be re-run after one. |
+| **The snapshot itself had an interrupted `dpkg`** | `apache2` was unpacked but not configured, and the preflight correctly refused to start: `FATAL: dpkg has an interrupted transaction`. One `sudo dpkg --configure -a` clears it. This is a property of the snapshot, not of this repository, so it recurs on every rollback to that snapshot until the snapshot is retaken. |
+
+### The four preconditions
+
+Only the first is a product requirement; the rest are what the *verification*
+needs, and none of them was written down before.
+
+**1. A clean dpkg state.** `sudo dpkg --configure -a` if the preflight says so.
+
+**2. The captcha must be off for the suites to log in.**
+
+```sql
+REPLACE INTO control (control_name, control_value) VALUES ('ctrl_captcha','0');
+```
+
+`install/sql/seed-control.sql` seeds four rows and **not** `ctrl_captcha`, and
+`Ctrl::get(CTRL_CAPTCHA, true)` in `LoginController` defaults it to ON when the
+row is absent. So a fresh install enforces the captcha, every scripted login
+returns `Captcha is Wrong`, and that one fact cascades into 46 failures in
+`lab-functional.sh`, 5 in `node-types.sh` and a loud skip in
+`db-backup-restore.sh`.
+
+**`tools/integration/lab-functional.sh` states the opposite** — "Requires the
+captcha to be off, which a fresh install has" — and it is wrong. That comment
+was written against a box where someone had already run the SQL above. It is
+left uncorrected here so that this document changes and the suites do not;
+correcting it, or having the suites set the value themselves, is a decision
+someone should make on purpose.
+
+**3. The Guacamole artefacts.** ~23 MB of Apache binaries, deliberately not
+committed (`install/vendor/guacamole/.gitignore` says why). Staged by a
+maintainer on a connected host:
+
+```bash
+bash tools/vendor-guacamole.sh          # verifies twice: Apache's published
+                                        # checksum, and the committed SHA512SUMS
+sudo install/install.sh --only guacamole
+```
+
+Without them the installer skips HTML5 consoles loudly and correctly, but
+`guacamole-console.sh` cannot run and six assertions across `node-types.sh`
+and `db-backup-restore.sh` fail on the missing console link.
+
+**4. A bootable QEMU image.** `node-types.sh` takes the first directory under
+`/opt/unetlab/addons/qemu/`, derives the template from the part before the
+first `-`, and needs a disk matching `hd[a-z]+.qcow2`. CirrOS 0.6.2 is what
+was used:
+
+```bash
+sudo install -d -m 0755 /opt/unetlab/addons/qemu/linux-cirros
+sudo curl -fsSL -o /opt/unetlab/addons/qemu/linux-cirros/hda.qcow2 \
+  https://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img
+# md5 c8fc807773e5354afe61636071771906, matching the MD5SUMS cirros publishes
+```
+
+**This one has no pin in the tree.** Guacamole has `SHA512SUMS`, committed and
+reviewed; the QEMU image has nothing, so a future download that differed would
+not be noticed. Worth closing if these images are meant to be part of
+reproducible verification.
+
+### What a repeat deploy will and will not hit
+
+The compiler defect is fixed in the tree, so it will not recur. The dpkg state
+will recur on every rollback to that same snapshot. The captcha, the Guacamole
+artefacts and the QEMU image are host setup, not code, so they are needed again
+on every fresh host — a product deploy is fine without the last two, and only
+the verification suites need them.
+
+### What is still not proven from scratch
+
+**IOL**, unchanged: licensed Cisco binaries this project does not carry, so
+`node-types.sh` skips it and `iol-dataplane.sh` drives the wrapper directly
+against a stand-in. And **PHP 7.4**, which nothing installs, so the lint matrix
+on a clean host is 8.4 alone.
 
 ---
 
@@ -376,7 +481,7 @@ review and several had been shipping for years.
 
 ## Suggested next steps, in order
 
-1. **Review and merge `phase-04-exit-fixes`.** 28 commits, each individually
+1. **Review and merge `phase-04-exit-fixes`.** 31 commits, each individually
    scoped, each message carrying the reasoning and what was measured. One
    commit (`9bcff23`) closes two gate items at once because they are two
    findings on the same allowlist and the same test. Then open Phase 05:
