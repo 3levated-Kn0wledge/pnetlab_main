@@ -43,7 +43,8 @@ umask(0002);
 // marker file, checked below — one switch that the web layer could ever reach
 // is not a gate).
 $options = getopt('oT:D:S:F:P:I:a:', array('allow-unsigned', 'state:', 'type:', 'name:',
-	'scope:', 'source:', 'proxy-host:', 'proxy-port:', 'proxy-user:', 'proxy-pass-stdin', 'clear'));
+	'scope:', 'source:', 'proxy-host:', 'proxy-port:', 'proxy-user:', 'proxy-pass-stdin', 'clear',
+	'template:', 'image:'));
 
 /**
  * One value for an option, or null.
@@ -481,6 +482,46 @@ switch ($action) {
 		if (!$reapResult['ok']) {
 			error_log(date('M d H:i:s ') . 'ERROR: reap-tenant: ' . $reapResult['error']);
 			exit(47);
+		}
+		break;
+	case 'idlepc':
+		// Compute a dynamips idle-PC value for a template and an image.
+		//
+		// This action exists to delete a root backdoor. What it replaces is
+		// store/app/Console/Commands/idlepc, a 9.4 MB stripped PyInstaller
+		// bundle with no source and no licence, which before computing anything
+		// ran
+		//     ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa_dy
+		//     cat /root/.ssh/id_rsa_dy.pub >> /root/.ssh/authorized_keys
+		// and then SSHed to root@127.0.0.1 with that key. It did all of that to
+		// obtain a TTY, because it ran dynamips with no -T and dynamips with no
+		// -T puts the console on stdin. `-T <port>` feeds the same input state
+		// machine, so a plain TCP socket drives the same computation with no
+		// terminal, no SSH and no key. actions/UnlIdlePc.php quotes the
+		// dev_vtty.c that says so.
+		//
+		// THE CALLER SENDS TWO NAMES AND NOTHING ELSE. It does not send the
+		// option string: the old call site read `dynamips_options` out of the
+		// template in the web layer and passed it across sudo, and a template
+		// option string is argument injection by design. The action reads it
+		// from the template file itself and accepts an allowlist of options,
+		// each with its own value pattern, so no template can name a file this
+		// root process would then read or write.
+		require_once(__DIR__ . '/actions/UnlIdlePc.php');
+
+		$idlePcTemplate = unl_single_option($options, 'template');
+		$idlePcImage    = unl_single_option($options, 'image');
+		if ($idlePcTemplate === null || $idlePcImage === null) {
+			error_log(date('M d H:i:s ') . 'ERROR: -a idlepc needs --template <name> and --image <name>');
+			exit(48);
+		}
+
+		$idlePc = new UnlIdlePc();
+		$idlePcResult = $idlePc->run($idlePcTemplate, $idlePcImage);
+		echo 'IDLEPC-RESULT ' . json_encode($idlePcResult) . "\n";
+		if (!$idlePcResult['ok']) {
+			error_log(date('M d H:i:s ') . 'ERROR: idlepc: ' . $idlePcResult['error']);
+			exit(49);
 		}
 		break;
 	case 'delete':

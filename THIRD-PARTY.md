@@ -218,16 +218,19 @@ emulates and implies no affiliation or endorsement.
 
 ## Prebuilt binaries
 
-`store/app/Console/Commands/idlepc` is a 9.4 MB stripped ELF of unknown
-provenance, PyInstaller-packed against Python 3.5 and embedding `paramiko`
-(LGPL-2.1), `cryptography` 3.1.1, `bcrypt`, PyNaCl and OpenSSL. No source
-accompanies it and this project cannot rebuild it. **Its removal is an open item
-on the pre-publication checklist** (`docs/LICENSING.md` §3). It is named here
-because it is in the tree and its embedded components have attribution
-requirements this project is not currently able to satisfy.
+**None.** The console wrappers under `platform/wrappers/src/` are C source
+compiled by the installer, and nothing else in the tree is a compiled artefact.
 
-No other prebuilt binary is committed. The console wrappers under
-`platform/wrappers/src/` are C source compiled by the installer.
+`store/app/Console/Commands/idlepc` used to be the exception: a 9.4 MB stripped
+ELF of unknown provenance, PyInstaller-packed against Python 3.5 and embedding
+`paramiko` (LGPL-2.1), `cryptography` 3.1.1, `bcrypt`, PyNaCl and OpenSSL, with
+no source and no way to rebuild it. It has been **deleted**, and the capability
+it provided is now `unl_wrapper -a idlepc`, written in this repository. Its
+attribution requirements went with it. See `docs/LICENSING.md` §3.
+
+Note that deleting it from `HEAD` does not remove it from git history; whether
+to rewrite history before a first public push is an open owner decision recorded
+in `docs/LICENSING.md` §10.
 
 ---
 

@@ -52,6 +52,52 @@ class Wrapper
     }
 
     /**
+     * The names `-a idlepc` accepts, repeated for the same reason SCOPES is.
+     *
+     * The wrapper holds the real validators (UnlIdlePc::templateName() and
+     * ::imageName()) and re-runs them on the far side; these are here so a
+     * malformed name is a clear message from this process instead of exit 49,
+     * and so the controller has something to build its own template path with.
+     * Widening either of these cannot widen what the wrapper accepts.
+     */
+    const TEMPLATE_RE = '/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\z/';
+    const IMAGE_RE    = '/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\z/';
+
+    /**
+     * Compute a dynamips idle-PC value for a template and an image.
+     *
+     * WHAT THIS REPLACES: an exec() of a 9.4 MB unlicensed PyInstaller blob
+     * under sudo, which generated a passphrase-less RSA key at
+     * /root/.ssh/id_rsa_dy and appended it to /root/.ssh/authorized_keys before
+     * doing anything else. See platform/wrappers/actions/UnlIdlePc.php.
+     *
+     * TWO NAMES CROSS, AND NOT THE OPTION STRING. The old call site read
+     * `dynamips_options` out of the template here and passed it over sudo; the
+     * action reads it from the template file itself now, so an operator-editable
+     * option string is no longer on the request path at all.
+     *
+     * This blocks for as long as the emulator takes to boot the image and
+     * calibrate — the action bounds that, the caller must allow for it.
+     *
+     * @param  string $template a template name, without the .yml
+     * @param  string $image    a filename under /opt/unetlab/addons/dynamips
+     * @return array ['ok'=>bool,'error'=>string|null,'idlepc'=>string|null,...]
+     */
+    public static function idlepc($template, $image)
+    {
+        if (!is_string($template) || !preg_match(self::TEMPLATE_RE, $template)
+            || $template === '.' || $template === '..') {
+            return array('ok' => false, 'error' => 'that is not a template name');
+        }
+        if (!is_string($image) || !preg_match(self::IMAGE_RE, $image)
+            || $image === '.' || $image === '..') {
+            return array('ok' => false, 'error' => 'that is not an image name');
+        }
+        return self::run(array(self::SUDO, self::WRAPPER, '-a', 'idlepc',
+            '--template', $template, '--image', $image), null, 'IDLEPC-RESULT ');
+    }
+
+    /**
      * Write or clear /etc/apt/apt.conf.d/00proxy.
      *
      * Empty settings clear it. That is what the admin screen means by saving an
