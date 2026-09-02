@@ -124,11 +124,23 @@ step_platform() {
 	step "Emulation platform"
 
 	# --- emulators and host tooling ------------------------------------
+	#
+	# build-essential is not optional and not a developer convenience: this
+	# step COMPILES the three console wrappers from platform/wrappers/src
+	# below, and dies if it cannot. It is listed here, in the step that
+	# consumes it, rather than in base_packages() -- the web layer itself
+	# needs no compiler, and an install that only serves the web layer
+	# should not pull one in.
+	#
+	# Found by installing onto a freshly provisioned host: every host this
+	# had previously been run on already had gcc, so the installer died at
+	# "no C compiler found" the first time it met a genuinely clean one.
 	local pkgs=(
 		vpcs dynamips qemu-system-x86 qemu-utils
 		bridge-utils uml-utilities net-tools iproute2 psmisc
+		build-essential
 	)
-	note "installing emulators and host tools"
+	note "installing emulators, host tools and the compiler for the wrappers"
 	apt_install "${pkgs[@]}"
 
 	for b in vpcs dynamips qemu-system-x86_64; do
