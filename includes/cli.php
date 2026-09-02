@@ -746,6 +746,40 @@ function isBridge($s)
 }
 
 /**
+ * Every tap this node session owns, as the kernel currently sees it.
+ *
+ * Taps are vunl{session}_{interface}. Enumerating them from /sys/class/net
+ * rather than from the node's interface list is the point: the leak this exists
+ * to clean up happens when prepare() dies PART WAY through the interface loop,
+ * and it also survives an interface being removed from the lab afterwards, so
+ * a list derived from the node definition can be a subset of what is actually
+ * on the host.
+ *
+ * The anchored `_[0-9]+` matters. Without it 'vunl1_' is a prefix of 'vunl12_0'
+ * and stopping session 1 would tear down session 12's data plane.
+ *
+ * @param   int     $session            Node session id
+ * @param   string  $dir                Where to look. Only the tests pass this,
+ *                                      and they pass it because the anchoring
+ *                                      above is the part worth a regression
+ *                                      test and it cannot be exercised against
+ *                                      the real /sys without creating taps.
+ * @return  array                       Interface names, ascending
+ */
+function unl_session_taps($session, $dir = '/sys/class/net')
+{
+	$session = (int) $session;
+	$names = @scandir($dir);
+	if ($names === false) return array();
+	$out = array();
+	foreach ($names as $n) {
+		if (preg_match('/^vunl' . $session . '_[0-9]+\z/', $n)) $out[] = $n;
+	}
+	sort($out);
+	return $out;
+}
+
+/**
  * Function to check if a interface exists
  *
  * @param   string  $s                  Interface name

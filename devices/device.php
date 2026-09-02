@@ -682,17 +682,52 @@ class device
 
         $result = $this->prepare();
 
-        if ($result > 0) return $result;
+        // EVERY FAILURE FROM HERE ON UNWINDS. prepare() creates the taps, and
+        // it creates them FIRST -- before the linked clone, before .prepared,
+        // before anything that can fail -- so each of its later error returns
+        // used to leave one tap per interface on the host. See abandonStart().
+        if ($result > 0) return $this->abandonStart($result);
 
         if (!chdir($this->getRunningPath())) {
             // Failed to change directory
             error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80047]);
-            return 80047;
+            return $this->abandonStart(80047);
         }
 
+        // TWO different things used to arrive here and be treated as one.
+        //
+        // command() returns '' for a node type that has no emulator command
+        // line at all -- Docker, which does not override it, and whose
+        // container is started by device_docker::start() after this returns.
+        // That is SUCCESS and has to stay success.
+        //
+        // device_qemu::command() returns array(False, False) when it cannot
+        // resolve the architecture or the binary. That is a failure, and it
+        // never reached the `$cmd == ''` test below: secureCmd() runs first and
+        // calls preg_match() on the array, which is a TypeError on PHP 8. So a
+        // QEMU node with an unresolvable template took the whole request down
+        // with a fatal, left its taps behind, and reported nothing.
+        //
+        // The type check therefore comes BEFORE secureCmd(), and the two cases
+        // are separated. `return;` (NULL) was what the empty case did, and NULL
+        // is not > 0, so callers read it as started either way -- 0 says the
+        // same thing on purpose.
         $cmd = $this->command();
-        $cmd = secureCmd($cmd);
-        if (!isset($cmd) || $cmd == '') return;
+        if (!is_string($cmd)) {
+            error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80046]);
+            return $this->abandonStart(80046);
+        }
+        if ($cmd === '') return 0;
+        // secureCmd() THROWS. It is a blocklist with documented bypasses and is
+        // not the control here, but a template option string carrying '..' or
+        // '&' does reach it, and an uncaught throw from this point leaves the
+        // taps behind exactly as the returns above did.
+        try {
+            $cmd = secureCmd($cmd);
+        } catch (Exception $e) {
+            error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80046] . ' ' . $e->getMessage());
+            return $this->abandonStart(80046);
+        }
         $cmd = preg_replace('/\s+/m', ' ', $cmd);
 
         error_log(date('M d H:i:s ') . 'INFO: CWD is ' . getcwd());
@@ -706,7 +741,12 @@ class device
             exec($cmd . ' 2>&1 &', $o, $rcp);
         }
 
-        if ($rcp == 0 && $this->type != 'docker') {
+        // spawnAsTenant() returns 80036 for a missing ext-pcntl, a tenant
+        // account that is absent or holds the wrong uid, and a failed fork.
+        // All three are after the taps exist.
+        if ($rcp != 0) return $this->abandonStart($rcp);
+
+        if ($this->type != 'docker') {
             $ethernets = $this->getEthernets();
             foreach ($ethernets as $ethernet) {
                 if (count($ethernet->getQuality()) > 0) $ethernet->applyQuality();
@@ -715,6 +755,68 @@ class device
         }
 
         return $rcp;
+    }
+
+    /**
+     * Undo a start that got part way and then failed.
+     *
+     * WHY THIS IS WORSE THAN IT LOOKS, AND WHY IT IS HERE AND NOT IN prepare()
+     *
+     * The tap is created before the failure point, and neither stop nor delete
+     * removed it: device::stopNode() did all of its work, tap teardown
+     * included, inside `if ($this->getStatus() != 0)`, and a node whose start
+     * failed has status 0. So `stop` was a no-op on exactly the node that
+     * needed it -- one orphaned vunl<session>_* per failed start, permanently.
+     *
+     * Since tenant accounts are reaped, that also strands the ACCOUNT. The
+     * reaper refuses to remove an account while a vunl<session>_* interface
+     * exists (actions/UnlTenantAccount.php), which is the right refusal -- it
+     * is what stops a running node losing its uid -- but it means one leaked
+     * tap pins one Unix account for the life of the host. The two bugs
+     * compound, and the second one arrived after the first was written down.
+     *
+     * It lives here rather than in each prepare() because device::start() is
+     * the single funnel: every node type's start() calls parent::start(), so
+     * one unwind covers vpcs, qemu (three variants), dynamips, iol and docker.
+     * Putting it in prepare() would mean six near-identical edits and would
+     * still miss the failures start() itself can have after prepare() returned.
+     *
+     * The tenant is reaped too. A start that produced nothing should leave
+     * nothing, and the reaper does its own safety checks -- no process on the
+     * uid, no surviving tap, no session reporting status 2 or 3 -- so this
+     * cannot pull an account out from under a node that is actually running.
+     *
+     * @param   int     $code               The failure to report
+     * @return  int                         $code, unchanged
+     */
+    protected function abandonStart($code)
+    {
+        error_log(date('M d H:i:s ') . 'INFO: start failed (' . $code . '); releasing taps for session '
+            . (int) $this->getSession());
+        $this->releaseTaps();
+        $this->reapTenant();
+        return $code;
+    }
+
+    /**
+     * Tear down every tap belonging to this node session.
+     *
+     * Enumerated from the host, not from the node's interface list: a start
+     * that died inside prepare()'s interface loop created a PREFIX of that
+     * list, and an interface removed from the lab after a start leaves a tap
+     * that the list no longer mentions. delTap() is a no-op for a name that is
+     * not there, so this is safe to call on a node that never started.
+     *
+     * @return  int                         0
+     */
+    protected function releaseTaps()
+    {
+        foreach (unl_session_taps($this->getSession()) as $tap) {
+            if (delTap($tap) !== 0) {
+                error_log(date('M d H:i:s ') . 'ERROR: could not remove ' . $tap);
+            }
+        }
+        return 0;
     }
 
     /**
@@ -867,6 +969,20 @@ class device
         return 0;
     }
 
+    /**
+     * THE STATUS GUARD IS THE OTHER HALF OF THE TAP LEAK.
+     *
+     * Everything below used to sit inside `if ($this->getStatus() != 0)`,
+     * teardown included. A node whose start failed reports status 0, so stop
+     * did nothing for it -- which is precisely the node with a stranded tap.
+     * Delete behaves the same way, so nothing on the box ever collected one.
+     *
+     * Killing the emulator still depends on there being one. Releasing the taps
+     * does not, and now happens either way, so a tap left by an older failed
+     * start (or by a crash between prepare() and start()) is collected the next
+     * time anything stops or deletes that node -- which also unpins the tenant
+     * account the reaper was refusing to remove while the tap existed.
+     */
     private function stopNode()
     {
         if ($this->getStatus() != 0) {
@@ -894,14 +1010,20 @@ class device
             }
 
             usleep(200000); //sleep waiting for vunl free
-            // $line is the shell's own loop variable, not ours; only the session is interpolated.
-            $cmd = 'ip link | grep ' . escapeshellarg('vunl' . $this->getSession() . '_')
-                . ' | sed \'s/.*\(vunl[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ip link set $line down; sudo tunctl -d $line; done';
-            error_log(date('M d H:i:s ') . 'ERROR: ' . $cmd);
-            exec($cmd, $o, $rc);
-
-            return 0;
         }
+
+        // Outside the guard, and no longer a shell pipeline.
+        //
+        // What was here was
+        //     ip link | grep 'vunl<session>_' | sed ... | while read line; do
+        //         sudo ip link set $line down; sudo tunctl -d $line; done
+        // which matched by PREFIX: 'vunl1_' matches vunl12_0, so stopping
+        // session 1 on a busy host tore down session 12's data plane. It also
+        // read nothing back, so a tap that survived tunctl -d was reported as
+        // removed. releaseTaps() anchors the name and goes through delTap(),
+        // which re-checks and says so when the interface is still there.
+        $this->releaseTaps();
+
         return 0;
     }
 

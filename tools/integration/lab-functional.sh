@@ -224,6 +224,91 @@ chk "stopping the nodes reaped their tenant accounts" "$LEFT" "0"
 chk "and removed their home directories"              "$HOMES" "0"
 
 echo
+echo "=============== FAILED START LEAVES NOTHING ==============="
+#
+# The roadmap's Phase 04 item: "tunctl runs before the failure point, and
+# neither stop nor delete removes the interface. One orphaned tap and one
+# orphaned unlN account accumulate per failed start."
+#
+# Forcing it honestly matters more than forcing it easily. prepare() creates the
+# tap and then calls connectInterface(), which returns 80029 when the bridge is
+# not there -- so removing the bridge behind the API's back reproduces the exact
+# shape observed on the appliance: addTap succeeded, the next step did not, and
+# prepare returned. Nothing about this is specific to VPCS; qemu, dynamips and
+# iol have the same loop, and qemu has four more error returns after it.
+#
+# It also proves the SECOND half. Since tenant accounts are reaped, a stranded
+# tap pins its account: the reaper refuses while a vunl<session>_* exists. So
+# "no tap" and "no account" are one assertion made twice, and before the fix
+# both failed.
+# HOW THE FAILURE IS FORCED, AND THE ONE THAT DOES NOT WORK
+#
+# Deleting the node's bridge and starting into the gap looks like the obvious
+# force -- connectInterface() returns 80029 for a missing bridge, right after
+# addTap() -- and it does not work. `unl_wrapper -a start` walks the node's
+# interfaces and calls addNetwork() for each one BEFORE it starts anything, so
+# it rebuilds the bridge and the node starts normally. That is the wrapper
+# behaving correctly; it is written down because the test that assumed
+# otherwise passed for the wrong reason.
+#
+# What is forced instead is prepare()'s last step. vpcs::prepare() creates the
+# taps and then touch()es .prepared, and touch() on an immutable file returns
+# false for root as well -- so the failure cannot be repaired by anything the
+# application does. 80044, one line after the taps exist. Every other node type
+# has the same shape, and qemu has four more error returns after its tap loop.
+#
+# The FILE, not the directory. PC1 ran successfully above, so .prepared already
+# exists, and creating an entry is the only thing an immutable DIRECTORY
+# forbids -- touch()ing a file that is already there succeeds, and the start
+# then succeeds too. That is what the first version of this did.
+LSID=$(sudo mysql -N pnetlab_db -e 'SELECT lab_session_id FROM lab_sessions LIMIT 1;' 2>/dev/null)
+NSID=$(sudo mysql -N pnetlab_db -e 'SELECT node_session_id FROM node_sessions WHERE node_session_nid=1 LIMIT 1;' 2>/dev/null)
+RP="/opt/unetlab/tmp/${LSID}/${NSID}"
+sudo mkdir -p "$RP"
+sudo touch "$RP/.prepared"
+sudo chattr +i "$RP/.prepared" 2>/dev/null
+if lsattr "$RP/.prepared" 2>/dev/null | grep -q '^....i'; then
+  ok "the node's .prepared is immutable, so prepare() must fail after the tap"
+else
+  bad "the node's .prepared is immutable, so prepare() must fail after the tap" \
+      "chattr +i did not take on $RP/.prepared; is this an ext4 filesystem?"
+fi
+
+FS=$(A -X POST $S/nodes/start -d '{"id":"1"}')
+# 80049 is 'Node started'. The assertion is that it did NOT report success --
+# which code it chose is prepare()'s business, not this suite's.
+case "$FS" in
+  *80049*) bad "a start that fails after the tap exists is reported as a failure" "got: $(echo "$FS" | head -c 120)" ;;
+  *)       ok  "a start that fails after the tap exists is reported as a failure" ;;
+esac
+sleep 2
+
+# THE REGRESSION THIS SECTION EXISTS FOR. Before the unwind, PC1's tap survived
+# here and survived every stop and delete that followed -- device::stopNode()
+# did its teardown inside `if getStatus() != 0`, and a node that failed to start
+# reports 0, so stop was a no-op on the one node that needed it.
+LEAKED=$(ip -o link show 2>/dev/null | grep -c 'vunl' || true)
+if [ "$LEAKED" = "0" ]; then
+  ok "the failed start left no tap behind"
+else
+  bad "the failed start left no tap behind" \
+      "$(ip -o link show | sed 's/.*\(vunl[0-9]*_[0-9]*\).*/\1/' | grep '^vunl' | tr '\n' ' ')"
+fi
+
+# And the account is not pinned. UnlTenantAccount refuses to remove an account
+# while a vunl<session>_* interface exists, so a leaked tap strands its account
+# for the life of the host. This assertion is only reachable because the one
+# above passed, which is the point: they are one bug seen from two sides.
+if [ -n "$NSID" ] && getent passwd "unl$NSID" >/dev/null 2>&1; then
+  bad "and left no tenant account pinned" "unl$NSID survives with no node running"
+else
+  ok "and left no tenant account pinned"
+fi
+
+# Put the host back before DELETE, which cannot remove an immutable file.
+sudo chattr -i "$RP/.prepared" 2>/dev/null
+
+echo
 echo "=============== DELETE ==============="
 has "delete a node"  "$(A -X POST $S/nodes/delete -d '{"id":"3"}')" "success"
 chk "two nodes remain" "$(A $S/nodes | grep -o '\"name\":\"PC' | wc -l)" "2"
