@@ -261,7 +261,14 @@ class UnlSetProxy
         if (!is_dir($dir)) return false;
 
         $tmp = $dir . '/.' . basename($this->file) . '.' . getmypid() . '.tmp';
-        if (file_put_contents($tmp, $content) !== strlen($content)) {
+        // Created under a 077 umask: file_put_contents() otherwise creates it
+        // 0644 under the default umask, and the chmod below then narrows it --
+        // a window in which a proxy URL carrying a credential was readable by
+        // every account on the host, under a predictable name.
+        $umask = umask(0077);
+        $written = file_put_contents($tmp, $content);
+        umask($umask);
+        if ($written !== strlen($content)) {
             @unlink($tmp);
             return false;
         }
