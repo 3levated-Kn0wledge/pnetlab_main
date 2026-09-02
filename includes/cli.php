@@ -67,6 +67,106 @@ function unl_write_sysfs($path, $value)
 }
 
 /**
+ * The memory-deduplication control: mainline KSM, not UKSM.
+ *
+ * WHAT THIS ACTUALLY CONTROLS, measured on the reference host (6.8.0-138,
+ * QEMU 8.2.2), because the honest answer is narrower than the button suggests.
+ *
+ * The kernel scans a mapping only if the owning process has asked it to with
+ * madvise(MADV_MERGEABLE); ksmd never touches anything else, and neither the
+ * `smart_scan` heuristic nor the `advisor_mode` scan-time governor changes
+ * that — they tune how hard ksmd works on the set it already has, not what is
+ * in the set. QEMU asks: `mem-merge` defaults to on, so every guest RAM block
+ * is advised at startup. Measured directly — a 512 MB guest's RAM mapping
+ * carries the `mg` VmFlag in /proc/<pid>/smaps with no configuration at all.
+ *
+ * So for QEMU nodes this toggle is the whole control, and it works: three
+ * CirrOS guests at 512 MB each, ksm/run 0 -> 1, reached pages_sharing 22900 /
+ * pages_shared 9111 within one full scan — about 89 MB of guest RAM collapsed,
+ * general_profit 85,590,848 bytes.
+ *
+ * What it does NOT do, and what no amount of sysfs will make it do:
+ *
+ *   - VPCS, dynamips and IOL processes never call madvise(MADV_MERGEABLE), so
+ *     none of their memory is scanned however this reads. A lab of VPCS nodes
+ *     gets nothing from turning this on.
+ *   - Docker-backed nodes are the container's own processes; same rule.
+ *   - A template whose qemu_options carry `-machine ...,mem-merge=off` opts
+ *     that node out, and this toggle cannot override it.
+ *
+ * A template could be opted in wholesale with prctl(PR_SET_MEMORY_MERGE) — 6.4
+ * and later, per process, no madvise needed. That is a real option for the
+ * emulators above and is deliberately NOT done here: it would be a per-node
+ * memory-behaviour change made from a host-wide button.
+ *
+ * ON THE THREE VALUES. run is 0 stop, 1 run, 2 stop-and-unmerge, and it reads
+ * back what was written, so 2 is a state and not an edge. 'off' writes 0, not
+ * 2, deliberately: 2 unmerges immediately, and unmerging N shared pages needs N
+ * free pages *now* — on the dense host that is the only reason to have had KSM
+ * on, that is where the OOM killer lives. 0 stops the scanner and leaves the
+ * existing merges in place to break up under ordinary copy-on-write. Both 0 and
+ * 2 therefore report 'disabled', which is true of both: nothing is being
+ * deduplicated. Verified end to end: writing 2 took pages_sharing 22900 -> 0.
+ */
+define('UNL_KSM_RUN', '/sys/kernel/mm/ksm/run');
+
+/**
+ * Read the memory-dedup state.
+ *
+ * @return  string                      'enabled', 'disabled' or 'unsupported'
+ */
+function unl_ksm_state()
+{
+	// Not exec('cat ...'). The old readers spawned a shell per status poll and
+	// the status page polls; more to the point, `cat` of a missing path is a
+	// non-zero exit that reads identically to a permissions problem, and this
+	// has to tell "no KSM in this kernel" apart from "cannot read it".
+	if (!is_file(UNL_KSM_RUN)) return 'unsupported';
+	$v = @file_get_contents(UNL_KSM_RUN);
+	if ($v === false) return 'unsupported';
+	return trim($v) === '1' ? 'enabled' : 'disabled';
+}
+
+/**
+ * Turn memory dedup on or off.
+ *
+ * Root only — the sysfs file is 0644 root:root. Every caller reaches this from
+ * inside unl_wrapper, which refuses to run as anything else.
+ *
+ * @param   bool    $on                 True to scan, false to stop scanning
+ * @return  int                         0 on success, 13 on failure
+ */
+function unl_ksm_set($on)
+{
+	$want = $on ? '1' : '0';
+
+	if (unl_ksm_state() === 'unsupported') {
+		error_log(date('M d H:i:s ') . 'ERROR: ' . UNL_KSM_RUN . ' does not exist; '
+			. 'this kernel has no KSM (CONFIG_KSM). Nothing to enable.');
+		return 13;
+	}
+
+	// No shell. What was here was `exec('echo 1 > /sys/...')`, which worked only
+	// because unl_wrapper is root, and which reported the *shell's* status.
+	if (@file_put_contents(UNL_KSM_RUN, $want) === false) {
+		error_log(date('M d H:i:s ') . 'ERROR: cannot write ' . UNL_KSM_RUN);
+		return 13;
+	}
+
+	// Read it back. sysfs store handlers reject out-of-range values by returning
+	// -EINVAL from write(2), and a short write is not an exception here, so the
+	// only trustworthy confirmation is the value the kernel now reports.
+	$got = trim((string) @file_get_contents(UNL_KSM_RUN));
+	if ($got !== $want) {
+		error_log(date('M d H:i:s ') . 'ERROR: ' . UNL_KSM_RUN . ' reads ' . var_export($got, true)
+			. ' after writing ' . $want);
+		return 13;
+	}
+
+	return 0;
+}
+
+/**
  * Function to create a bridge
  *
  * @param   string  $s                  Bridge name

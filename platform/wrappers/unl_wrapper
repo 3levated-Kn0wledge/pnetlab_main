@@ -944,69 +944,36 @@ switch ($action) {
 			exit(13);
 		}
 		break;
+	// Memory deduplication. FOUR verbs, ONE control.
+	//
+	// uksmon/uksmoff wrote /sys/kernel/mm/uksm/run, which is the out-of-tree
+	// UKSM patch's interface. UKSM came from the appliance's custom 4.15 kernel
+	// (CONFIG_UKSM=y, CONFIG_KSM_LEGACY=n — one of the four deliberate options
+	// in docs/FINDINGS-KERNEL.md's config diff). That kernel is gone: the fork
+	// ships stock Ubuntu, /sys/kernel/mm/uksm/ does not exist on 6.8, and these
+	// two verbs could only ever fail. They are kept as ALIASES rather than
+	// deleted because the shipped React bundle still POSTs admin/status/
+	// apiSetUksm and the legacy /api path still routes to it; a verb that is
+	// gone is a 500, a verb that does the right thing is a fix. The status page
+	// will lose its second row when the frontend is next built — see
+	// docs/PLATFORM-SUPPORT.md.
+	//
+	// The two `echo N > /opt/unetlab/{u,}ksm` writes that used to follow each
+	// sysfs write are gone. Nothing in the tree ever read either file, nothing
+	// restores KSM at boot from them, and their failure aborted the action with
+	// exit 13 *after* the sysfs write had already succeeded — so the wrapper
+	// reported failure for a change it had made. The setting is runtime-only
+	// and always was; docs/PLATFORM-SUPPORT.md says so and gives the sysfs.d
+	// line for an operator who wants it to survive a reboot.
 	case 'uksmoff':
-		$cmd = 'echo 0 > /sys/kernel/mm/uksm/run';
-		exec($cmd, $o, $rc);
-		if ($rc !== 0) {
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][13]);
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . implode("\n", $o));
-			exit(13);
-		}
-		$cmd = 'echo 0 > /opt/unetlab/uksm';
-		exec($cmd, $o, $rc);
-		if ($rc !== 0) {
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][13]);
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . implode("\n", $o));
-			exit(13);
-		}
+	case 'ksmoff':
+		$rc = unl_ksm_set(false);
+		if ($rc !== 0) exit($rc);
 		break;
 	case 'uksmon':
-		$cmd = 'echo 1 > /sys/kernel/mm/uksm/run';
-		exec($cmd, $o, $rc);
-		if ($rc !== 0) {
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][13]);
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . implode("\n", $o));
-			exit(13);
-		}
-		$cmd = 'echo 1 > /opt/unetlab/uksm';
-		exec($cmd, $o, $rc);
-		if ($rc !== 0) {
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][13]);
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . implode("\n", $o));
-			exit(13);
-		}
-		break;
-	case 'ksmoff':
-		$cmd = 'echo 0 > /sys/kernel/mm/ksm/run';
-		exec($cmd, $o, $rc);
-		if ($rc !== 0) {
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][13]);
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . implode("\n", $o));
-			exit(13);
-		}
-		$cmd = 'echo 0 > /opt/unetlab/ksm';
-		exec($cmd, $o, $rc);
-		if ($rc !== 0) {
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][13]);
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . implode("\n", $o));
-			exit(13);
-		}
-		break;
 	case 'ksmon':
-		$cmd = 'echo 1 > /sys/kernel/mm/ksm/run';
-		exec($cmd, $o, $rc);
-		if ($rc !== 0) {
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][13]);
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . implode("\n", $o));
-			exit(13);
-		}
-		$cmd = 'echo 1 > /opt/unetlab/ksm';
-		exec($cmd, $o, $rc);
-		if ($rc !== 0) {
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][13]);
-			error_log(date('M d H:i:s ') . date('M d H:i:s ') . implode("\n", $o));
-			exit(13);
-		}
+		$rc = unl_ksm_set(true);
+		if ($rc !== 0) exit($rc);
 		break;
 }
 exit(0);
