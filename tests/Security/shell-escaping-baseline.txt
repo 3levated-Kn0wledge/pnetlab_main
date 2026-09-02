@@ -145,30 +145,48 @@ devices/qemu/device_qemu_wp.php $this->delay
 
 # --- 7. Legacy API filesystem commands ---
 #
-# api_folders.php:102  exec('rm -rf "' . BASE_LAB . $path . '" 2>&1')  and :160
-# the mv of $s to $d — folder paths taken off the request. Double quotes do not
-# stop $( ) or a backtick. These are the folder create/rename/delete routes the
-# functional suite does not cover either.
+# ALL GONE. api_folders.php ran
+#     exec('rm -rf "' . BASE_LAB . $path . '" 2>&1')
+# and the mv of $s to $d on folder paths taken straight off the request; double
+# quotes do not stop $( ) or a backtick. api_labs.php's $user['pod'] was the
+# `rm -rf /tmp/import_<pod>` on the import route. All four are proc_open() with
+# an argv array now, with `--` terminating option parsing; there is no shell
+# left. The unzip beside the last one went the same way, which also fixed a
+# latent bug: its `*.unl` member pattern was unquoted, so the SHELL globbed it
+# against the current directory and it reached unzip intact only because no .unl
+# file was ever there.
+#
+# What these were NOT is worth recording, because the obvious reading is wrong.
+# They look like sites held up only by secureCmd()'s blocklist. They were not:
+# checkFolder() in devices/functions.php is an allowlist over the whole path,
+# applied before the exec, and stricter than anything in api_folders.php.
+# Measured against the parent commit on the reference host: a folder named
+# `x$(touch pnet_rce_proof)y` CAN be created, because apiAddFolder() validated
+# nothing at all, and deleting it is then refused by checkFolder() with 60009
+# and nothing runs. The half that was genuinely open was apiAddFolder(), which
+# is validated now too — so the three routes agree about what a folder name is,
+# which they never did before.
+#
 # The $pid / $o[0] entries were values read back from a previous exec's output
-# and fed to kill(1) without a cast. All three are GONE: they were the IOL
+# and fed to kill(1) without a cast. All three went earlier: they were the IOL
 # keepalive teardown, which ran `ps -aux | grep keepalive | ... | cut -d " " -f 2`
 # and passed each field to `sudo kill -9`. unl_wrapper -a iol-keepalive --state
 # down resolves those pids itself, from /proc, by the tenant uid that owns them,
 # so there is no shell left to escape into.
-includes/api_folders.php $path
-includes/api_folders.php $s
-includes/api_folders.php $d
-includes/api_labs.php $user['pod']
 
 # --- 8. secureCmd() returns its input unescaped ---
 #
-# includes/functions.php `return $cmd;`. Several call sites treat secureCmd() as
-# the escape step; it is a blocklist of [#;|&] and '..' and lets through
-# backticks, $( ), newline, > and spaces. tests/Security/SecureCmdTest.php pins
-# exactly what it does and does not stop. Any call site reached through it —
-# including Admin/DefaultController.php's `sudo chown` on a template name —
-# is represented by this one entry.
-includes/functions.php $cmd
+# includes/functions.php `return $v;`, reported on the parameter it came from.
+# This entry used to read `$cmd` and now reads `$value`; that is a RENAME, not a
+# new violation — the parameter was renamed when the function became an
+# allowlist, and identity in this file is path plus symbol.
+#
+# It is still correct that it is here. secureCmd() is no longer a blocklist of
+# [#;|&] and '..' — it is three named allowlist shapes, and
+# tests/Security/SecureCmdTest.php pins what each one permits — but validating a
+# value is not escaping it, and the function still hands its argument back
+# unchanged. Any call site reached through it is represented by this one entry.
+includes/functions.php $value
 
 # --- 9. The Laravel half, which the original sweep never reached at all ---
 #
@@ -200,8 +218,21 @@ includes/functions.php $cmd
 # root at the next apt run. It is now `unl_wrapper -a set-proxy`: four separately
 # validated options, the password on stdin, and a file the action writes itself
 # with no shell anywhere on the path.
-store/app/Helpers/Admin/SystemHelper.php $path
-store/app/Helpers/Admin/SystemHelper.php $nodeSession->{}
+# SystemHelper's TWO are the last to go. FolderSize() ran
+# `/usr/bin/du -sb <workspace>` and getNodeDisk() ran a `docker ... inspect`
+# with the session id interpolated into a double-quoted shell string. Access to
+# the docker socket is root-equivalent by design, so an id that could become a
+# second command was worth exactly what a sudo was. Both are argv arrays now,
+# which empties this group.
+#
+# Not listed here but retired in the same pass: Admin/LabsController::getDepends()
+# ran `sudo qemu-img info --backing-chain <path> | grep image` with the path
+# unescaped, where the path came from the `image` attribute of an uploaded lab's
+# XML and a scandir() filename. It never appeared under its own name because the
+# sweep resolved it through secureCmd() and reported it as entry 8. It is the one
+# call site in the tree that WAS held up only by that blocklist. It is an argv
+# array now, and without the sudo — reading a qcow2 header needs no privilege,
+# which retired the /usr/bin/qemu-img grant from install/sudoers.d/pnetlab.
 
 # --- 10. Manual root-only probes, not shipped code ---
 #

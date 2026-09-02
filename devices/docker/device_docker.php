@@ -142,7 +142,7 @@ class device_docker extends device
          */
         $cmd = 'docker -H=unix:///var/run/docker.sock inspect --format="{{ .State.Running }}" ' . escapeshellarg('docker' . $this->getSession());
  	    error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
-        secureCmd($cmd);
+        secureCmd($cmd, SECURE_LINE);
         exec($cmd, $o, $rc);
 	    error_log($rc);
         if ($rc != 0) {

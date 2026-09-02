@@ -201,11 +201,17 @@ www-data ALL=(root) NOPASSWD: /usr/bin/rm                # arbitrary deletion
 # type word from a closed set and a slug — never a path. link had no live call
 # site at all: devices/qemu/device_qemu.php assigned the command to $cmd and
 # never executed it.
-www-data ALL=(root) NOPASSWD: /usr/bin/qemu-img          # reads/writes any path
-# qemu-img is down to ONE caller, Admin/LabsController::…'s dependency listing
-# (`sudo qemu-img info --backing-chain`), which is a read that needs no
-# privilege at all. That file belongs to the CSRF work in flight; when its sudo
-# goes, this line goes with it and SudoersPolicyTest will say so.
+# qemu-img is GONE. It had one caller left, the dependency listing in
+# Admin/LabsController::getDepends(), and the note that used to stand here
+# predicted this: `qemu-img info --backing-chain` is a read that needs no
+# privilege at all. Measured on the reference host — as www-data, against
+# /opt/unetlab/addons/qemu — it returns the full chain with exit 0 and no sudo.
+#
+# The call site was also the worst-shaped one left in the tree: it interpolated
+# an unescaped path into a shell string, and that path came from the `image`
+# attribute of an uploaded lab's XML. It is now proc_open() with an argv array,
+# so there is no shell and no sudo. The grant could read or WRITE any file on
+# the host as root, which is more than a listing ever needed.
 # useradd is gone. It had exactly one caller, checkUsername() in
 # includes/cli.php:
 #     sudo /usr/sbin/useradd -c "Unified Networking Lab TID=N" -d /opt/unetlab/users/N

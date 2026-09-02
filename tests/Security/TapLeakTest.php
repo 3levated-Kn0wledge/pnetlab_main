@@ -118,10 +118,17 @@ assert_true(strpos($start, 'catch (Exception') !== false,
 
 // The type check has to precede secureCmd(). device_qemu::command() returns
 // array(False, False) when it cannot resolve the architecture or the binary,
-// and secureCmd() calls preg_match() on it -- a TypeError on PHP 8, which took
-// the whole request down before any of the above could run.
-assert_true(strpos($start, 'is_string($cmd)') < strpos($start, 'secureCmd($cmd)'),
-    'command() is type-checked before secureCmd() can fatal on an array');
+// and secureCmd() used to call preg_match() on it -- a TypeError on PHP 8,
+// which took the whole request down before any of the above could run.
+//
+// secureCmd() now refuses a non-string by name and throws an Exception, so the
+// catch above would hold even on its own. The ordering still matters and is
+// still asserted: it is what turns an unresolvable template into error 80046
+// with a log line rather than into an escaping failure with a useless message.
+// The literal being searched for carries the shape argument, so this assertion
+// also fails if the call ever loses it -- see tests/Security/SecureCmdTest.php.
+assert_true(strpos($start, 'is_string($cmd)') < strpos($start, 'secureCmd($cmd, SECURE_LINE)'),
+    'command() is type-checked before secureCmd() sees it');
 
 // ------------------------------------------ and stop releases them regardless
 

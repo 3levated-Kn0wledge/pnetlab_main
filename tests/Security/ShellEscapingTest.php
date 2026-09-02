@@ -620,7 +620,14 @@ foreach (file($baselineFile, FILE_IGNORE_NEW_LINES) as $l) {
 // took the whole QEMU commit flow out of Node_sessionsController, 73 once
 // `-a set-proxy` took the four proxy fields out of Query::setProxy() — which was
 // the only entry in this file that was a root RCE rather than a route to one.
-const SWEEP_BASELINE_MAX = 73;
+//
+// 67 once secureCmd() became an allowlist and the call sites it was standing in
+// for were traced: the two Laravel SystemHelper sites, the folder create/rename/
+// delete routes and the lab-import route are argv arrays now, and the sudo came
+// off Admin/LabsController's qemu-img with the grant. One entry was RENAMED
+// rather than retired — `includes/functions.php $cmd` is now `$value`, because
+// secureCmd()'s parameter was renamed and identity here is path plus symbol.
+const SWEEP_BASELINE_MAX = 67;
 assert_true(count($baseline) <= SWEEP_BASELINE_MAX,
     sprintf('the known-unfixed baseline has not grown (%d of %d)', count($baseline), SWEEP_BASELINE_MAX));
 

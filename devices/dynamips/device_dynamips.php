@@ -171,7 +171,7 @@ class device_dynamips extends device
             return 80066;
         }
         $cmd = '/opt/unetlab/scripts/wrconf_dyn.py -p ' . escapeshellarg($this->getPort()) . ' -t 30';
-        secureCmd($cmd);
+        secureCmd($cmd, SECURE_LINE);
         exec($cmd, $o, $rc);
         error_log(date('M d H:i:s ') . 'INFO: force write configuration ' . $cmd);
         if ($rc != 0) {

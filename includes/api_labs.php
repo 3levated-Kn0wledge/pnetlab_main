@@ -221,7 +221,7 @@ function apiExportLabs($p)
 		if (is_file(BASE_LAB . $p['path'] . $relement)) {
 			// Adding a file
 			$cmd = 'zip ' . escapeshellarg($export_file) . ' ' . escapeshellarg('.' . $relement);
-			secureCmd($cmd);
+			secureCmd($cmd, SECURE_LINE);
 			exec($cmd, $o, $rc);
 			if ($rc != 0) {
 				$output['code'] = 400;
@@ -234,7 +234,7 @@ function apiExportLabs($p)
 		if (checkFolder(BASE_LAB . $p['path'] . $relement) === 0) {
 			// Adding a dir
 			$cmd = 'zip -r ' . escapeshellarg($export_file) . ' ' . escapeshellarg('.' . $relement);
-			secureCmd($cmd);
+			secureCmd($cmd, SECURE_LINE);
 			exec($cmd, $o, $rc);
 			if ($rc != 0) {
 				$output['code'] = 400;
@@ -247,7 +247,7 @@ function apiExportLabs($p)
 
 	// Now remove UUID from labs
 	$cmd = BASE_DIR . '/scripts/remove_uuid.sh ' . escapeshellarg($export_file);
-	secureCmd($cmd);
+	secureCmd($cmd, SECURE_LINE);
 	exec($cmd, $o, $rc);
 	if ($rc != 0) {
 		if (is_file($export_file)) {
@@ -389,13 +389,21 @@ function apiImportLabs($p)
 	if (strpos($finfo->file($p['file']), 'application/zip') !== False) {
 		// UNetLab export
 		$tmpFolder = '/tmp/import_' . $user['pod'];
-		exec('rm -rf ' . $tmpFolder);
+		// $user['pod'] was interpolated into a shell string with no escaping at
+		// all — the last entry group 7 of the escaping baseline had here. An
+		// argv array reaches no shell, so there is nothing to escape.
+		unl_exec_argv(array('rm', '-rf', '--', $tmpFolder));
 		$labFolder = BASE_LAB . $p['path'];
 
 		// $p['file'] is the uploaded filename, straight from the import request.
-		$cmd = 'unzip -o -d ' . escapeshellarg($tmpFolder) . ' ' . escapeshellarg($p['file']) . ' *.unl';
-		secureCmd($cmd);
-		exec($cmd, $o, $rc);
+		//
+		// This was escapeshellarg()'d into a shell string with `*.unl` left bare
+		// on the end. The glob was meant as unzip's member pattern and it only
+		// ever worked by accident: the SHELL expanded it first, against whatever
+		// the current directory happened to hold, and passed it through
+		// unchanged solely because no .unl file was ever there. An argv array
+		// hands unzip the literal pattern, which is what the line meant to say.
+		$rc = unl_exec_argv(array('unzip', '-o', '-d', $tmpFolder, $p['file'], '*.unl'), $o);
 		if ($rc != 0) {
 			$output['code'] = 400;
 			$output['status'] = 'fail';
