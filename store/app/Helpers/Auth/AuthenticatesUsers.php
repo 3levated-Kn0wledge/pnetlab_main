@@ -6,7 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Foundation\Auth\RedirectsUsers;
-use Illuminate\Foundation\Auth\ThrottlesLogins  ;
+use Illuminate\Foundation\Auth\ThrottlesLogins;
 use App\Helpers\Request\Reply;
 use Illuminate\Http\Response;
 use \Exception;
@@ -105,7 +105,7 @@ trait AuthenticatesUsers
         
         $request->session()->invalidate();
         
-        Cookie::queue(Cookie::make('token', null, -3600, '/', APP_DOMAIN));
+        AuthCookie::forget();
 
         Reply::finish(true,'Success', '');
     }

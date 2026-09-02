@@ -1,10 +1,42 @@
 <?php
 
+/**
+ * The lab-path allowlists, and the two characters that were wrong in all four.
+ *
+ * checkFolder(), checkLabFilename(), checkLabName() and checkLabPath() are the
+ * oldest validation in this tree and, it turns out, the most load-bearing:
+ * checkFolder() runs on every folder create, rename and delete before
+ * api_folders.php touches the filesystem, and it is stricter than anything in
+ * that file. When those routes still built `rm -rf "<path>"` and handed it to a
+ * shell, THIS is what stopped a folder path of `x$(id)y` — not secureCmd(),
+ * which is what the comments there implied. Measured against the parent commit
+ * on the reference host: the payload folder can be created and the delete is
+ * refused here with 60009, nothing executed.
+ *
+ * Two things were wrong with all four, and both are the same kind of mistake —
+ * a character class that is wider than the author meant:
+ *
+ *   \s is not "a space". It is [ \t\n\r\f\v], so a lab or folder name
+ *   containing a NEWLINE passed every one of these. A newline is a command
+ *   separator, and it is also what turns one line into two for anything that
+ *   reads this tree's paths line by line. A literal space is what was meant and
+ *   is what is written now.
+ *
+ *   $ is not "end of string". Without /D, PCRE's $ also matches immediately
+ *   before a trailing newline, so "MyLab\n" satisfied checkLabName(). \z is
+ *   the anchor that means what these functions need. The identical trap is
+ *   recorded on unl_valid_ifname() in includes/cli.php and in
+ *   platform/wrappers/actions/ — this is the third place it has been found.
+ *
+ * Nothing legitimate is lost: a lab or folder name with a tab or a newline in it
+ * could not be created through the UI, and the space that people do use is still
+ * permitted.
+ */
 function checkFolder($s)
 {
-	if (preg_match('/^\/[\/A-Za-z0-9_\\s-]*$/', $s) && is_dir($s)) {
+	if (preg_match('/^\/[\/A-Za-z0-9_ -]*\z/', $s) && is_dir($s)) {
 		return 0;
-	} else if (preg_match('/^\/[\/A-Za-z0-9_\\s-]*$/', $s)) {
+	} else if (preg_match('/^\/[\/A-Za-z0-9_ -]*\z/', $s)) {
 		return 1;
 	} else {
 		return 2;
@@ -34,7 +66,7 @@ function checkInterfcType($s)
  */
 function checkLabFilename($s)
 {
-	if (preg_match('/^[A-Za-z0-9_\\s-]+\.unl$/', $s)) {
+	if (preg_match('/^[A-Za-z0-9_ -]+\.unl\z/', $s)) {
 		return True;
 	} else {
 		return False;
@@ -49,7 +81,7 @@ function checkLabFilename($s)
  */
 function checkLabName($s)
 {
-	if (preg_match('/^[A-Za-z0-9_\\s-]+$/', $s)) {
+	if (preg_match('/^[A-Za-z0-9_ -]+\z/', $s)) {
 		return True;
 	} else {
 		return False;
@@ -64,7 +96,7 @@ function checkLabName($s)
  */
 function checkLabPath($s)
 {
-	if (preg_match('/^\/[\/A-Za-z0-9_\\s-]*$/', $s)) {
+	if (preg_match('/^\/[\/A-Za-z0-9_ -]*\z/', $s)) {
 		return True;
 	} else {
 		return False;
@@ -323,7 +355,7 @@ function listNodeImages($t, $p)
 			}
 			break;
 		case 'docker':
-			$cmd = 'docker -H=tcp://127.0.0.1:4243 images | sed \'s/^\([^[:space:]]\+\)[[:space:]]\+\([^[:space:]]\+\).\+/\1:\2/g\'';
+			$cmd = 'docker -H=unix:///var/run/docker.sock images | sed \'s/^\([^[:space:]]\+\)[[:space:]]\+\([^[:space:]]\+\).\+/\1:\2/g\'';
 			exec($cmd, $o, $rc);
 			if (!empty($o) && sizeof($o) > 1) {
 				unset($o[0]);	// Removing header

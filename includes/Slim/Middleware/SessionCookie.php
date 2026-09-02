@@ -72,9 +72,24 @@ class SessionCookie extends \Slim\Middleware
             'expires' => '20 minutes',
             'path' => '/',
             'domain' => null,
-            'secure' => false,
-            'httponly' => false,
+            // Only mark the cookie Secure when the request actually arrived over
+            // TLS. The appliance is reachable on plain HTTP as well, and a
+            // hardcoded true would make the browser withhold the cookie there,
+            // silently breaking every session on the HTTP listener.
+            'secure' => self::isRequestSecure(),
+            // No script has any reason to read the session cookie, so keep it
+            // out of document.cookie and away from XSS. Unconditional: HttpOnly
+            // costs nothing on either listener.
+            'httponly' => true,
             'name' => 'slim_session',
+            // No SameSite. This is Slim 2.6.1 (see \Slim\Slim::VERSION), whose
+            // cookie writer -- \Slim\Http\Util::setCookieHeader() -- only
+            // understands domain, path, expires, secure and httponly, and whose
+            // \Slim\Slim::setCookie() has no parameter to carry anything else.
+            // A 'samesite' key here would be silently dropped on the floor and
+            // read as protection that is not actually being applied. Adding it
+            // for real means editing Util.php and Slim.php, which is out of
+            // scope here; see the report.
         );
         $this->settings = array_merge($defaults, $settings);
         if (is_string($this->settings['expires'])) {
@@ -99,6 +114,40 @@ class SessionCookie extends \Slim\Middleware
             array($this, 'destroy'),
             array($this, 'gc')
         );
+    }
+
+    /**
+     * Is the current request being served over TLS?
+     *
+     * The equivalent of Laravel's request()->isSecure(), which is what
+     * store/app/Http/Controllers/Auth/LoginController.php uses for the same
+     * decision. Slim 2 has no such helper, so read the server environment
+     * directly: $_SERVER['HTTPS'] for a direct TLS connection, plus the port and
+     * the forwarding headers a reverse proxy sets when it terminates TLS itself.
+     *
+     * Fails closed to false, which yields a cookie without Secure -- usable over
+     * both schemes. Guessing true on a plain-HTTP appliance would lock users out.
+     *
+     * @return bool
+     */
+    protected static function isRequestSecure()
+    {
+        if (!empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off') {
+            return true;
+        }
+        if (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443) {
+            return true;
+        }
+        if (isset($_SERVER['HTTP_X_FORWARDED_PROTO'])
+            && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') {
+            return true;
+        }
+        if (isset($_SERVER['HTTP_X_FORWARDED_SSL'])
+            && strtolower($_SERVER['HTTP_X_FORWARDED_SSL']) === 'on') {
+            return true;
+        }
+
+        return false;
     }
 
     /**

@@ -8,9 +8,11 @@ use App\Helpers\Box\License;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Helpers\Request\Reply;
+use App\Helpers\System\Wrapper;
 use Illuminate\Support\Facades\Auth;
 use App\Helpers\View\JS;
 use Illuminate\Support\Facades\Cookie;
+use App\Helpers\Auth\AuthCookie;
 use App\Helpers\Control\Ctrl;
 use App\Helpers\DB\Models;
 use Illuminate\Support\Facades\Response;
@@ -75,7 +77,7 @@ class DefaultController extends Controller
     function refreshToken()
     {
         $cookie = Cookie::get('token', '');
-        Cookie::queue(Cookie::make('token', $cookie, 60, '/', $_SERVER['SERVER_NAME']));
+        AuthCookie::issue($cookie, 60);
         Models::get('Admin/Users')->edit([
             DATA_KEY => [[[USER_USERNAME, '=', Auth::user()->{USER_USERNAME}]]],
             DATA_EDITOR => [USER_ONLINE_TIME => time(), USER_SESSION => time() + SESSION],
@@ -195,62 +197,122 @@ class DefaultController extends Controller
 
     public function updateGuacToken()
     {
-        \updateUserToken(Auth::user()->{USER_USERNAME}, Auth::user()->{USER_PASSWORD}, Auth::user()->{USER_POD});
+        \updateUserToken(Auth::user()->{USER_USERNAME}, \unl_guacamole_secret(Auth::user()->{USER_USERNAME}), Auth::user()->{USER_POD});
         Reply::finish(true, 'success', '');
     }
 
 
 
+    /*
+     * Compute a dynamips idle-PC value for one template and one image.
+     *
+     * WHAT THIS USED TO DO, AND WHY IT IS WORTH SPELLING OUT
+     *
+     * It ran, under sudo:
+     *
+     *     sudo /opt/unetlab/html/store/app/Console/Commands/idlepc
+     *          --option=<the template's dynamips_options> -f <image path>
+     *
+     * `idlepc` was a 9.4 MB stripped PyInstaller bundle committed to this
+     * repository with no source, no build recipe and no licence. Its archive
+     * was unpacked and the entry script read. Before it computed anything it
+     * ran:
+     *
+     *     ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa_dy
+     *     cat /root/.ssh/id_rsa_dy.pub >> /root/.ssh/authorized_keys
+     *
+     * and then paramiko-connected to root@127.0.0.1 with that key. So pressing
+     * this button left a standing passwordless root SSH key on the appliance —
+     * the same key this fork had already deleted from docker_wrapper by giving
+     * it a PTY instead of a loopback SSH hop.
+     *
+     * It did all of that for a terminal. The computation is dynamips' own, and
+     * the blob ran dynamips with no -T, which puts the console on stdin. With
+     * `-T <port>` the same Ctrl-] monitor console is reachable over a plain TCP
+     * socket, so the replacement needs no terminal, no SSH and no key.
+     *
+     * WHAT CROSSES NOW: two names. The option string does not. This method used
+     * to read `dynamips_options` out of the template and hand it over sudo;
+     * template option strings are argument injection by design (item 4 of
+     * docs/HANDOVER.md), and on this path the far side is root. The wrapper
+     * action reads the option string from the template file itself and accepts
+     * an allowlist of options, so an operator who can edit a template can no
+     * longer choose a root process's argv through this button.
+     *
+     * NOT PROVEN AGAINST AN IMAGE. The calibration needs a real Cisco IOS image
+     * for dynamips and this project deliberately carries none — the same
+     * position as iol_wrapper. Everything up to that point is covered by
+     * tests/Security/IdlePcTest.php; the console conversation is derived from
+     * dynamips' own source and has not been run against an image.
+     * docs/LICENSING.md section 3 says the same thing at greater length.
+     */
     public function idlepc(Request $req){
         if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        set_time_limit(180);
+        // The wrapper bounds itself — a connect timeout, a boot timeout and a
+        // calibration timeout — and this has to outlast the sum of them, or PHP
+        // kills the request while dynamips is still running. The action's own
+        // shutdown guard reaps it in that case; this is here so the ordinary
+        // path does not depend on the guard.
+        set_time_limit(300);
 
+        $ios = $req->input('ios', '');
+        $template = $req->input('template', '');
 
-        $ios = secureCmd($req->input('ios', ''));
-        $template = secureCmd($req->input('template', ''));
-
-        if($ios == '' || $template == ''){
+        if(!is_string($ios) || !is_string($template) || $ios === '' || $template === ''){
             Reply::finish(false, 'Data is empty');
         }
 
-        $dynamipFolder = '/opt/unetlab/addons/dynamips';
-        $tempFolder = '/opt/unetlab/html/templates';
+        // No secureCmd(). There is no shell on this path any more, and
+        // secureCmd() is a blocklist that passes backticks, $( ), spaces and
+        // quotes — it was never what made this safe, and leaving it here would
+        // imply it was. Wrapper::idlepc() checks both names against an anchored
+        // allowlist pattern and UnlIdlePc checks them again, as root.
+        $result = Wrapper::idlepc($template, $ios);
+        if(empty($result['ok']) || !isset($result['idlepc']) || $result['idlepc'] === null){
+            Reply::finish(false, 'Can not get Idle-PC: {data}',
+                ['data' => isset($result['error']) && $result['error'] !== null
+                    ? $result['error'] : 'the wrapper returned no value']);
+        }
+        $idlepc = $result['idlepc'];
 
-        $file = $tempFolder . '/'. $template.'.yml';
+        // Built from the name the PRIVILEGED side accepted and echoed back,
+        // never from the request field. If those two could disagree, the
+        // wrapper's is the one that decided which template dynamips was
+        // configured from, so it is the one this write has to follow.
+        $tempFolder = '/opt/unetlab/html/templates';
+        $file = $tempFolder . '/' . $result['template'] . '.yml';
         if(!is_file($file)){
             Reply::finish(false, '{data} not found', ['data' => $file]);
         }
         $content = file_get_contents($file);
         $p = yaml_parse_file($file);
 
-        $option = secureCmd(get($p['dynamips_options'], ''));
-
-        $cmd = 'sudo /opt/unetlab/html/store/app/Console/Commands/idlepc --option="'.$option.'" -f ' . $dynamipFolder. '/'. $ios;
-       
-        exec($cmd, $o, $r);
-
-        if($r != 0){
-            Reply::finish(false, 'Can not get Idle-PC');
-        }
-        $idlepc = '';
-        foreach($o as $output){
-            if(preg_match('/idle-pc=(\w+)/', $output, $matches)){
-                $idlepc = $matches[1];
-            }
-        }
-        if($idlepc == ''){
-            Reply::finish(false, 'Can not get Idle-PC');
-        }
-
-        
         if(!isset($p['idlepc'])){
             $content = preg_replace('/^name\s?:\s?(.+)$/m', 'name: $1\nidlepc: "'.$idlepc.'"', $content);
         }else{
             $content = preg_replace('/^idlepc\s?:\s?(.+)$/m', 'idlepc: "'.$idlepc.'"', $content);
         }
 
-        exec('sudo chown www-data:www-data '. $file);
-    
+        // This chown looks like cargo — the very next line writes the file — and
+        // it is not. $file is /opt/unetlab/html/templates/<template>.yml, and on
+        // a deployed box that tree is root:root 0644; checked on the reference
+        // install rather than assumed. Without the chown, file_put_contents()
+        // runs as www-data and silently writes nothing, which is why it was
+        // there.
+        //
+        // What was wrong was its shape: `sudo chown www-data:www-data ` . $file
+        // where $file is built from $req->input('template') by way of
+        // secureCmd(), a blocklist that passes backticks, $( ), spaces and
+        // quotes — the call site group 8 of the shell-escaping baseline names
+        // by hand. The templates tree is one of the wrapper's scopes, so the
+        // repair is now a scope word and the path stays on the far side of the
+        // boundary.
+        Wrapper::fixperms('templates');
+        clearstatcache(true, $file);
+
+        if (!is_writable($file)) {
+            Reply::finish(false, 'Cannot write {data}', ['data' => basename($file)]);
+        }
         file_put_contents($file, $content);
 
         Reply::finish(true, 'idlepc_success_alert', ['idlepc'=>$idlepc, 'file' => basename($file)]);

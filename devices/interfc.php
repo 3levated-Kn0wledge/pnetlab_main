@@ -1,11 +1,28 @@
 <?php
 
 /**
- * 
- * @author LIN 
+ * devices/interfc.php
+ *
+ * Class for node interfaces.
+ *
+ * Derived from UNetLab html/includes/__interfc.php. This file is the one case
+ * in the tree where the upstream BSD-3-Clause notice was not merely dropped
+ * but REPLACED by a different attribution: the pnetlab.com block below stood
+ * alone here, over Andrea Dainese's code. Both are recorded now, in the order
+ * they arose. See docs/LICENSING.md section 2.2.
+ *
+ * @author Andrea Dainese <andrea.dainese@gmail.com>
+ * @copyright 2014-2016 Andrea Dainese
+ * @license BSD-3-Clause https://github.com/dainok/unetlab/blob/master/LICENSE
+ * @link http://www.unetlab.com/
+ *
+ * @author LIN
  * @copyright pnetlab.com
  * @link https://www.pnetlab.com/
- * 
+ *
+ * Substantially modified by PNETLab and by the pnetlab_main fork. Those
+ * modifications are licensed under the terms in this repository's LICENSE;
+ * the notice above must be retained regardless.
  */
 
 class Interfc
@@ -409,22 +426,22 @@ class Interfc
 		$p = $this->getQuality();
 		$delay = '';
 		if (isset($p['delay']) && $p['delay'] != '') {
-			$delay = ' delay ' . $p['delay'] . 'ms';
-			if (isset($p['jitter']) && $p['jitter'] != '') $delay .= ' ' . $p['jitter'] . 'ms';
+			$delay = ' delay ' . escapeshellarg((int) $p['delay'] . 'ms');
+			if (isset($p['jitter']) && $p['jitter'] != '') $delay .= ' ' . escapeshellarg((int) $p['jitter'] . 'ms');
 		}
 
 		$loss = '';
-		if (isset($p['loss']) && $p['loss'] != '') $loss = ' loss ' . $p['loss'] . '%';
+		if (isset($p['loss']) && $p['loss'] != '') $loss = ' loss ' . escapeshellarg((float) $p['loss'] . '%');
 
 		$bandwidth = '';
-		if (isset($p['bandwidth']) && $p['bandwidth'] != '') $bandwidth = ' rate ' . $p['bandwidth'] . 'Kbit';
+		if (isset($p['bandwidth']) && $p['bandwidth'] != '') $bandwidth = ' rate ' . escapeshellarg((int) $p['bandwidth'] . 'Kbit');
 
 		if ($delay == '' && $loss == '' && $bandwidth == '') {
 			$this->unApplyQuality();
 			return 0;
 		}
 
-		$cmd = secureCmd('sudo tc qdisc replace dev ' . $vunl . ' root netem' . $bandwidth . $delay . $loss) . ' 2>&1';
+		$cmd = 'sudo tc qdisc replace dev ' . escapeshellarg($vunl) . ' root netem' . $bandwidth . $delay . $loss . ' 2>&1';
 		error_log(date('M d H:i:s ') . $cmd);
 		
 		exec($cmd, $o, $rc);
@@ -447,8 +464,8 @@ class Interfc
 	{
 		if ($this->type == 'serial') return 0;
 		$vunl = 'vunl' . $this->if_session[IF_SESSION_NODE] . '_' . $this->id;
-		$cmd = 'sudo tc qdisc del dev ' . $vunl . ' root';
-		secureCmd($cmd);
+		$cmd = 'sudo tc qdisc del dev ' . escapeshellarg($vunl) . ' root';
+		secureCmd($cmd, SECURE_LINE);
 		exec($cmd, $o, $rc);
 		if ($rc != 0) {
 			// Failed to set delay and jitter on interface
@@ -605,12 +622,13 @@ class Interfc
 		if ($this->device->getNType() == 'qemu' && $this->device->getStatus() > 0) {
 			$vunl = $this->getSysName();
 			$monSocket = $this->device->getRunningPath() . '/monitor.sock';
-			$cmd = "echo 'info network' | sudo nc -U " . $monSocket . " -q 0 | grep " . $vunl . " | sed 's/.*\(net[0-9]\+\)\:.*/\\1/g'";
+			$cmd = "echo 'info network' | sudo nc -U " . escapeshellarg($monSocket) . " -q 0 | grep " . escapeshellarg($vunl) . " | sed 's/.*\(net[0-9]\+\)\:.*/\\1/g'";
 			error_log(date('M d H:i:s ') . $cmd);
 			exec($cmd, $netIndex, $rc);
 			if (isset($netIndex[0])) {
 
-				$cmd = "echo 'set_link " . $netIndex[0] . " " . ($status == 'up' ? 'on' : 'off') . "' | sudo nc -U " . $monSocket . " -q 0";
+				$cmd = 'echo ' . escapeshellarg('set_link ' . $netIndex[0] . ' ' . ($status == 'up' ? 'on' : 'off'))
+				. ' | sudo nc -U ' . escapeshellarg($monSocket) . ' -q 0';
 				error_log(date('M d H:i:s ') . $cmd);
 				exec($cmd, $netIndex, $rc);
 			}
@@ -626,25 +644,38 @@ class Interfc
 
 			// if ($ifIndex === null) return;
 
-			$cmd = 'id -u ' . 'unl' . $this->device->getSession() . ' 2>&1';
-			exec($cmd, $o, $rc);
-			$uid = $o[0];
-
-			$cmd = "sudo perl " . $this->device->getRunningPath() . '/keepalive.pl' . " -i " . $this->device->getIolId() . " -p " . $this->getId() . ' -n ' . $this->device->getSession() . '_' . $this->getId() . ' > ' . $this->device->getRunningPath() . '/keepalive.log 2>&1 &';
+			// One enumerated wrapper action, two integers and a two-value enum.
+			//
+			// What used to be here was the worst gadget in the tree. It read the
+			// tenant uid out of `id -u`, built a shell string containing
+			// `sudo perl <runningPath>/keepalive.pl ...`, and passed that string
+			// as the third argument of
+			//     sudo php .../store/app/Console/Commands/wrapper 32768 <uid> '<string>'
+			// whose entire body was posix_setgid, posix_setuid and shell_exec of
+			// that argument. Any request that could change a link state could
+			// choose the string, and could choose to keep root by passing 0 as
+			// the uid. That script is deleted; nothing constructs a command line
+			// here any more.
+			//
+			// The down path is the same action. It used to be
+			// `ps -aux | grep keepalive | ... | cut -d " " -f 2` fed straight to
+			// `sudo kill -9 $pid`, which killed whatever the grep matched; the
+			// wrapper now resolves pids from /proc by the tenant uid and the
+			// script path instead.
+			$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a iol-keepalive'
+				. ' -S ' . (int) $this->device->getSession()
+				. ' -I ' . (int) $this->getId();
+			// Two literal branches rather than a ternary on $status. The
+			// tokenizer sweep judges each interpolation on its own and cannot
+			// see that a ternary yields one of two literals, so writing it the
+			// short way puts a new entry in the baseline for no reason.
 			if ($status == 'up') {
-				$wrapper = "sudo php /opt/unetlab/html/store/app/Console/Commands/wrapper 32768 " . $uid . " '" . $cmd . "'";
-				error_log(date('M d H:i:s ') . $wrapper);
-				exec($wrapper, $netIndex, $rc);
+				$cmd .= ' --state up';
 			} else {
-
-				$cmd = 'ps -aux | grep keepalive | grep ' . $this->device->getSession() . '_' . $this->getId() . ' | grep -v "ps -aux" | tr -s " "| cut -d " " -f 2';
-				$o = [];
-				exec($cmd, $o, $rc);
-				foreach ($o as $pid) {
-					exec('sudo kill -9 ' . $pid);
-					error_log('sudo kill -9 ' . $pid);
-				}
+				$cmd .= ' --state down';
 			}
+			error_log(date('M d H:i:s ') . $cmd);
+			exec($cmd, $o, $rc);
 
 			return;
 		}
@@ -652,9 +683,9 @@ class Interfc
 		if ($this->device->getNType() == 'docker' && $this->device->getStatus() > 0) {
 			$vunl = $this->getSysName();
 			if ($status == 'up') {
-				$cmd = 'sudo ip link set ' . $vunl . ' up';
+				$cmd = 'sudo ip link set ' . escapeshellarg($vunl) . ' up';
 			} else {
-				$cmd = 'sudo ip link set ' . $vunl . ' down';
+				$cmd = 'sudo ip link set ' . escapeshellarg($vunl) . ' down';
 			}
 			error_log(date('M d H:i:s ') . $cmd);
 			exec($cmd, $netIndex, $rc);

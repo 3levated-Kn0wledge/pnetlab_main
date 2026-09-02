@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * includes/__node.php
+ *
+ * Class for nodes.
+ *
+ * Derived from UNetLab html/includes/__node.php.
+ * Its BSD-3-Clause notice was absent from the copy this fork inherited
+ * and is restored below. See docs/LICENSING.md section 2.2.
+ *
+ * @author Andrea Dainese <andrea.dainese@gmail.com>
+ * @copyright 2014-2016 Andrea Dainese
+ * @license BSD-3-Clause https://github.com/dainok/unetlab/blob/master/LICENSE
+ * @link http://www.unetlab.com/
+ *
+ * Substantially modified by PNETLab and by the pnetlab_main fork. Those
+ * modifications are licensed under the terms in this repository's LICENSE;
+ * the notice above must be retained regardless.
+ */
+
 class Node
 {
 
@@ -578,10 +597,16 @@ class Node
 		$startConfigFile = $this->getRunningPath() . '/startup-config';
 		$configedFlag = $this->getRunningPath().'/.configured';
 
-		$result = exec('sudo rm -f '.$startConfigFile);
-		$result = exec('sudo rm -f '.$configedFlag);
-		$result = exec('sudo touch '. $startConfigFile);
-		$result = exec('sudo chown www-data:www-data '.$startConfigFile);
+		// No sudo, and no shell. These four lines used to be
+		//     sudo rm -f <f>; sudo rm -f <f>; sudo touch <f>; sudo chown www-data:www-data <f>
+		// with the paths concatenated in unquoted — four root-side file
+		// operations on a string this method built. None of them needed root:
+		// the files are inside the node workspace and are created and rewritten
+		// by this same process a few lines further down with file_put_contents().
+		// PHP's own calls take a path, not a command line.
+		@unlink($startConfigFile);
+		@unlink($configedFlag);
+		@touch($startConfigFile);
 
 		$activeConfig = $this->getActiveConfig();
 		if ($activeConfig == '') {

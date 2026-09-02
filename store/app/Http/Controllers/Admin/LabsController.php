@@ -60,11 +60,41 @@ class LabsController extends Controller
                         $imagePath = '/opt/unetlab/addons/qemu/'. $image;
                         if(is_dir($imagePath)){
                             foreach (array_diff(scandir($imagePath), ['.', '..']) as $filename){
-                                $file = secureCmd($imagePath.'/'.$filename);
+                                // SECURE_PATH, not the old bare secureCmd(): this is a
+                                // filesystem path, and the shape it needs is a path.
+                                $file = secureCmd($imagePath.'/'.$filename, SECURE_PATH);
                                 $depends[] = $file;
                                 if(preg_match('/^.+\.qcow2$/', $file)){
-                                    $o = [];
-                                    $result = exec('sudo qemu-img info --backing-chain '.$file.' | grep image', $o, $r);
+                                    // WHAT THIS USED TO BE, AND WHY IT MATTERED
+                                    //
+                                    //   exec('sudo qemu-img info --backing-chain '.$file.' | grep image', $o, $r)
+                                    //
+                                    // $file is unescaped, and $image reaching it is the
+                                    // `image` attribute of an uploaded lab's XML. The only
+                                    // filter was secureCmd(), whose blocklist did not
+                                    // contain a backtick, a dollar or a space — so this
+                                    // call site was correct only because of a function
+                                    // that did not do what its name said, and the command
+                                    // it fed was prefixed with sudo.
+                                    //
+                                    // Two things change. The argv array execs qemu-img
+                                    // directly: no shell, so `| grep` is gone too and the
+                                    // filtering happens here. And the sudo is gone,
+                                    // because reading a qcow2 header needs no privilege —
+                                    // measured on the reference host as www-data against
+                                    // /opt/unetlab/addons/qemu. install/sudoers.d/pnetlab
+                                    // predicted this was the grant's last caller; it was,
+                                    // and the grant goes with it.
+                                    $raw = [];
+                                    $r = $this->captureArgv(
+                                        ['qemu-img', 'info', '--backing-chain', '--', $file], $raw);
+                                    // `grep image` kept every line with "image" anywhere
+                                    // in it, and the loop below indexes off that. Filter
+                                    // the same way so the $key == 0 skip still means the
+                                    // image's own entry rather than a backing file.
+                                    $o = array_values(array_filter($raw, function ($l) {
+                                        return strpos($l, 'image') !== false;
+                                    }));
                                     foreach($o as $key => $item){
                                         if(preg_match('/^image\:\s+(.+)$/', $item, $match)){
                                             if($key == 0) continue;
@@ -87,6 +117,36 @@ class LabsController extends Controller
 
         Reply::finish(true, 'Success', $depends);
 
+    }
+
+    /**
+     * Run a program and split its output into lines, with no shell involved.
+     *
+     * proc_open() given an argv ARRAY execs the binary directly, so nothing in
+     * the arguments can be read as syntax and no escaping is needed. The
+     * parameter is typed `array` because that is the shape the tokenizer sweep
+     * in tests/Security/ShellEscapingTest.php can prove is not a shell — see
+     * its argv_param fixture. The same helper is
+     * Admin/SystemController::capture(); it is not shared because that one is
+     * private and returns a blob rather than lines.
+     *
+     * @param  array $argv    program then arguments
+     * @param  array $output  filled with stdout, one line per element
+     * @return int            exit status, or 127 if it could not be run
+     */
+    private function captureArgv(array $argv, array &$output)
+    {
+        $output = [];
+        $desc = [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']];
+        $pipes = [];
+        $proc = @proc_open($argv, $desc, $pipes);
+        if (!is_resource($proc)) return 127;
+        $out = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        $code = proc_close($proc);
+        $out = rtrim($out, "\n");
+        if ($out !== '') $output = explode("\n", $out);
+        return $code;
     }
 
    
@@ -142,6 +202,19 @@ class LabsController extends Controller
         if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
         $action = $request->input('action', '');
         if($action == '') Reply::finish(false, ERROR_UNDEFINE, ['data' => 'Action']);
+
+        // This is the one action on config/readonly_actions.php that is not
+        // read-only end to end, and the reason it is listed there at all is
+        // 'Read': the lab-image previews render
+        //     <img src="/store/public/admin/labs/uploader?action=Read&file=...">
+        // (components/input/InputImg.js:37, components/func/FuncUploadModal.js:207),
+        // and an <img> is a GET. Upload, Delete and History all change state on
+        // the store, so they are closed here with the same guard the rest of the
+        // application uses. Deleting these two lines reopens a GET-reachable
+        // mutation with the config file still looking correct, which is why
+        // tests/Security/CsrfTest.php asserts they are present.
+        if($action !== 'Read') Checker::method('post');
+
         switch ($action) {
     
             case 'Upload':{
@@ -258,7 +331,7 @@ class LabsController extends Controller
         $labs = \scanDirFiles(BASE_LAB.$workspace);
 
         $labs = array_map(function($item){
-            return str_replace_first(BASE_LAB, '', $item);
+            return \Illuminate\Support\Str::replaceFirst(BASE_LAB, '', $item);
         }, $labs);
 
         if($search != ''){

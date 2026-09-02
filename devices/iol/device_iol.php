@@ -104,7 +104,14 @@ class device_iol extends device
         //     $cmd = '/opt/unetlab/wrappers/iol_wrapper ';
         // }
         $cmd = '/opt/unetlab/wrappers/iol_wrapper ';
-        $cmd .= '-D ' . $iol_id . ' -S ' . $this->getSession() . ' -P ' . $this->getPort() . ' -t "' . $this->name . '" -F ' . $this->node->getRunningPath() . '/' . $this->image . ' -d ' . (int)$this->delay . ' -e ' . (int)$this->ethernet . ' -s ' . (int)$this->serial;
+        $cmd .= '-D ' . escapeshellarg($iol_id)
+            . ' -S ' . escapeshellarg($this->getSession())
+            . ' -P ' . escapeshellarg($this->getPort())
+            . ' -t ' . escapeshellarg($this->name)
+            . ' -F ' . escapeshellarg($this->node->getRunningPath() . '/' . $this->image)
+            . ' -d ' . (int)$this->delay
+            . ' -e ' . (int)$this->ethernet
+            . ' -s ' . (int)$this->serial;
 
         foreach ($this->getSerials() as $interface_id => $interface) {
             $remote_id = $interface->getRemoteId();
@@ -114,13 +121,13 @@ class device_iol extends device
                     error_log('ERROR: Can not find node ' + $remote_id);
                     return;
                 }
-                $cmd .= ' -l ' . $interface_id . ':localhost:' . $remote_node->getIolId() . ':' . $interface->getRemoteIf() . ':' . $remote_node->getPort();
+                $cmd .= ' -l ' . escapeshellarg($interface_id . ':localhost:' . $remote_node->getIolId() . ':' . $interface->getRemoteIf() . ':' . $remote_node->getPort());
             }
         }
         
-        $flags = ' -n ' . $this->nvram;  // Size of nvram in Kb
+        $flags = ' -n ' . escapeshellarg($this->nvram);  // Size of nvram in Kb
         $flags .= ' -q';                       // Suppress informational messages
-        $flags .= ' -m ' . $this->ram;    // Megabytes of router memory
+        $flags .= ' -m ' . escapeshellarg($this->ram);    // Megabytes of router memory
 
         if($this->isKeepAlive()) $flags .= ' -l'; // Add L1 keepalive option
 
@@ -128,9 +135,10 @@ class device_iol extends device
             $flags .= ' -c startup-config';        // Configuration file name
         }
 
+        // sweep-exempt: the template's iol_options string supplies multiple arguments.
         $flags .= isset($this->iol_options) ? ' '.$this->iol_options : '';
 
-        $cmd .= ' -- ' . $flags . ' > ' . $this->getRunningPath() . '/wrapper.txt';
+        $cmd .= ' -- ' . $flags . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt');
         return $cmd;
     }
 
@@ -235,7 +243,7 @@ class device_iol extends device
             return 80044;
         }
 
-        $cmd = 'id -u ' . $user . ' 2>&1';
+        $cmd = 'id -u ' . escapeshellarg($user) . ' 2>&1';
         exec($cmd, $o, $rc);
         $uid = $o[0];
         if (!posix_setuid($uid)) {
@@ -271,13 +279,20 @@ class device_iol extends device
 
     public function stop(){
 
-        $cmd = 'ps -aux | grep keepalive | grep vunl'.$this->getSession().'_ | grep -v "ps -aux" | tr -s " "| cut -d " " -f 2';
-        $o = [];
+        // Reap every keepalive helper this node session started.
+        //
+        // The pids are resolved inside unl_wrapper, from /proc, by the tenant
+        // uid that owns them. What was here before ran `ps -aux | grep
+        // keepalive | grep vunl<session>_ | cut -d " " -f 2` and handed each
+        // field to `sudo kill -9`: the pattern matched process TITLES, so any
+        // process whose command line happened to contain those substrings was
+        // killed as root, and a non-numeric field would have been passed to
+        // kill(1) unquoted. It also never matched the helper it was aiming at,
+        // because the helper is started with -n <session>_<iface> and no
+        // 'vunl' prefix.
+        $cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a iol-keepalive'
+            . ' -S ' . (int) $this->getSession() . ' --state down';
         exec($cmd, $o, $rc);
-        foreach($o as $pid){
-            exec('sudo kill -9 '. $pid);
-            error_log('sudo kill -9 '. $pid);
-        }
         return parent::stop();
     }
 
@@ -306,7 +321,7 @@ class device_iol extends device
             return 80066;
         }
 
-        $cmd = '/opt/unetlab/scripts/wrconf_iol.py -p ' . $this->getPort() . ' -t 30';
+        $cmd = '/opt/unetlab/scripts/wrconf_iol.py -p ' . escapeshellarg($this->getPort()) . ' -t 30';
         exec($cmd, $o, $rc);
         error_log(date('M d H:i:s ') . 'INFO: force write configuration ' . $cmd);
         if ($rc != 0) {
@@ -314,7 +329,7 @@ class device_iol extends device
             error_log(date('M d H:i:s ') . implode("\n", $o));
             return 80060;
         }
-        $cmd = '/opt/unetlab/scripts/iou_export ' . $nvram . ' ' . $tmp;
+        $cmd = '/opt/unetlab/scripts/iou_export ' . escapeshellarg($nvram) . ' ' . escapeshellarg($tmp);
         exec($cmd, $o, $rc);
         usleep(1);
         error_log(date('M d H:i:s ') . 'INFO: exporting ' . $cmd);

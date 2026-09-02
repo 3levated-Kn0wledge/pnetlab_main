@@ -682,26 +682,82 @@ class device
 
         $result = $this->prepare();
 
-        if ($result > 0) return $result;
+        // EVERY FAILURE FROM HERE ON UNWINDS. prepare() creates the taps, and
+        // it creates them FIRST -- before the linked clone, before .prepared,
+        // before anything that can fail -- so each of its later error returns
+        // used to leave one tap per interface on the host. See abandonStart().
+        if ($result > 0) return $this->abandonStart($result);
 
         if (!chdir($this->getRunningPath())) {
             // Failed to change directory
             error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80047]);
-            return 80047;
+            return $this->abandonStart(80047);
         }
 
+        // TWO different things used to arrive here and be treated as one.
+        //
+        // command() returns '' for a node type that has no emulator command
+        // line at all -- Docker, which does not override it, and whose
+        // container is started by device_docker::start() after this returns.
+        // That is SUCCESS and has to stay success.
+        //
+        // device_qemu::command() returns array(False, False) when it cannot
+        // resolve the architecture or the binary. That is a failure, and it
+        // never reached the `$cmd == ''` test below: secureCmd() runs first and
+        // calls preg_match() on the array, which is a TypeError on PHP 8. So a
+        // QEMU node with an unresolvable template took the whole request down
+        // with a fatal, left its taps behind, and reported nothing.
+        //
+        // The type check therefore comes BEFORE secureCmd(), and the two cases
+        // are separated. `return;` (NULL) was what the empty case did, and NULL
+        // is not > 0, so callers read it as started either way -- 0 says the
+        // same thing on purpose.
         $cmd = $this->command();
-        $cmd = secureCmd($cmd) . " 2>&1 &";
-        if (!isset($cmd) || $cmd == '') return;
+        if (!is_string($cmd)) {
+            error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80046]);
+            return $this->abandonStart(80046);
+        }
+        if ($cmd === '') return 0;
+        // secureCmd() THROWS, and an uncaught throw from this point leaves the
+        // taps behind exactly as the returns above did, so it stays wrapped.
+        //
+        // SECURE_LINE is the shape: this is a whole emulator command line. What
+        // that shape proves is that the line cannot spawn a second command —
+        // no $( ), no backtick, no ; | & newline, no unquoted glob. What it does
+        // NOT prove is that the arguments are the intended ones, because the
+        // line is NOT fully escaped: qemu_options, dynamips_options and
+        // getFlag() are concatenated raw, and they exist to supply several
+        // arguments (handover point 4, and the sweep-exempt markers in
+        // devices/qemu/). An unquoted space is still a word separator here.
+        //
+        // So this is defence in depth over a surface the fork has decided to
+        // keep. The containment that matters is device::spawnAsTenant(): for
+        // VPCS and QEMU the line runs as unl<session>, not root.
+        try {
+            $cmd = secureCmd($cmd, SECURE_LINE);
+        } catch (Exception $e) {
+            error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80046] . ' ' . $e->getMessage());
+            return $this->abandonStart(80046);
+        }
         $cmd = preg_replace('/\s+/m', ' ', $cmd);
 
         error_log(date('M d H:i:s ') . 'INFO: CWD is ' . getcwd());
         error_log(date('M d H:i:s ') . 'INFO: starting ' . $cmd);
         // Clean TCP port
-        exec("fuser -k -n tcp " . ($this->getPort()));
-        exec($cmd, $o, $rcp);
+        exec("fuser -k -n tcp " . (int) $this->getPort());
 
-        if ($rcp == 0 && $this->type != 'docker') {
+        if ($this->runsAsTenant()) {
+            $rcp = $this->spawnAsTenant($cmd . ' 2>&1');
+        } else {
+            exec($cmd . ' 2>&1 &', $o, $rcp);
+        }
+
+        // spawnAsTenant() returns 80036 for a missing ext-pcntl, a tenant
+        // account that is absent or holds the wrong uid, and a failed fork.
+        // All three are after the taps exist.
+        if ($rcp != 0) return $this->abandonStart($rcp);
+
+        if ($this->type != 'docker') {
             $ethernets = $this->getEthernets();
             foreach ($ethernets as $ethernet) {
                 if (count($ethernet->getQuality()) > 0) $ethernet->applyQuality();
@@ -713,35 +769,272 @@ class device
     }
 
     /**
+     * Undo a start that got part way and then failed.
+     *
+     * WHY THIS IS WORSE THAN IT LOOKS, AND WHY IT IS HERE AND NOT IN prepare()
+     *
+     * The tap is created before the failure point, and neither stop nor delete
+     * removed it: device::stopNode() did all of its work, tap teardown
+     * included, inside `if ($this->getStatus() != 0)`, and a node whose start
+     * failed has status 0. So `stop` was a no-op on exactly the node that
+     * needed it -- one orphaned vunl<session>_* per failed start, permanently.
+     *
+     * Since tenant accounts are reaped, that also strands the ACCOUNT. The
+     * reaper refuses to remove an account while a vunl<session>_* interface
+     * exists (actions/UnlTenantAccount.php), which is the right refusal -- it
+     * is what stops a running node losing its uid -- but it means one leaked
+     * tap pins one Unix account for the life of the host. The two bugs
+     * compound, and the second one arrived after the first was written down.
+     *
+     * It lives here rather than in each prepare() because device::start() is
+     * the single funnel: every node type's start() calls parent::start(), so
+     * one unwind covers vpcs, qemu (three variants), dynamips, iol and docker.
+     * Putting it in prepare() would mean six near-identical edits and would
+     * still miss the failures start() itself can have after prepare() returned.
+     *
+     * The tenant is reaped too. A start that produced nothing should leave
+     * nothing, and the reaper does its own safety checks -- no process on the
+     * uid, no surviving tap, no session reporting status 2 or 3 -- so this
+     * cannot pull an account out from under a node that is actually running.
+     *
+     * @param   int     $code               The failure to report
+     * @return  int                         $code, unchanged
+     */
+    protected function abandonStart($code)
+    {
+        error_log(date('M d H:i:s ') . 'INFO: start failed (' . $code . '); releasing taps for session '
+            . (int) $this->getSession());
+        $this->releaseTaps();
+        $this->reapTenant();
+        return $code;
+    }
+
+    /**
+     * Tear down every tap belonging to this node session.
+     *
+     * Enumerated from the host, not from the node's interface list: a start
+     * that died inside prepare()'s interface loop created a PREFIX of that
+     * list, and an interface removed from the lab after a start leaves a tap
+     * that the list no longer mentions. delTap() is a no-op for a name that is
+     * not there, so this is safe to call on a node that never started.
+     *
+     * @return  int                         0
+     */
+    protected function releaseTaps()
+    {
+        foreach (unl_session_taps($this->getSession()) as $tap) {
+            if (delTap($tap) !== 0) {
+                error_log(date('M d H:i:s ') . 'ERROR: could not remove ' . $tap);
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Does this node type's emulator run as the tenant account?
+     *
+     * False here, and overridden to true only for the types that have been
+     * driven end to end unprivileged on a real host. Adding a type to that list
+     * is a claim about the whole start path, not a preference, so it is made per
+     * class rather than by a flag.
+     *
+     * Note that only IOL dropped privileges before this, and it did so by
+     * calling posix_setuid() in prepare() — inside the WRAPPER's own process.
+     * That is why unl_wrapper's start-all loop postpones IOL nodes: once the
+     * wrapper has setuid'd, it cannot start anything else, cannot create the
+     * next tenant account, and cannot bring up the next tap. spawnAsTenant()
+     * drops in a forked child instead, so the wrapper stays root and the
+     * ordering constraint goes away.
+     */
+    protected function runsAsTenant()
+    {
+        return false;
+    }
+
+    /**
+     * Start the emulator as the tenant account, in a forked child.
+     *
+     * WHY THE PIECES ARE ALREADY IN PLACE
+     *
+     * prepare() has, by this point, created the tap with `tunctl -u unl<N>` and
+     * attached it to the bridge. A persistent tap can be opened by its owning
+     * uid — that is what tunctl's -u means — so the emulator does not need
+     * CAP_NET_ADMIN to attach to it, and /dev/net/tun is 0666. The running
+     * directory and the disk images beneath it are root:unl 0775/0664, so the
+     * tenant reaches them through the group. The console ports are 3xxxx and
+     * the VNC ports 59xx, neither of which is privileged.
+     *
+     * ORDER IN THE CHILD MATTERS. Supplementary groups have to be set before the
+     * uid is dropped, because setuid is one-way; kvm is what /dev/kvm needs, and
+     * accel=kvm is in most of the shipped templates. stdio is replaced last, so
+     * a redirect the command carries lands as the tenant and not as root.
+     *
+     * A SHELL IS STILL USED, deliberately. The command string is assembled by
+     * command() and carries its own redirection, and the template option strings
+     * are argument injection by design (docs/HANDOVER.md, item 4). Handing it an
+     * argv array here would break every template and would not close that
+     * surface — what closes it is that the shell now runs as unl<N> and not as
+     * root, which is the whole point of this method.
+     *
+     * @param   string  $cmd                The full command line
+     * @return  int                         0 if the child was forked
+     */
+    protected function spawnAsTenant($cmd)
+    {
+        $session = (int) $this->getSession();
+        $user = 'unl' . $session;
+
+        if (!function_exists('pcntl_fork') || !function_exists('pcntl_exec')
+            || !function_exists('posix_setuid')) {
+            error_log(date('M d H:i:s ') . 'ERROR: ext-pcntl and ext-posix are required to '
+                . 'run a node as its tenant');
+            return 80036;
+        }
+
+        // Computed, then CONFIRMED against the passwd database, exactly as
+        // UnlIolKeepalive does it: an account called unl<session> that does not
+        // hold uid 32768+session is not the platform's, and dropping to it would
+        // put the node somewhere nobody expects. The uid is never taken from the
+        // output of `id`, which is what device_iol::prepare() used to do.
+        $entry = posix_getpwnam($user);
+        $expected = 32768 + $session;
+        if ($entry === false || (int) $entry['uid'] !== $expected) {
+            error_log(date('M d H:i:s ') . 'ERROR: tenant account ' . $user
+                . ' is missing or holds the wrong uid; not starting');
+            return 80036;
+        }
+        $gid = (int) $entry['gid'];
+        $cwd = $this->getRunningPath();
+
+        $pid = pcntl_fork();
+        if ($pid < 0) {
+            error_log(date('M d H:i:s ') . 'ERROR: fork failed; not starting ' . $user);
+            return 80036;
+        }
+
+        if ($pid === 0) {
+            // --- child ------------------------------------------------------
+            posix_setsid();
+            // Supplementary groups first: kvm is not the tenant's primary group,
+            // and after setuid() there is no way back to set it.
+            if (function_exists('posix_initgroups')) posix_initgroups($user, $gid);
+            if (!posix_setgid($gid) || !posix_setuid($expected)) exit(126);
+            @chdir($cwd);
+            fclose(STDIN);
+            fclose(STDOUT);
+            fclose(STDERR);
+            @fopen('/dev/null', 'r');
+            @fopen('/dev/null', 'w');
+            @fopen('/dev/null', 'w');
+            pcntl_exec('/bin/sh', array('-c', $cmd));
+            exit(127);   // only reached if exec failed
+        }
+
+        // --- parent ---------------------------------------------------------
+        // Deliberately not waited on: the emulator is a long-lived daemon, and
+        // the caller polls the console port for it. setsid() above means it
+        // survives the wrapper and is reparented to init, which is what the old
+        // `exec("... &")` achieved by letting sh fork and exit.
+        error_log(date('M d H:i:s ') . 'INFO: started as ' . $user . ' (uid ' . $expected
+            . '), pid ' . $pid);
+        return 0;
+    }
+
+    /**
      * stop device
-     * 
+     *
      */
     public function stop()
     {
+        $this->stopNode();
+        $this->reapTenant();
+        return 0;
+    }
+
+    /**
+     * Reap the Unix account this node session manufactured.
+     *
+     * Node start runs `useradd ... unl<session>` once per node session and
+     * nothing ever removed one, so the accounts grew without bound for the life
+     * of the appliance. This is the ordinary end of a session, and therefore
+     * where the ordinary reap belongs.
+     *
+     * ORDER MATTERS AND THIS CALL IS LAST ON PURPOSE. The account owns the tap
+     * interfaces and the running directory, so it may only go after both are
+     * finished with. It runs unconditionally — including when getStatus() said
+     * the node was already stopped — because a half-torn-down session that
+     * leaves an account behind is exactly the case that lets a later session's
+     * id collide with it.
+     *
+     * Through sudo rather than in-process because this method has TWO callers
+     * with different privileges: `unl_wrapper -a stop`, which is root, and
+     * destroyLabSession()/stopLabSession() in includes/functions.php, which run
+     * inside the web request as www-data. The wrapper decides for itself
+     * whether the reap is safe; see actions/UnlTenantAccount.php.
+     */
+    protected function reapTenant()
+    {
+        $cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a reap-tenant'
+            . ' -S ' . (int) $this->getSession() . ' > /dev/null 2>&1';
+        exec($cmd, $o, $rc);
+        return 0;
+    }
+
+    /**
+     * THE STATUS GUARD IS THE OTHER HALF OF THE TAP LEAK.
+     *
+     * Everything below used to sit inside `if ($this->getStatus() != 0)`,
+     * teardown included. A node whose start failed reports status 0, so stop
+     * did nothing for it -- which is precisely the node with a stranded tap.
+     * Delete behaves the same way, so nothing on the box ever collected one.
+     *
+     * Killing the emulator still depends on there being one. Releasing the taps
+     * does not, and now happens either way, so a tap left by an older failed
+     * start (or by a crash between prepare() and start()) is collected the next
+     * time anything stops or deletes that node -- which also unpins the tenant
+     * account the reaper was refusing to remove while the tap existed.
+     */
+    private function stopNode()
+    {
         if ($this->getStatus() != 0) {
             if ($this->getNType() == 'docker') {
-                $cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop docker' . $this->getSession();
+                $cmd = 'docker -H=unix:///var/run/docker.sock stop ' . escapeshellarg('docker' . $this->getSession());
             } else {
-                $cmd = 'sudo fuser -k -TERM ' . $this->getRunningPath();
+                $cmd = 'sudo fuser -k -TERM ' . escapeshellarg($this->getRunningPath());
             }
             error_log(date('M d H:i:s ') . 'INFO: stopping ' . $cmd);
             exec($cmd, $o, $rc);
 
             if ($this->getStatus() != 0) {
-                if ($this->command() != '') {
-                    $cmd = 'sudo pkill -term  \'' . $this->command() . '\'';
+                // command() reports its own failures by returning
+                // array(False, False) -- see device_qemu::command(), which does
+                // that when the arch or the binary cannot be resolved. Passing
+                // that to escapeshellarg() is a fatal TypeError on PHP 8, so a
+                // node that failed to start took the whole stop request down
+                // with it and could never be cleaned up.
+                $pkillTarget = $this->command();
+                if (is_string($pkillTarget) && $pkillTarget !== '') {
+                    $cmd = 'sudo pkill -term ' . escapeshellarg($pkillTarget);
                     error_log(date('M d H:i:s ') . 'INFO: stopping ' . $cmd);
                     exec($cmd, $o, $rc);
                 }
             }
 
             usleep(200000); //sleep waiting for vunl free
-            $cmd = 'ip link | grep vunl' . $this->getSession() . '_ | sed \'s/.*\(vunl[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ip link set $line down; sudo tunctl -d $line; done';
-            error_log(date('M d H:i:s ') . 'ERROR: ' . $cmd);
-            exec($cmd, $o, $rc);
-
-            return 0;
         }
+
+        // Outside the guard, and no longer a shell pipeline.
+        //
+        // What was here was
+        //     ip link | grep 'vunl<session>_' | sed ... | while read line; do
+        //         sudo ip link set $line down; sudo tunctl -d $line; done
+        // which matched by PREFIX: 'vunl1_' matches vunl12_0, so stopping
+        // session 1 on a busy host tore down session 12's data plane. It also
+        // read nothing back, so a tap that survived tunctl -d was reported as
+        // removed. releaseTaps() anchors the name and goes through delTap(),
+        // which re-checks and says so when the interface is still there.
+        $this->releaseTaps();
+
         return 0;
     }
 
@@ -772,7 +1065,7 @@ class device
 
         $runningPath = $this->getRunningPath();
         if ($runningPath != null && $runningPath != '') {
-            $cmd = 'sudo rm -rf ' . $runningPath;
+            $cmd = 'sudo rm -rf ' . escapeshellarg($runningPath);
             exec($cmd, $o, $rc);
         }
 

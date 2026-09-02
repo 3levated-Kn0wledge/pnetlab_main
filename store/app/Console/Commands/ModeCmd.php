@@ -67,14 +67,14 @@ class ModeCmd extends Command
                 if($userModel->is_exist([[[USER_USERNAME, '=', 'admin']]])){
                     $userModel->edit([
                         DATA_KEY => [[[USER_USERNAME, '=', 'admin']]],
-                        DATA_EDITOR => [USER_ROLE => '0', USER_PASSWORD => hash('sha256', LOCAL_PASS), USER_OFFLINE=>'1']
+                        DATA_EDITOR => [USER_ROLE => '0', USER_PASSWORD => \unl_password_hash(LOCAL_PASS), USER_OFFLINE=>'1']
                     ]);
                 }else{
                     $userModel->add([[
                         USER_USERNAME => 'admin',
                         USER_ROLE => '0',
                         USER_OFFLINE => '1',
-                        USER_PASSWORD => hash('sha256', LOCAL_PASS),
+                        USER_PASSWORD => \unl_password_hash(LOCAL_PASS),
                     ]]);
                 }
 

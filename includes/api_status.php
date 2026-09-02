@@ -91,7 +91,7 @@ function apiGetRunningWrappers() {
 	exec($cmd, $o_dynamips, $rc);
 	$cmd = 'pgrep -f -c -P 1 qemu_wrapper';
 	exec($cmd, $o_qemu, $rc);
-	$cmd= 'docker -H=tcp://127.0.0.1:4243 ps -q | wc -l';
+	$cmd= 'docker -H=unix:///var/run/docker.sock ps -q | wc -l';
 	exec($cmd, $o_docker, $rc);
 	$cmd = 'pgrep -f -c -P 1 vpcs';
 	exec($cmd, $o_vpcs, $rc);
@@ -118,28 +118,16 @@ function apiGetSwapUsage() {
 /*
  * Function to set UKSM status.
  *
+ * An alias. There is one memory-dedup control on this platform — mainline KSM —
+ * and this legacy entry point reaches it rather than writing to the UKSM sysfs
+ * tree, which only the appliance's custom 4.15 kernel ever had. See
+ * unl_ksm_state() in includes/cli.php.
+ *
  * @return  Bool Success operation
  */
 
 function apiSetUksm($p) {
-     if  ( $p['state'] == true ) {
-           $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a uksmon" ;
-           error_log(date('M d H:i:s ').'DEBUG: uksm on' );
-     } else {
-           $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a uksmoff" ;
-           error_log(date('M d H:i:s ').'DEBUG: uksm off' );
-     }
-     exec($cmd, $o, $rc);
-     if ($rc == 0 ) {
-                $output['code'] = 200;
-                $output['status'] = 'success';
-                $output['message'] = $GLOBALS['messages'][60065];
-     } else {
-                $output['code'] = 400;
-                $output['status'] = 'fail';
-                $output['message'] = $GLOBALS['messages'][60066];
-     }
-     return $output;
+     return apiSetKsm($p);
 }
 
 /*
@@ -149,12 +137,23 @@ function apiSetUksm($p) {
  */
 
 function apiSetKsm($p) {
-     if  ( $p['state'] == true ) {
-           $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a ksmon" ;
-           error_log(date('M d H:i:s ').'DEBUG: uksm on' );
+     // See the note on StatusController::apiSetKsm(). `$p['state'] == true` was
+     // true for the string 'false', so the off half of this never worked for a
+     // form-encoded caller.
+     $on = filter_var(isset($p['state']) ? $p['state'] : true, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+     if ($on === null) $on = true;
+     // Two whole literals, not one literal plus a chosen verb. The value is
+     // request-derived, and tests/Security/ShellEscapingTest.php sweeps every
+     // exec() argument back to its source: concatenating even a two-way choice
+     // makes this a value reaching a shell, which is a finding whether or not
+     // the two options are safe. Nothing is interpolated, so there is nothing
+     // to escape.
+     if ($on) {
+           $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a ksmon";
+           error_log(date('M d H:i:s ').'DEBUG: ksm on');
      } else {
-           $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a ksmoff" ;
-           error_log(date('M d H:i:s ').'DEBUG: uksm off' );
+           $cmd = "sudo /opt/unetlab/wrappers/unl_wrapper -a ksmoff";
+           error_log(date('M d H:i:s ').'DEBUG: ksm off');
      }
      exec($cmd, $o, $rc);
      if ($rc == 0 ) {

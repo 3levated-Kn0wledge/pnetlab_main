@@ -1,38 +1,234 @@
 # PNETLab — privilege policy for the web user.
 #
-# Replaces the upstream file, which granted www-data unconditional root:
+# Install as /etc/sudoers.d/pnetlab with mode 0440, owned root:root, and remove
+# the upstream /etc/sudoers.d/unetlab. Validate with `visudo -cf` before
+# deploying; a malformed file locks sudo out entirely.
+#
+# ---------------------------------------------------------------------------
+# What this replaces
+# ---------------------------------------------------------------------------
+# Upstream ships, across /etc/sudoers and /etc/sudoers.d/unetlab:
 #
 #     www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/unl_wrapper
-#     www-data ALL=(ALL) NOPASSWD:ALL     <-- negates the line above
-#     %unl     ALL=(ALL) NOPASSWD:ALL     <-- every lab tenant is root
+#     www-data ALL=(ALL)  NOPASSWD: ALL      <-- negates the line above
+#     %www-data ALL=(ALL:ALL) NOPASSWD: ALL
+#     %unl     ALL=(ALL)  NOPASSWD: ALL
 #
-# sudo takes the LAST match, so the correctly-scoped first line never applied.
-# On a stock install `sudo -l -U www-data` resolves to "(ALL) NOPASSWD: ALL".
+# sudo takes the last match, so `sudo -l -U www-data` resolves to
+# "(ALL : ALL) NOPASSWD: ALL". The correctly-scoped first line never applied.
 #
-# Because the web layer has an unescaped-shell-interpolation surface, that made
-# every injection bug an immediate, unauthenticated host compromise.
+# The %unl grant is the worse of the two. Node start runs
+#     useradd -c "Unified Networking Lab TID=N" -g unl -M -s /bin/bash unlN
+# so every node session manufactures a Unix account with a login shell in a group
+# holding unconditional root. Nothing runs under those accounts via sudo — they
+# exist to own tap interfaces — so the grant has no legitimate use and is simply
+# dropped. The accounts themselves were also never removed, by anything; that is
+# now `unl_wrapper -a reap-tenant`, and the useradd grant went with it.
 #
-# STATUS: NOT YET COMPLETE. See install/README.md before deploying.
-# The web layer sudo-invokes roughly two dozen binaries directly, not only
-# unl_wrapper, so a minimal policy needs the full inventory first. Shipping only
-# the unl_wrapper line breaks packet capture, Docker consoles and node cleanup.
+# ---------------------------------------------------------------------------
+# What this policy is, and is not
+# ---------------------------------------------------------------------------
+# It is an allowlist of the 24 binaries the web layer actually invokes, derived
+# from the tree and kept honest by tests/Security/SudoersPolicyTest.php, which
+# fails if the code and this file drift apart.
+#
+# It is NOT a privilege boundary, and it should not be described as one.
+# At least a dozen entries below are root-equivalent no matter how they are
+# scoped — php and perl execute arbitrary code; tee, cp, mv, rm, chmod and chown
+# write or take ownership of arbitrary paths; docker mounts the host filesystem;
+# nohup and service launch arbitrary processes. Anyone who can influence the
+# arguments to those can still become root.
+#
+# What it does buy, today:
+#   - removes the %unl group grant entirely
+#   - removes everything not on this list, so sudo su, sudo bash, sudo visudo,
+#     sudo passwd and the rest stop working
+#   - makes the remaining escalation surface explicit and countable rather than
+#     unbounded, which is what lets it be reduced
+#
+# The end state is that every entry below except unl_wrapper is removed, with its
+# behaviour moved behind the wrapper. Entries marked ROOT-EQUIVALENT should go
+# first. Until then, treat a compromise of the web layer as a host compromise.
 
 Defaults:www-data    !requiretty, umask_override, umask=0002
 
-# The platform wrapper. This is the intended entry point and must stay.
+# --- The platform wrapper: the intended entry point ------------------------
 www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/unl_wrapper
+www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/docker_wrapper
+www-data ALL=(root) NOPASSWD: /opt/unetlab/wrappers/nsenter
 
-# TODO(phase-02): enumerate and scope the remaining call sites. Inventory of
-# binaries the web layer currently sudo-invokes directly, by reference count:
-#
-#   rm(13) ip(11) chown(9) docker(7) service(6) qemu-img(6) brctl(5) tunctl(4)
-#   ovs-vsctl(4) kill(4) echo(4) pkill(3) mkdir(3) fuser(3) touch(2) tc(2)
-#   php(2) nsenter(2) nc(2) ifconfig(2) dos2unix(2) docker_wrapper(2) dmidecode(2)
-#
-# Several take fully attacker-influenced arguments, so a NOPASSWD entry per
-# binary is not in itself a boundary. The intended end state is that all of
-# these move behind unl_wrapper, and this file keeps exactly one rule.
+# --- Network plumbing: bridges, taps, namespaces, NAT ----------------------
+www-data ALL=(root) NOPASSWD: /usr/sbin/ip
+www-data ALL=(root) NOPASSWD: /usr/sbin/brctl
+www-data ALL=(root) NOPASSWD: /usr/bin/tunctl
+www-data ALL=(root) NOPASSWD: /usr/bin/ovs-vsctl
+www-data ALL=(root) NOPASSWD: /usr/sbin/tc
+www-data ALL=(root) NOPASSWD: /usr/sbin/iptables
+www-data ALL=(root) NOPASSWD: /usr/sbin/ifconfig
+www-data ALL=(root) NOPASSWD: /usr/sbin/sysctl
 
-# Deliberately ABSENT — do not reinstate:
+# --- Process and node lifecycle -------------------------------------------
+www-data ALL=(root) NOPASSWD: /usr/bin/fuser
+www-data ALL=(root) NOPASSWD: /usr/bin/pkill
+www-data ALL=(root) NOPASSWD: /usr/bin/nc
+# kill was removed with perl, below. Its only two call sites were the IOL
+# keepalive teardown in devices/interfc.php and devices/iol/device_iol.php, both
+# of which took a pid out of `ps -aux | grep`. unl_wrapper -a iol-keepalive
+# --state down resolves the pids itself, from /proc, by the tenant uid that owns
+# them, so no pid crosses the boundary any more.
+
+# --- Read-only host inspection --------------------------------------------
+# nproc and top were removed: counting cores and listing processes in batch
+# mode are unprivileged, and the only caller (the scand_process command) was
+# granted root for neither. Reading link state is unprivileged too, so
+# isInterface()/isInterfaceUp() no longer sudo `ip link show` — but the ip
+# grant stays, because changing links genuinely needs it.
+www-data ALL=(root) NOPASSWD: /usr/sbin/dmidecode
+www-data ALL=(root) NOPASSWD: /usr/bin/ps
+# There is deliberately no /bin/echo line. Its last caller was
+# Admin/SystemController's iourc write:
+#     sudo echo -e "[license]\n$license" > .../iourc
+# which was injectable AND broken: sudo applied to echo while the redirect ran
+# as www-data, so the write was never privileged at all — the same shape as the
+# three bridge sysfs writes in includes/cli.php, recorded there. It was rewritten
+# rather than relocated. refreshIolLicense() runs the keygen through proc_open()
+# with an argv array and writes the file with file_put_contents(), unprivileged,
+# because that is what it always was. Making it privileged would have been worse
+# than the bug: the keygen lives in a tree the web user owns.
+
+# --- Appliance control (availability impact only) -------------------------
+www-data ALL=(root) NOPASSWD: /usr/sbin/shutdown
+www-data ALL=(root) NOPASSWD: /usr/sbin/reboot
+www-data ALL=(root) NOPASSWD: /usr/sbin/ntpdate
+
+# --- ROOT-EQUIVALENT. Remove these first; route behind unl_wrapper. --------
+# Each of these can be turned into a root shell by anyone who controls its
+# arguments. They are listed because the product does not currently work without
+# them, not because granting them is acceptable.
+www-data ALL=(root) NOPASSWD: /usr/bin/php               # arbitrary code
+# There is deliberately no /usr/bin/perl line. It existed for exactly one thing:
+# the IOL L1 keepalive helper, which devices/interfc.php launched as
+#     sudo php .../Console/Commands/wrapper 32768 <uid> 'sudo perl .../keepalive.pl ...'
+# — a script whose whole body was setgid, setuid and shell_exec of its third
+# argument, i.e. "run this string as root, or first drop to any uid you name".
+# It is now `unl_wrapper -a iol-keepalive -S <session> -I <iface> --state up|down`,
+# which computes the uid, confirms it against the passwd entry, and execs a FIXED
+# script path with an argv array. Nothing on that path builds a command line.
+#
+# The php line above is NOT still here for that. Its last caller is
+# Admin/DefaultController::upgrade(), which runs `sudo php .../artisan upgrade
+# now`; that file belongs to the CSRF work in flight and has not been moved yet.
+# When it goes, this line goes with it, and SudoersPolicyTest will say so.
+www-data ALL=(root) NOPASSWD: /usr/bin/nohup             # launches anything
+www-data ALL=(root) NOPASSWD: /usr/sbin/service          # launches anything
+# There is deliberately no /usr/bin/docker line. All thirty-one docker
+# invocations in the tree — across api.php, includes/, devices/ and store/ —
+# reach the daemon over /var/run/docker.sock as a member of the docker group,
+# so none of them needs sudo. SudoersPolicyTest fails on a grant the code no
+# longer invokes, so re-adding this line breaks the build until a call site
+# needs it again.
+#
+# Group membership is not a smaller privilege: anyone who can talk to the
+# daemon can bind-mount / into a container. It is one path instead of two, and
+# it replaced an unauthenticated daemon socket on 127.0.0.1:4243, which any
+# local account could reach with no membership at all.
+# idlepc is GONE, and it was the worst line in this file. The grant ran a 9.4 MB
+# stripped PyInstaller bundle committed to this repository with no source, no
+# build recipe and no licence — Python 3.5 with paramiko, cryptography, PyNaCl
+# and OpenSSL frozen inside it. The archive was unpacked and read, and what it
+# did is worse than what it was. idlepc.py, in order:
+#
+#   1. ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa_dy      (no passphrase)
+#   2. cat /root/.ssh/id_rsa_dy.pub >> /root/.ssh/authorized_keys
+#   3. paramiko connect to root@127.0.0.1 with that key
+#   4. run dynamips in that session, send  ('i') to trigger dynamips'
+#      OWN idle-pc computation, and scrape "--idle-pc=([^"]+)" from the console
+#   5. pkill -9 -f "dynamips ..."
+#
+# So pressing "calculate Idle-PC" in the admin UI PERMANENTLY INSTALLED A
+# PASSWORDLESS ROOT SSH KEY on the appliance — the same standing root key this
+# fork had already deleted from docker_wrapper by allocating a PTY instead of
+# shelling out to root@localhost, reintroduced by an admin button.
+#
+# None of it was doing anything dynamips cannot. Step 4 is dynamips' built-in
+# calculation, and the SSH session existed only to obtain a TTY, because the
+# blob ran dynamips with no -T and dynamips with no -T puts its console on
+# stdin. dynamips 0.2.14's common/dev_vtty.c routes the TCP console created by
+# `-T <port>` through the SAME input state machine, Ctrl-] included, so the
+# replacement drives it over a plain socket and needs no terminal at all:
+# `unl_wrapper -a idlepc --template <name> --image <name>`, implemented in
+# platform/wrappers/actions/UnlIdlePc.php. The caller sends two names; the
+# option string, the paths, the console port and the process lifetime all live
+# on this side of the boundary.
+#
+# The calibration itself is UNPROVEN, because it needs a Cisco IOS image and
+# this project carries none. The action says so in its header and
+# docs/LICENSING.md section 3 says so at length. Removing the root key was not
+# contingent on proving the replacement.
+www-data ALL=(root) NOPASSWD: /usr/bin/rm                # arbitrary deletion
+# tee and touch are gone, and they went together. Both had exactly one caller,
+# Query::setProxy(), which was the shortest path from an HTTP request to root in
+# this tree:
+#     if(!is_file($file)) exec('sudo touch '.$file);
+#     $result = exec("echo '".$proxyAddr."' | sudo tee ".$file);
+# with $proxyAddr concatenated from four request fields inside a SINGLE-QUOTED
+# shell string — one apostrophe ends the quoting — and the destination an apt
+# configuration file, which can carry APT::Update::Pre-Invoke and therefore run
+# as root at the next apt run. Two root primitives from one admin form. It is now
+# `unl_wrapper -a set-proxy`, which takes the four components as four validated
+# options, takes the password on stdin so it is not in /proc/<pid>/cmdline, and
+# writes a file whose path is a constant in the action.
+#
+# chown is gone. Its six call sites were four constants in
+# User/DependenceController, one in User/VersionsController, and
+#     exec('sudo chown www-data:www-data '. $file);
+# in Admin/DefaultController, where $file came from $req->input('template')
+# through secureCmd() — a blocklist that passes backticks, $( ) and quotes. All
+# six are `unl_wrapper -a fixperms --scope <word>`: the caller sends one of six
+# scope words, never a path, and an unrecognised scope is refused rather than
+# interpreted.
+#
+# chmod is gone with them. Its last caller chmodded the IOL keygen, which sits in
+# /opt/unetlab/addons — a tree the fixperms 'addons' scope hands to www-data, so
+# the web user can chmod its own file without borrowing root to do it.
+# cp, mv, mkdir and link are gone. Every one of them was reached from the QEMU
+# commit flow in Admin/Node_sessionsController.php, on paths concatenated from
+# request input without a quote anywhere:
+#     $newFolder = '/opt/unetlab/addons/qemu/' . $imageQemu[0] . '-' . $deviceName;
+#     exec('sudo mkdir ' . $newFolder);
+#     exec('sudo cp -f ' . $qcowFile . ' ' . $newFolder . '/' . basename($qcowFile));
+# That flow is now `unl_wrapper -a image-commit`, which receives a session id, a
+# type word from a closed set and a slug — never a path. link had no live call
+# site at all: devices/qemu/device_qemu.php assigned the command to $cmd and
+# never executed it.
+# qemu-img is GONE. It had one caller left, the dependency listing in
+# Admin/LabsController::getDepends(), and the note that used to stand here
+# predicted this: `qemu-img info --backing-chain` is a read that needs no
+# privilege at all. Measured on the reference host — as www-data, against
+# /opt/unetlab/addons/qemu — it returns the full chain with exit 0 and no sudo.
+#
+# The call site was also the worst-shaped one left in the tree: it interpolated
+# an unescaped path into a shell string, and that path came from the `image`
+# attribute of an uploaded lab's XML. It is now proc_open() with an argv array,
+# so there is no shell and no sudo. The grant could read or WRITE any file on
+# the host as root, which is more than a listing ever needed.
+# useradd is gone. It had exactly one caller, checkUsername() in
+# includes/cli.php:
+#     sudo /usr/sbin/useradd -c "Unified Networking Lab TID=N" -d /opt/unetlab/users/N
+#          -g unl -M -s /bin/bash -u <32768+N> unlN
+# and that sudo was never buying anything: checkUsername() is reached only from a
+# device's prepare(), which is reached only from `unl_wrapper -a start`, which is
+# already root. It was root running sudo to become root, and the cost of it was a
+# standing grant on a binary that can create a second uid 0 account.
+#
+# Account creation is now UnlTenantAccount::create(), which execs useradd with an
+# argv array from inside the wrapper. Removal — which did not exist at all, in
+# any form, anywhere in the tree — is `unl_wrapper -a reap-tenant -S <session>`
+# or `--scope all`. The caller sends a session id or the word 'all' and never a
+# name; the account must be unl<digits>, must hold exactly uid 32768+session, and
+# must have `unl` as its primary group.
+
+# --- Deliberately ABSENT. Do not reinstate. --------------------------------
 #   www-data ALL=(ALL) NOPASSWD:ALL
+#   %www-data ALL=(ALL:ALL) NOPASSWD:ALL
 #   %unl     ALL=(ALL) NOPASSWD:ALL

@@ -81,7 +81,7 @@ class ScandHardDisk extends Command
 
 
         $out = [];
-        exec('docker -H=tcp://127.0.0.1:4243 container ls -a --format={{.Names}}:{{.Size}}', $out, $rc);
+        exec('docker -H=unix:///var/run/docker.sock container ls -a --format={{.Names}}:{{.Size}}', $out, $rc);
         if ($rc == 0) {
             foreach ($out as $dockerName) {
                 if (preg_match('/docker(\d+):([\d\.]+)(\w+)/', $dockerName, $maches)) {
@@ -121,12 +121,12 @@ class ScandHardDisk extends Command
     private function wipe($session, $node)
     {
         if (isset($node['docker']) && $node['docker']) {
-            $cmd = 'sudo /usr/bin/docker -H=tcp://127.0.0.1:4243 rm docker' . $session;
+            $cmd = 'docker -H=unix:///var/run/docker.sock rm ' . escapeshellarg('docker' . $session);
             exec($cmd, $o, $rc);
         }
         $runningPath = $node['path'];
         if ($runningPath != null && $runningPath != '') {
-            $cmd = 'sudo rm -rf ' . $runningPath;
+            $cmd = 'sudo rm -rf ' . escapeshellarg($runningPath);
             exec($cmd, $o, $rc);
         }
         return 0;
@@ -135,14 +135,16 @@ class ScandHardDisk extends Command
     private function stop($session, $node)
     {
         if (isset($node['docker']) && $node['docker']) {
-            $cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop docker' . $session;
+            $cmd = 'docker -H=unix:///var/run/docker.sock stop ' . escapeshellarg('docker' . $session);
         } else {
-            $cmd = 'sudo fuser -k -TERM ' . $node['path'] . ' > /dev/null 2>&1';
+            $cmd = 'sudo fuser -k -TERM ' . escapeshellarg($node['path']) . ' > /dev/null 2>&1';
         }
         error_log(date('M d H:i:s ') . 'INFO: stopping ' . $cmd);
         exec($cmd, $o, $rc);
         usleep(200000); //sleep waiting for vunl free
-        $cmd = 'ifconfig | grep vunl' . $session . ' | cut -d\' \' -f1 | while read line; do sudo ip link set $line down; sudo tunctl -d $line; done';
+        // $line is the shell's own loop variable, not ours; only the session is interpolated.
+        $cmd = 'ifconfig | grep ' . escapeshellarg('vunl' . $session)
+            . ' | cut -d\' \' -f1 | while read line; do sudo ip link set $line down; sudo tunctl -d $line; done';
         error_log(date('M d H:i:s ') . 'ERROR: ' . $cmd);
         exec($cmd, $o, $rc);
 

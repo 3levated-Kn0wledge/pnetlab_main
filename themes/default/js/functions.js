@@ -1,4 +1,23 @@
 
+/**
+ * themes/default/js/functions.js
+ *
+ * Frontend helper functions for the legacy UI.
+ *
+ * Derived from UNetLab html/themes/default/js/functions.js.
+ * Its BSD-3-Clause notice was absent from the copy this fork inherited
+ * and is restored below. See docs/LICENSING.md section 2.2.
+ *
+ * @author Andrea Dainese <andrea.dainese@gmail.com>
+ * @copyright 2014-2016 Andrea Dainese
+ * @license BSD-3-Clause https://github.com/dainok/unetlab/blob/master/LICENSE
+ * @link http://www.unetlab.com/
+ *
+ * Substantially modified by PNETLab and by the pnetlab_main fork. Those
+ * modifications are licensed under the terms in this repository's LICENSE;
+ * the notice above must be retained regardless.
+ */
+
 var contextMenuOpen = false;
 
 // Basename: given /a/b/c return c
@@ -897,7 +916,8 @@ function logger(severity, message) {
 function logoutUser() {
     var deferred = $.Deferred();
     var url = '/api/auth/logout';
-    var type = 'GET';
+    // POST, not GET: this mutates, and a Lax cookie rides a top-level GET.
+    var type = 'POST';
     $.ajax({
         cache: false,
 

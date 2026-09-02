@@ -16,8 +16,10 @@ class Logout extends Component {
 	logout() {
 
 		axios.request({
+			// POST: /api/auth/logout mutates, and while it was a GET a
+			// SameSite=Lax cookie rode along on any cross-site navigation to it.
 			url: '/api/auth/logout',
-			method: 'get',
+			method: 'post',
 		})
 			.then(response => {
 				window.location.href = "/";

@@ -1,0 +1,105 @@
+# PNETLab virtual host. Rendered by install/lib/apache.sh — edit the template,
+# not /etc/apache2/sites-available/pnetlab.conf, or the next install run will
+# overwrite your changes.
+#
+# Placeholders of the form NAME wrapped in at-signs (PHP_VERSION, FPM_SOCKET,
+# WEB_ROOT, SERVER_NAME) are substituted at install time by render_template.
+
+<VirtualHost *:80>
+	ServerName @SERVER_NAME@
+	DocumentRoot @WEB_ROOT@
+
+	# AllowOverride All is required, not stylistic: the application's entire
+	# routing table lives in @WEB_ROOT@/.htaccess (/api -> api.php,
+	# /auth -> auth.php, everything else -> store/public). With overrides off,
+	# Apache serves the directory listing and nothing works.
+	<Directory @WEB_ROOT@>
+		Options -Indexes +FollowSymLinks
+		AllowOverride All
+		Require all granted
+	</Directory>
+
+	# PHP runs under FPM. mod_php does not exist on a current LTS, and the
+	# php_value directives in .htaccess are guarded by <IfModule mod_php.c>
+	# precisely because they are a fatal error here. The equivalent settings
+	# live in @WEB_ROOT@/.user.ini, which FPM reads per directory.
+	<FilesMatch "\.php$">
+		SetHandler "proxy:unix:@FPM_SOCKET@|fcgi://localhost"
+	</FilesMatch>
+
+	# Nothing beginning with a dot is ever a page: .env (which this repository
+	# still ships with a live APP_KEY), .user.ini, .htaccess, editor droppings.
+	# The rewrite rules only redirect requests that are NOT real files, so
+	# without this a request for /store/.env is served as plain text.
+	<FilesMatch "^\.">
+		Require all denied
+	</FilesMatch>
+
+	# The Laravel application's source tree sits under the document root
+	# because .htaccess rewrites into store/public. Only store/public is meant
+	# to be reachable; the rest is code, configuration, sessions and logs.
+	#
+	# Note for later: if anything ever runs `php artisan storage:link`, the
+	# symlink resolves into store/storage and will be denied by this block.
+	# Serve those assets from store/public instead.
+	<DirectoryMatch "^@WEB_ROOT@/store/(app|bootstrap|config|database|resources|routes|storage|tests|vendor)(/|$)">
+		Require all denied
+	</DirectoryMatch>
+
+	<Directory @WEB_ROOT@/store>
+		<FilesMatch "^(artisan|composer\.(json|lock)|phpunit\.xml|server\.php|laravel\.php|readme\.md)$">
+			Require all denied
+		</FilesMatch>
+	</Directory>
+
+	# --- HTML5 consoles ---------------------------------------------------
+	#
+	# Jetty serves the Guacamole web application on 127.0.0.1:8080 and nowhere
+	# else (install/guacamole/jetty-http-loopback.ini). Apache is its only
+	# client, and this is the whole of the front-door configuration.
+	#
+	# The context path is /html5 on BOTH sides, deliberately.
+	# includes/functions.php posts to http://127.0.0.1/html5/api/tokens and
+	# devices/device.php returns /html5/#/client/<b64>?token=<t>, so the path
+	# the browser uses and the servlet context path have to agree. The PNETLab
+	# appliance proxies /html5/ to a context called /guacamole instead, which
+	# works but leaves absolute redirects, cookie paths and WebSocket upgrade
+	# URLs permanently disagreeing with each other. The installer deploys the
+	# war AS html5.war so that no renaming happens anywhere.
+	#
+	# ProxyPass inside <Location> sets r->proxyreq during translation, so these
+	# requests never reach the AllowOverride All .htaccess chain above, which
+	# would otherwise rewrite /html5/... into store/public and 404 it.
+	#
+	# NOTE: the guacamole install step is optional. If it was skipped, these
+	# blocks proxy to a port with nothing on it and /html5/ returns 503. That is
+	# the correct behaviour — updateUserToken() has a 5s timeout and treats an
+	# unreachable console service as a warning, not a login failure.
+	<Location /html5/>
+		Require all granted
+		ProxyPass        http://127.0.0.1:8080/html5/ flushpackets=on
+		ProxyPassReverse http://127.0.0.1:8080/html5/
+	</Location>
+
+	# The console data plane. It must be ws://, not http:// — mod_proxy_http
+	# will not perform the Upgrade, and the symptom is a console that opens,
+	# shows a black rectangle and then disconnects.
+	#
+	# This block comes AFTER the one above on purpose: Apache applies <Location>
+	# sections in the order they appear, so of the two that match a
+	# websocket-tunnel request, the last one wins. Moving it above /html5/ would
+	# silently disable WebSocket tunnelling and fall the client back to the HTTP
+	# tunnel, which works but is markedly slower and logs
+	# "Using HTTP tunnel (not WebSocket). Performance may be sub-optimal."
+	<Location /html5/websocket-tunnel>
+		Require all granted
+		ProxyPass        ws://127.0.0.1:8080/html5/websocket-tunnel
+		ProxyPassReverse ws://127.0.0.1:8080/html5/websocket-tunnel
+	</Location>
+
+	# Large lab and image uploads; matches post_max_size in .user.ini.
+	LimitRequestBody 209715200
+
+	ErrorLog  ${APACHE_LOG_DIR}/pnetlab-error.log
+	CustomLog ${APACHE_LOG_DIR}/pnetlab-access.log combined
+</VirtualHost>

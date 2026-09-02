@@ -1,0 +1,6 @@
+# Built here, never committed. The fork ships source and compiles during
+# install, the same arrangement as install/sql — so the repository stays free of
+# binaries and the ISO dependency is closed either way.
+*.o
+qemu_wrapper_telnet
+wrapper_test

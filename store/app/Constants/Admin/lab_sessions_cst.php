@@ -1,8 +1,8 @@
 <?php
-define('LAB_SESSIONS_TABLE', 'lab_sessions');
-define('LAB_SESSION_ID', 'lab_session_id');
-define('LAB_SESSION_LID', 'lab_session_lid');
-define('LAB_SESSION_POD', 'lab_session_pod');
-define('LAB_SESSION_JOINED', 'lab_session_joined');
-define('LAB_SESSION_PATH', 'lab_session_path');
-define('LAB_SESSION_RUNNING', 'lab_session_running');
+defined('LAB_SESSIONS_TABLE') || define('LAB_SESSIONS_TABLE', 'lab_sessions');
+defined('LAB_SESSION_ID') || define('LAB_SESSION_ID', 'lab_session_id');
+defined('LAB_SESSION_LID') || define('LAB_SESSION_LID', 'lab_session_lid');
+defined('LAB_SESSION_POD') || define('LAB_SESSION_POD', 'lab_session_pod');
+defined('LAB_SESSION_JOINED') || define('LAB_SESSION_JOINED', 'lab_session_joined');
+defined('LAB_SESSION_PATH') || define('LAB_SESSION_PATH', 'lab_session_path');
+defined('LAB_SESSION_RUNNING') || define('LAB_SESSION_RUNNING', 'lab_session_running');

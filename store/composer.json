@@ -1,28 +1,29 @@
 {
-    "name": "laravel/laravel",
-    "description": "The Laravel Framework.",
-    "keywords": ["framework", "laravel"],
-    "license": "MIT",
+    "name": "pnetlab/pnetlab",
+    "description": "PNETLab \u2014 network emulation lab platform",
+    "keywords": [
+        "framework",
+        "laravel"
+    ],
+    "license": "BSD-3-Clause",
     "type": "project",
     "require": {
-        "php": ">=7.0.0",
-        "fideloper/proxy": "~3.3",
-        "firebase/php-jwt": "^5.0",
-        "jenssegers/agent": "^2.6",
-        "laravel/framework": "5.5.*",
-        "laravel/tinker": "~1.0"
+        "firebase/php-jwt": "^6.10",
+        "laravel/framework": "^12.0",
+        "laravel/tinker": "^2.9",
+        "laravel/ui": "^4.6",
+        "php": "^8.2"
     },
     "require-dev": {
-        "filp/whoops": "~2.0",
-        "fzaninotto/faker": "~1.4",
-        "mockery/mockery": "~1.0",
-        "phpunit/phpunit": "~6.0",
-        "symfony/thanks": "^1.0"
+        "fakerphp/faker": "^1.23",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.1",
+        "phpunit/phpunit": "^11.0"
     },
     "autoload": {
-    	"files": [
-	        "app/Helpers/Default.php"
-	    ],
+        "files": [
+            "app/Helpers/Default.php"
+        ],
         "classmap": [
             "database/seeds",
             "database/factories"
@@ -38,25 +39,22 @@
     },
     "extra": {
         "laravel": {
-            "dont-discover": [
-            ]
+            "dont-discover": []
         }
     },
     "scripts": {
-        "post-root-package-install": [
-            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
-        ],
-        "post-create-project-cmd": [
-            "@php artisan key:generate"
-        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
-            "@php artisan package:discover"
+            "@php artisan package:discover --ansi"
         ]
     },
     "config": {
         "preferred-install": "dist",
         "sort-packages": true,
-        "optimize-autoloader": true
+        "optimize-autoloader": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
     }
 }

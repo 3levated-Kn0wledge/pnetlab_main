@@ -53,18 +53,19 @@ class device_dynamips extends device
 
     public function command()
     {
-        $cmd = 'dynamips -T ' . $this->getPort(). ' ';
+        $cmd = 'dynamips -T ' . escapeshellarg($this->getPort()) . ' ';
         $cmd .= isset($this->dynamips_options) ? $this->dynamips_options : '';
         $cmd .= ' -l dynamips.txt';               // Set logging file
-        $cmd .= ' -N "' . $this->name . '"';               // Set logging file
-        $cmd .= ' --idle-pc ' . $this->idlepc;    // Set the idle PC
-        $cmd .= ' -i ' . $this->getSession();               // Set instance ID
-        $cmd .= ' -r ' . $this->ram;              // Set the virtual RAM size
-        $cmd .= ' -n ' . $this->nvram;            // Set the NVRAM size
+        $cmd .= ' -N ' . escapeshellarg($this->name);               // Set logging file
+        $cmd .= ' --idle-pc ' . escapeshellarg($this->idlepc);    // Set the idle PC
+        $cmd .= ' -i ' . escapeshellarg($this->getSession());               // Set instance ID
+        $cmd .= ' -r ' . escapeshellarg($this->ram);              // Set the virtual RAM size
+        $cmd .= ' -n ' . escapeshellarg($this->nvram);            // Set the NVRAM size
+        // sweep-exempt: the template's flag string supplies multiple arguments.
         $cmd .= ' ' . $this->getFlag();           // Adding Ethernet flags
 
         if ($this->config == '1') $cmd .= ' -C startup-config';
-        $cmd .= ' /opt/unetlab/addons/dynamips/' . $this->image . ' > ' . $this->getRunningPath() . '/wrapper.txt';
+        $cmd .= ' ' . escapeshellarg('/opt/unetlab/addons/dynamips/' . $this->image) . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt');
 
         return $cmd;
     }
@@ -169,8 +170,8 @@ class device_dynamips extends device
             error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80066]);
             return 80066;
         }
-        $cmd = '/opt/unetlab/scripts/wrconf_dyn.py -p ' . $this->getPort() . ' -t 30';
-        secureCmd($cmd);
+        $cmd = '/opt/unetlab/scripts/wrconf_dyn.py -p ' . escapeshellarg($this->getPort()) . ' -t 30';
+        secureCmd($cmd, SECURE_LINE);
         exec($cmd, $o, $rc);
         error_log(date('M d H:i:s ') . 'INFO: force write configuration ' . $cmd);
         if ($rc != 0) {
@@ -178,7 +179,7 @@ class device_dynamips extends device
             error_log(date('M d H:i:s ') . implode("\n", $o));
             return 80060;
         }
-        $cmd = 'nvram_export ' . $nvram . ' ' . $tmp;
+        $cmd = 'nvram_export ' . escapeshellarg($nvram) . ' ' . escapeshellarg($tmp);
         exec($cmd, $o, $rc);
         error_log(date('M d H:i:s ') . 'INFO: exporting ' . $cmd);
         if ($rc != 0) {

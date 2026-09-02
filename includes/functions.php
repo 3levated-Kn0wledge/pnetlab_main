@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * includes/functions.php
+ *
+ * Various shared functions for the legacy API and the wrappers.
+ *
+ * Derived from UNetLab html/includes/functions.php.
+ * Its BSD-3-Clause notice was absent from the copy this fork inherited
+ * and is restored below. See docs/LICENSING.md section 2.2.
+ *
+ * @author Andrea Dainese <andrea.dainese@gmail.com>
+ * @copyright 2014-2016 Andrea Dainese
+ * @license BSD-3-Clause https://github.com/dainok/unetlab/blob/master/LICENSE
+ * @link http://www.unetlab.com/
+ *
+ * Substantially modified by PNETLab and by the pnetlab_main fork. Those
+ * modifications are licensed under the terms in this repository's LICENSE;
+ * the notice above must be retained regardless.
+ */
+
 use App\Exceptions\FinishException;
 
 $db = null;
@@ -264,55 +283,225 @@ function html5AddSession($db, $name, $type, $port, $userid, $hostname = null, $s
 {
 	if ($servicePort === null) $servicePort = $port;
 	if ($hostname === null) $hostname = '127.0.0.1';
-	
+
 	$connectionId = $port.$userid;
 
 	$query = "delete from guacamole_connection where connection_id=:connection_id";
 	$statement = $db->prepare($query);
 	$statement->execute(['connection_id'=>$connectionId]);
 
-	$query = "replace into guacamole_connection ( connection_id , connection_name , protocol ) values ( " . $connectionId . ",'" . $name . "','" . $type . "');";
+	// $name is derived from the node name, which is user-supplied. Bind it.
+	$query = "replace into guacamole_connection ( connection_id , connection_name , protocol ) values ( ?, ?, ? )";
 	$statement = $db->prepare($query);
-	$statement->execute();
+	$statement->execute([$connectionId, $name, $type]);
 
-	$query = "replace into guacamole_connection_permission ( entity_id, connection_id, permission ) values ( " . ($userid + 1000) . " , " . $connectionId . ", 'READ' );";
+	$query = "replace into guacamole_connection_permission ( entity_id, connection_id, permission ) values ( ?, ?, 'READ' )";
 	$statement = $db->prepare($query);
-	$statement->execute();
+	$statement->execute([$userid + 1000, $connectionId]);
 
+	// Parameter rows, as [name, value] pairs. Values reach the database only as
+	// bound parameters — several of them ($hostname, $username, $password) are
+	// caller-controlled.
 	$connectionData = [
-		
-		"( " . $connectionId . ",'ignore-cert','true' )",
-		"( " . $connectionId . ", 'hostname', '".$hostname."' )",
-		"( " . $connectionId . ", 'port', '".$servicePort."' )",
-		"( " . $connectionId . ",'create-drive-path','true' )",
-		"( " . $connectionId . ",'enable-drive','true' )",
-		"( " . $connectionId . ",'enable-printing','false' )",
-		"( " . $connectionId . ",'drive-path','/tmp/" . $connectionId . "' )",
-		
+		['ignore-cert', 'true'],
+		['hostname', $hostname],
+		['port', $servicePort],
+		['create-drive-path', 'true'],
+		['enable-drive', 'true'],
+		['enable-printing', 'false'],
+		['drive-path', '/tmp/' . $connectionId],
 	];
 
 	if ($password != null && $username != null) {
-		$connectionData[] = "( " . $connectionId . ",'disable-auth','false' )";
-		$connectionData[] = "( " . $connectionId . ",'username', '".$username."' )";
-		$connectionData[] = "( " . $connectionId . ",'password', '".$password."' )";
-		$connectionData[] = "( " . $connectionId . ",'security', 'any' )";
+		$connectionData[] = ['disable-auth', 'false'];
+		$connectionData[] = ['username', $username];
+		$connectionData[] = ['password', $password];
+		$connectionData[] = ['security', 'any'];
 
 		if ($onresize != null) {
-			$connectionData[] = "( " . $connectionId . ",'resize-method', '".$onresize."' )";
+			$connectionData[] = ['resize-method', $onresize];
 		}
-
-	}else{
-		$connectionData[] = "( " . $connectionId . ",'disable-auth','true' )";
+	} else {
+		$connectionData[] = ['disable-auth', 'true'];
 	}
 
-	if($type == 'rdp'){
-		$connectionData[] = "( " . $connectionId . ",'disable-glyph-caching', 'true' )";
+	if ($type == 'rdp') {
+		$connectionData[] = ['disable-glyph-caching', 'true'];
 	}
 
-	$query = "insert into guacamole_connection_parameter ( connection_id , parameter_name , parameter_value ) values ". implode(',', $connectionData);
+	$placeholders = implode(',', array_fill(0, count($connectionData), '( ?, ?, ? )'));
+	$params = [];
+	foreach ($connectionData as $row) {
+		$params[] = $connectionId;
+		$params[] = $row[0];
+		$params[] = $row[1];
+	}
+
+	$query = "insert into guacamole_connection_parameter ( connection_id , parameter_name , parameter_value ) values " . $placeholders;
 	$statement = $db->prepare($query);
-	$statement->execute();
-	
+	$statement->execute($params);
+}
+
+/**
+ * Hash a user password for storage.
+ *
+ * Passwords were previously stored as unsalted, single-round hash('sha256', $p).
+ * That is reversible by rainbow table and brute-forceable at billions of guesses
+ * per second on commodity hardware; the default admin password's digest matches
+ * `echo -n pnet | sha256sum` exactly.
+ *
+ * @param   string  $plain              Plaintext password
+ * @return  string                      Hash suitable for the users.password column
+ */
+function unl_password_hash($plain)
+{
+	return password_hash($plain, PASSWORD_DEFAULT);
+}
+
+/**
+ * Verify a password against a stored hash, accepting the legacy format.
+ *
+ * Existing installations hold sha256 digests, and users cannot be asked to reset
+ * passwords they cannot log in to change. So a legacy digest still verifies, and
+ * the caller is told to re-hash it — see unl_password_needs_rehash().
+ *
+ * hash_equals() is used for the legacy comparison because the original code used
+ * != on two strings, which is not constant time.
+ *
+ * @param   string  $plain              Plaintext password as supplied
+ * @param   string  $stored             Value from the users.password column
+ * @return  bool                        True if the password matches
+ */
+function unl_password_verify($plain, $stored)
+{
+	if (!is_string($stored) || $stored === '') return false;
+
+	// Legacy: 64 hex characters and nothing else.
+	if (preg_match('/^[0-9a-f]{64}$/i', $stored)) {
+		return hash_equals(strtolower($stored), hash('sha256', $plain));
+	}
+
+	return password_verify($plain, $stored);
+}
+
+/**
+ * Should this stored hash be replaced after a successful login?
+ *
+ * True for any legacy sha256 digest, and for a modern hash whose cost or
+ * algorithm has since moved on.
+ *
+ * @param   string  $stored             Value from the users.password column
+ * @return  bool                        True if it should be re-hashed
+ */
+function unl_password_needs_rehash($stored)
+{
+	if (!is_string($stored) || $stored === '') return true;
+	if (preg_match('/^[0-9a-f]{64}$/i', $stored)) return true;
+	return password_needs_rehash($stored, PASSWORD_DEFAULT);
+}
+
+/**
+ * Hash a lab-level password for storage in the .unl file.
+ *
+ * Lab passwords were stored as a bare, unsalted md5() digest and compared with
+ * ==, which is loose comparison on two strings. PHP still juggles two numeric
+ * strings to numbers there, so the classic "magic hash" collision applies: any
+ * two passwords whose md5 digests both match /^0e[0-9]+$/ compare equal, and
+ * md5('240610708') and md5('QNKCDZO') are the textbook pair. Unsalted md5 is
+ * also trivially reversed by rainbow table.
+ *
+ * These are kept separate from unl_password_hash()/unl_password_verify()
+ * deliberately. Those accept a 64-hex legacy digest for user accounts; teaching
+ * them to also accept a 32-hex md5 would widen the accepted legacy formats for
+ * user login, which is the higher-value target. Lab passwords carry their own
+ * legacy format, so they get their own pair.
+ *
+ * @param   string  $plain              Plaintext lab password
+ * @return  string                      Hash suitable for the lab password attribute
+ */
+function unl_lab_password_hash($plain)
+{
+	return password_hash($plain, PASSWORD_DEFAULT);
+}
+
+/**
+ * Verify a lab password against the stored value, accepting the legacy format.
+ *
+ * Labs already on disk hold md5 digests and their owners are not necessarily
+ * around to re-set them, so a legacy digest must still open the lab. The
+ * comparison is hash_equals() rather than ==: constant time, no type juggling,
+ * so the magic-hash collision is gone even for the legacy path.
+ *
+ * @param   string  $plain              Plaintext password as supplied
+ * @param   string  $stored             Value of the lab's password attribute
+ * @return  bool                        True if the password matches
+ */
+function unl_lab_password_verify($plain, $stored)
+{
+	if (!is_string($stored) || $stored === '') return false;
+	if (!is_string($plain)) return false;
+
+	// Legacy: a bare md5 digest, 32 hex characters and nothing else.
+	if (preg_match('/^[0-9a-f]{32}$/i', $stored)) {
+		return hash_equals(strtolower($stored), md5($plain));
+	}
+
+	return password_verify($plain, $stored);
+}
+
+/**
+ * Is this stored lab password still in the legacy md5 format?
+ *
+ * Nothing rewrites the lab file automatically on a successful unlock — saving a
+ * lab rewrites the whole .unl document, which is not something an unlock should
+ * do to a lab that may be running. The upgrade happens when the password is next
+ * set. This is here so a caller that does own the file can ask.
+ *
+ * @param   string  $stored             Value of the lab's password attribute
+ * @return  bool                        True if it should be re-hashed
+ */
+function unl_lab_password_needs_rehash($stored)
+{
+	if (!is_string($stored) || $stored === '') return true;
+	if (preg_match('/^[0-9a-f]{32}$/i', $stored)) return true;
+	return password_needs_rehash($stored, PASSWORD_DEFAULT);
+}
+
+/**
+ * The credential PNETLab presents to Guacamole on a user's behalf.
+ *
+ * Guacamole needs a password it can store and check, and PNETLab previously gave
+ * it the sha256 digest of the user's own password — which meant the guacdb
+ * database held material derived directly from user credentials, and meant the
+ * digest had to remain derivable, which is incompatible with storing a proper
+ * password hash.
+ *
+ * This derives a stable per-user value from an installation secret instead, so
+ * Guacamole holds nothing related to the user's password. The value is
+ * deterministic, so both the login path and the console path can compute it
+ * without storing anything extra.
+ *
+ * @param   string  $username           PNETLab username
+ * @return  string                      Credential to present to Guacamole
+ */
+function unl_guacamole_secret($username)
+{
+	static $installSecret = null;
+
+	if ($installSecret === null) {
+		$path = '/opt/unetlab/data/.guacamole_secret';
+		if (is_readable($path)) {
+			$installSecret = trim(file_get_contents($path));
+		}
+		if (!$installSecret) {
+			$installSecret = bin2hex(random_bytes(32));
+			// Written 0600 so only the web user can read it.
+			@file_put_contents($path, $installSecret, LOCK_EX);
+			@chmod($path, 0600);
+		}
+	}
+
+	return hash_hmac('sha256', (string) $username, $installSecret);
 }
 
 function updateUserToken($username, $password, $pod)
@@ -325,31 +514,53 @@ function updateUserToken($username, $password, $pod)
 			'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
 			'method'  => 'POST',
 			'content' => http_build_query($data),
+			// Without this the request inherits default_socket_timeout and can
+			// stall a web worker. The console service is local, so a short bound
+			// is generous.
+			'timeout' => 5,
+			'ignore_errors' => true,
 		)
 	);
 
 	$context  = stream_context_create($options);
-	$result = (array) json_decode(file_get_contents($url, false, $context));
-	
+
+	// The HTML5 console service is optional. It may not be installed, may not be
+	// running, or may be mid-restart. None of those are a reason to fail a login:
+	// the caller queues the session cookie *after* this returns, so throwing here
+	// locked every user out of an appliance whose consoles happened to be down.
+	// See docs/OFFLINE-FIRST.md — an absent service degrades, it does not block.
+	$body = @file_get_contents($url, false, $context);
+	if ($body === false) {
+		error_log(date('M d H:i:s ') . 'WARNING: HTML5 console service unreachable at ' . $url . '; console access will be unavailable for this session');
+		return false;
+	}
+
+	$result = (array) json_decode($body);
+	if (!isset($result['authToken'])) {
+		error_log(date('M d H:i:s ') . 'WARNING: HTML5 console service returned no authToken; console access will be unavailable for this session');
+		return false;
+	}
+
 	$db = checkDatabase();
 	$token = $result['authToken'];
-	$query = "delete from html5 where username = '" . $username . "';";
+	// $username arrives from the login form.
+	$query = "delete from html5 where username = ?";
 	$statement = $db->prepare($query);
-	$statement->execute();
-	$query = "delete from html5 where pod = '" . $pod . "';";
+	$statement->execute([$username]);
+	$query = "delete from html5 where pod = ?";
 	$statement = $db->prepare($query);
-	$statement->execute();
-	$query = "replace into html5 ( username , pod, token ) values ( '" . $username . "','" . $pod . "','" . $token . "');";
+	$statement->execute([$pod]);
+	$query = "replace into html5 ( username , pod, token ) values ( ?, ?, ? )";
 	$statement = $db->prepare($query);
-	$statement->execute();
+	$statement->execute([$username, $pod, $token]);
 }
 
 function getHtml5Token($userid)
 {
 	$db = checkDatabase();
-	$query = "select token from html5 where pod = " . $userid . " ;";
+	$query = "select token from html5 where pod = ?";
 	$statement = $db->prepare($query);
-	$statement->execute();
+	$statement->execute([$userid]);
 	$result = $statement->fetch();
 	return $result['token'];
 }
@@ -569,9 +780,16 @@ function addWireshark($lab, $node_id, $interface_id)
 
 function addWiresharkSystem($lab, $node_id, $interface_id)
 {
-	secureCmd($node_id);
-	secureCmd($interface_id);
+	// The emptiness test comes FIRST now. secureCmd()'s allowlist refuses an empty
+	// string, so leaving it second would have replaced 'Missing data' with a
+	// less useful message for the commonest bad request on this route.
+	//
+	// SECURE_TOKEN: both of these are ids, not command lines. They are used as
+	// array keys two lines below and never reach a shell on this path at all, so
+	// this is a shape assertion rather than a shell defence.
 	if ($interface_id === '' || $node_id === '') throw new Exception('Missing data');
+	$node_id = secureCmd($node_id, SECURE_TOKEN);
+	$interface_id = secureCmd($interface_id, SECURE_TOKEN);
 
 	$lab_session = $lab->getSession();
 	if ($lab_session == null) throw new Exception('No Lab Session');
@@ -620,52 +838,80 @@ function addWiresharkSystem($lab, $node_id, $interface_id)
 
 	// create wireshark docker container.
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container ls -a | grep ' . $dockerName; // Check docker is exist
+	/*
+	 * -H=unix:///var/run/docker.sock, not the tcp://127.0.0.1:4243 every one of
+	 * these call sites used to name. Two reasons, and the second is the one that
+	 * made this urgent:
+	 *
+	 *   - that TCP socket is unauthenticated. Anything that can open a loopback
+	 *     connection — every PHP path here, but equally any other local user or
+	 *     any SSRF in the web layer — can POST /containers/create with
+	 *     Binds: ["/:/host"] and start a container that owns the host. www-data
+	 *     reaching it is www-data being root, whatever the sudo policy says;
+	 *   - nothing in install/ ever configured it. Docker listens on the unix
+	 *     socket out of the box and needs an explicit -H (or a systemd drop-in)
+	 *     to listen on 4243 as well, so on a clean install of this fork every
+	 *     command below failed to connect and Docker nodes could not work at all.
+	 *
+	 * The unix socket is root:docker 0660, so access is group membership rather
+	 * than a listening port: install/lib/platform.sh puts the PHP-FPM user in the
+	 * docker group, which is also why none of these need sudo any more. Group
+	 * membership is read at process start, so that step restarts php-fpm — a
+	 * running pool will not pick it up.
+	 *
+	 * The endpoint is named explicitly rather than left to the CLI default so a
+	 * stray DOCKER_HOST cannot redirect it. tests/Security/DockerSocketTest.php
+	 * fails if tcp://127.0.0.1:4243 comes back.
+	 */
+	$cmd = 'docker -H=unix:///var/run/docker.sock container ls -a | grep ' . escapeshellarg($dockerName); // Check docker is exist
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	if (count($o) == 0) {
-		$cmd = 'docker -H=tcp://127.0.0.1:4243 create --shm-size 1G --privileged -ti --net=none --name=' . $dockerName . ' -h "' . $node_name . '_' . $interface_name . '" pnetlab/pnet-wireshark';
+		$cmd = 'docker -H=unix:///var/run/docker.sock create --shm-size 1G --privileged -ti --net=none --name=' . escapeshellarg($dockerName)
+			. ' -h ' . escapeshellarg($node_name . '_' . $interface_name) . ' pnetlab/pnet-wireshark';
 		exec($cmd, $o, $rc);
 	}
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 start ' . $dockerName;
+	$cmd = 'docker -H=unix:///var/run/docker.sock start ' . escapeshellarg($dockerName);
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format "{{ .State.Pid }}" ' . $dockerName;
+	$cmd = 'docker -H=unix:///var/run/docker.sock inspect --format "{{ .State.Pid }}" ' . escapeshellarg($dockerName);
 	$o = [];
 	exec($cmd, $o, $rc);
 	$pid = $o[0];
 
 	// Create rdp connection to eth1
 
-	$cmd = 'ip link | grep rdp' . $uniqueId;
+	$cmd = 'ip link | grep ' . escapeshellarg('rdp' . $uniqueId);
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	if (count($o) == 0) {
-		$cmd = 'ip link add rdp' . $uniqueId . ' type veth peer name dc0' . $uniqueId;
+		$cmd = 'ip link add ' . escapeshellarg('rdp' . $uniqueId) . ' type veth peer name ' . escapeshellarg('dc0' . $uniqueId);
 		exec($cmd, $o, $rc);
-		$cmd = 'ip link set dev rdp' . $uniqueId . ' up';
+		$cmd = 'ip link set dev ' . escapeshellarg('rdp' . $uniqueId) . ' up';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev dc0' . $uniqueId . ' up';
+		$cmd = 'ip link set dev ' . escapeshellarg('dc0' . $uniqueId) . ' up';
 		exec($cmd, $o, $rc);
 
 		// Add eth1 for docker
 
-		$cmd = 'ip link set netns ' . $pid . ' dc0' . $uniqueId . ' name eth1 address ' . '48:' . sprintf('%02x', $lab_session) . ':' . sprintf('%02x', $node_id / 512) . ':' . sprintf('%02x', $node_id % 512) . ':' . sprintf('%02x', $interface_id) . ':' . sprintf('%02x', 1) . ' up';
+		$mac = sprintf('48:%02x:%02x:%02x:%02x:%02x', $lab_session, intdiv($node_id, 512), $node_id % 512, $interface_id, 1);
+		$cmd = 'ip link set netns ' . escapeshellarg($pid) . ' ' . escapeshellarg('dc0' . $uniqueId)
+			. ' name eth1 address ' . escapeshellarg($mac) . ' up';
 		exec($cmd, $o, $rc);
 
 		//connect eth1 to docker 0
-		$cmd = 'brctl addif docker0 rdp' . $uniqueId;
+		$cmd = 'brctl addif docker0 ' . escapeshellarg('rdp' . $uniqueId);
 		exec($cmd, $o, $rc);
 
 		//config ip address eth1
-		$cmd = 'sudo /opt/unetlab/wrappers/nsenter -t ' . $pid . ' -n ip addr add ' . $ipAddress . '/16 dev eth1';
+		$cmd = 'sudo /opt/unetlab/wrappers/nsenter -t ' . escapeshellarg($pid) . ' -n ip addr add ' . escapeshellarg($ipAddress . '/16') . ' dev eth1';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'sudo /opt/unetlab/wrappers/nsenter -t ' . $pid . ' -n ip route add default via ' . $ipAddress;
+		$cmd = 'sudo /opt/unetlab/wrappers/nsenter -t ' . escapeshellarg($pid) . ' -n ip route add default via ' . escapeshellarg($ipAddress);
 		exec($cmd, $o, $rc);
 
 		// // nat rdp port
@@ -677,37 +923,39 @@ function addWiresharkSystem($lab, $node_id, $interface_id)
 		// exec($cmd, $o, $rc);
 	}
 
-	$cmd = 'ip link | grep span' . $uniqueId;
+	$cmd = 'ip link | grep ' . escapeshellarg('span' . $uniqueId);
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	if (count($o) == 0) {
 
-		$cmd = 'ip link add span' . $uniqueId . ' type veth peer name cap' . $uniqueId;
+		$cmd = 'ip link add ' . escapeshellarg('span' . $uniqueId) . ' type veth peer name ' . escapeshellarg('cap' . $uniqueId);
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev span' . $uniqueId . ' up';
+		$cmd = 'ip link set dev ' . escapeshellarg('span' . $uniqueId) . ' up';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev span' . $uniqueId. ' mtu 9000';
+		$cmd = 'ip link set dev ' . escapeshellarg('span' . $uniqueId) . ' mtu 9000';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev cap' . $uniqueId . ' up';
+		$cmd = 'ip link set dev ' . escapeshellarg('cap' . $uniqueId) . ' up';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'ip link set dev cap' . $uniqueId. ' mtu 9000';
+		$cmd = 'ip link set dev ' . escapeshellarg('cap' . $uniqueId) . ' mtu 9000';
 		exec($cmd, $o, $rc);
 
 		// add capture port to docker 
-		$cmd = 'ip link set netns ' . $pid . ' cap' . $uniqueId . ' name eth0 address ' . '48:' . sprintf('%02x', $lab_session) . ':' . sprintf('%02x', $node_id / 512) . ':' . sprintf('%02x', $node_id % 512) . ':' . sprintf('%02x', $interface_id) . ':' . sprintf('%02x', 0) . ' up';
+		$mac = sprintf('48:%02x:%02x:%02x:%02x:%02x', $lab_session, intdiv($node_id, 512), $node_id % 512, $interface_id, 0);
+		$cmd = 'ip link set netns ' . escapeshellarg($pid) . ' ' . escapeshellarg('cap' . $uniqueId)
+			. ' name eth0 address ' . escapeshellarg($mac) . ' up';
 		exec($cmd, $o, $rc);
 
 		// add span port to network need capture
-		$cmd = 'brctl addif ' . $net_name . ' span' . $uniqueId;
+		$cmd = 'brctl addif ' . escapeshellarg($net_name) . ' ' . escapeshellarg('span' . $uniqueId);
 		exec($cmd, $o, $rc);
 
 		// set age
-		$cmd = 'brctl setageing ' . $net_name . ' 0';
+		$cmd = 'brctl setageing ' . escapeshellarg($net_name) . ' 0';
 		exec($cmd, $o, $rc);
 	}
 
@@ -778,28 +1026,28 @@ function deleteWiresharkSystem($tenant, $lab_session, $node_id, $interface_id, $
 	$dockerName = 'Capture_' . $uniqueId;
 	$connectPort = 3389;
 	// nat rdp port
-	$cmd = 'sudo iptables -t nat -D PREROUTING -p tcp --dport ' . $port . ' -j DNAT --to ' . $ipAddress . ':' . $connectPort;
+	$cmd = 'sudo iptables -t nat -D PREROUTING -p tcp --dport ' . escapeshellarg($port) . ' -j DNAT --to ' . escapeshellarg($ipAddress . ':' . $connectPort);
 	exec($cmd, $o, $rc);
 
 	$dockerIp = getDockerIp();
-	$cmd = 'sudo iptables -t nat -D POSTROUTING -p tcp -d ' . $ipAddress . ' --dport ' . $connectPort . ' -j SNAT --to ' . $dockerIp;
+	$cmd = 'sudo iptables -t nat -D POSTROUTING -p tcp -d ' . escapeshellarg($ipAddress) . ' --dport ' . escapeshellarg($connectPort) . ' -j SNAT --to ' . escapeshellarg($dockerIp);
 	exec($cmd, $o, $rc);
 
 	// remove rdp connection to eth1
-	$cmd = 'ip link delete rdp' . $uniqueId;
+	$cmd = 'ip link delete ' . escapeshellarg('rdp' . $uniqueId);
 	$o = [];
 	exec($cmd, $o, $rc);
 
 	// remove span connection to eth1
-	$cmd = 'ip link delete span' . $uniqueId;
+	$cmd = 'ip link delete ' . escapeshellarg('span' . $uniqueId);
 	$o = [];
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container stop ' . $dockerName;
+	$cmd = 'docker -H=unix:///var/run/docker.sock container stop ' . escapeshellarg($dockerName);
 	$o = [];
 	exec($cmd, $o, $rc);
 
-	$cmd = 'docker -H=tcp://127.0.0.1:4243 container rm ' . $dockerName . ' &';
+	$cmd = 'docker -H=unix:///var/run/docker.sock container rm ' . escapeshellarg($dockerName) . ' &';
 	$o = [];
 	exec($cmd, $o, $rc);
 
@@ -1168,10 +1416,10 @@ function destroyLabSession($lab)
 			'lab_session' =>  $lab->getSession(),
 		]);
 
-		$cmd = 'brctl show | grep vnet' . $lab->getSession() . ' | sed \'s/^\(vnet[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ifconfig $line down; sudo brctl delbr $line; done';
+		$cmd = 'brctl show | grep ' . escapeshellarg('vnet' . $lab->getSession()) . ' | sed \'s/^\(vnet[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ifconfig $line down; sudo brctl delbr $line; done';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'sudo rm -rf ' . BASE_TMP . '/' . $lab->getSession();
+		$cmd = 'sudo rm -rf ' . escapeshellarg(BASE_TMP . '/' . $lab->getSession());
 		exec($cmd, $o, $rc);
 
 		return ['result' => true, 'message' => 'Success'];
@@ -1232,14 +1480,27 @@ function destroyBrokenLabSession($lab_session)
 		$result = $statement->fetchAll(PDO::FETCH_ASSOC);
 		foreach ($result as $node) {
 			if ($node['node_session_type'] == 'docker') {
-				$cmd = 'sudo docker -H=tcp://127.0.0.1:4243 stop docker' . $node['node_session_id'];
+				$cmd = 'docker -H=unix:///var/run/docker.sock stop ' . escapeshellarg('docker' . $node['node_session_id']);
 				exec($cmd, $o, $rc);
-				$cmd = 'sudo docker -H=tcp://127.0.0.1:4243 rm docker' . $node['node_session_id'];
+				$cmd = 'docker -H=unix:///var/run/docker.sock rm ' . escapeshellarg('docker' . $node['node_session_id']);
 				exec($cmd, $o, $rc);
 			} else {
-				$cmd = 'sudo fuser -k -TERM ' . $node['node_session_workspace'] . ' > /dev/null 2>&1';
+				$cmd = 'sudo fuser -k -TERM ' . escapeshellarg($node['node_session_workspace']) . ' > /dev/null 2>&1';
 				exec($cmd, $o, $rc);
 			}
+
+			// Reap the tenant account. This path does NOT go through
+			// device::stop(), which is where the ordinary reap lives — it kills
+			// the processes itself, precisely because the lab is too broken to
+			// build Node objects for — so without this call, destroying a broken
+			// session is the one teardown that still leaks an account.
+			//
+			// After the kill, never before it: the account owns the taps and the
+			// running directory. The wrapper re-checks that for itself and keeps
+			// the account if anything is still alive under it.
+			$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper -a reap-tenant'
+				. ' -S ' . (int) $node['node_session_id'] . ' > /dev/null 2>&1';
+			exec($cmd, $o, $rc);
 		}
 
 		$query = 'DELETE FROM node_sessions WHERE node_session_lab = :node_session_lab';
@@ -1260,10 +1521,10 @@ function destroyBrokenLabSession($lab_session)
 			'lab_session' =>  $lab_session
 		]);
 
-		$cmd = 'brctl show | grep vnet' . $lab_session . ' | sed \'s/^\(vnet[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ifconfig $line down; sudo brctl delbr $line; done';
+		$cmd = 'brctl show | grep ' . escapeshellarg('vnet' . $lab_session) . ' | sed \'s/^\(vnet[0-9]\+_[0-9]\+\).*/\1/g\' | while read line; do sudo ifconfig $line down; sudo brctl delbr $line; done';
 		exec($cmd, $o, $rc);
 
-		$cmd = 'sudo rm -rf ' . BASE_TMP . '/' . $lab_session;
+		$cmd = 'sudo rm -rf ' . escapeshellarg(BASE_TMP . '/' . $lab_session);
 		exec($cmd, $o, $rc);
 
 		return ['result' => true, 'message' => 'Success'];
@@ -1378,7 +1639,7 @@ function getNodeStatus($session, $type, $running_path, $port)
 	if (!isset($session)) return 0;
 
 	if ($type == 'docker') {
-		$cmd = 'docker -H=tcp://127.0.0.1:4243 inspect --format="{{ .State.Running }}" docker' . $session;
+		$cmd = 'docker -H=unix:///var/run/docker.sock inspect --format="{{ .State.Running }}" ' . escapeshellarg('docker' . $session);
 		exec($cmd, $o, $rc);
 		if ($rc == 0) {
 			if ($o[0] == 'true') {
@@ -1403,7 +1664,7 @@ function getNodeStatus($session, $type, $running_path, $port)
 		}
 	} else {
 		// Need to check if node port is used (netstat + grep doesn't require root privileges)
-		$cmd = 'netstat -a -t -n | grep LISTEN | grep :' . $port . ' 2>&1';
+		$cmd = 'netstat -a -t -n | grep LISTEN | grep ' . escapeshellarg(':' . $port) . ' 2>&1';
 		
 		exec($cmd, $o, $rc);
 		if ($rc == 0) {
@@ -1428,7 +1689,13 @@ function getNodeStatus($session, $type, $running_path, $port)
 
 function createRunningPath($lab_session, $node_session)
 {
-	return BASE_TMP . '/' . $lab_session . '/' . $node_session;
+	// Both are int(11) columns — lab_sessions.lab_session_id is AUTO_INCREMENT
+	// and node_sessions.node_session_id is allocated modulo 30000 by
+	// createNodeSession(). The cast says so, and it is what makes the workspace
+	// path this returns provably free of shell syntax: it is interpolated into
+	// emulator command lines all over devices/ through getRunningPath(), and it
+	// was the last unescaped value on several of them.
+	return BASE_TMP . '/' . (int) $lab_session . '/' . (int) $node_session;
 }
 
 
@@ -1486,7 +1753,7 @@ function getTemplates()
 				if($templ == 'docker'){
 					$found = 1;
 				}else{
-					$cmd = 'docker -H=tcp://127.0.0.1:4243 images | grep "'. $templ. '"';
+					$cmd = 'docker -H=unix:///var/run/docker.sock images | grep ' . escapeshellarg($templ);
 					exec($cmd, $o, $r);
 					if(count($o) > 0) $found = 1;
 				}
@@ -1628,7 +1895,7 @@ function checkRunningNodeLimit($pod){
 	
 	$hostLab = getUserByPod($pod);
 	if(!$hostLab) throw new ResponseException('User not exist');
-	if($hostLab[USER_ROLE] == 0) return true;
+	if (!$hostLab || ($hostLab[USER_ROLE] ?? 0) == 0) return true;
 
 	$checkMaxNode = false;
 	if(isset($hostLab[USER_MAX_NODE]) && $hostLab[USER_MAX_NODE] > 0){
@@ -1653,13 +1920,13 @@ function checkRunningNodeLimit($pod){
 	$totalRunningNode = $result['total_running_node'];
 
 	if($checkMaxNode){
-		if($totalRunningNode >= $hostLab[USER_MAX_NODE]){
+		if ($hostLab[USER_MAX_NODE] !== null && $totalRunningNode >= $hostLab[USER_MAX_NODE]) {
 			throw new ResponseException('max_running_node_limit', ['data' => $hostLab[USER_MAX_NODE]]);
 		}
 	}
 
 	if($checkMaxNodeLab){
-		if($totalRunningNode >= $hostLab[USER_MAX_NODELAB]){
+		if ($hostLab[USER_MAX_NODELAB] !== null && $totalRunningNode >= $hostLab[USER_MAX_NODELAB]) {
 			throw new ResponseException('max_running_nodelab_limit', ['data' => $hostLab[USER_MAX_NODELAB]]);
 		}
 	}
@@ -1672,9 +1939,13 @@ function checkLimit($pod)
 
 	$role = getRoleByPod($pod);
 
-	$ramLimit = $role[USER_ROLE_RAM];
-	$cpuLimit = $role[USER_ROLE_CPU];
-	$hddLimit = $role[USER_ROLE_HDD];
+	// user_roles is empty on a stock installation — including the appliance —
+	// so $role is routinely null here. The '' fallbacks immediately below are
+	// what supply the defaults; null-coalescing simply restores the PHP 7
+	// behaviour those fallbacks were written against.
+	$ramLimit = $role[USER_ROLE_RAM] ?? '';
+	$cpuLimit = $role[USER_ROLE_CPU] ?? '';
+	$hddLimit = $role[USER_ROLE_HDD] ?? '';
 
 	if ($ramLimit == '' || $ramLimit > 95) $ramLimit = 95;
 	if ($cpuLimit == '' || $cpuLimit > 95) $cpuLimit = 95;
@@ -1712,7 +1983,7 @@ function getPermission()
 	if ($GLOBALS['permission'] != null) return $GLOBALS['permission'];
 	$role = getRole();
 	if (!$role) return null;
-	$roleId = $role[USER_ROLE_ID];
+	$roleId = $role[USER_ROLE_ID] ?? null;
 	$db = checkDatabase();
 	$query = 'SELECT * FROM ' . USER_PERMISSION_TABLE . ' WHERE ' . USER_PER_ROLE . ' = :role_id';
 	$statement = $db->prepare($query);
@@ -1815,7 +2086,7 @@ function getWorkspace()
 
 	$role = getRole();
 	if ($role == 'null') throw new Exception('You do not have permission');
-	$workspace = $role['user_role_workspace'];
+	$workspace = $role['user_role_workspace'] ?? '';
 
 	$user = getUser();
 	if ($user[USER_WORKSPACE] != null && $user[USER_WORKSPACE] != '') {
@@ -1937,13 +2208,256 @@ function loadLanguage($lang)
 }
 
 
-function secureCmd($cmd){
-	$re = '/[#;|&]|\.{2,}/m';
-	if(preg_match($re, $cmd, $matches)){
-		print_r($matches);
-		throw new Exception("The command contains dangerous characters [" . join(" ", $matches) . "]");
+/**
+ * exec() without a shell.
+ *
+ * proc_open() given an ARRAY execs the binary directly on PHP >= 7.4: there is
+ * no /bin/sh anywhere on the path, so nothing in $argv can be a metacharacter,
+ * a redirect or a second command, and no escaping is needed or possible. That
+ * is a stronger statement than escapeshellarg() makes, and it is the shape
+ * tests/Security/ShellEscapingTest.php can actually prove — see its
+ * argv_literal/argv_param fixtures.
+ *
+ * The signature mirrors exec()'s on purpose, so converting a call site is one
+ * line and the surrounding `if ($rc != 0)` keeps working. stderr is folded into
+ * $output because every caller converted so far logged the two together.
+ *
+ * The same helper exists on the Laravel side as System\Wrapper::run() and in
+ * platform/wrappers/actions/. It is duplicated rather than shared because
+ * includes/ is loaded by the legacy API with no autoloader.
+ *
+ * @param  array  $argv    program then arguments; never a string
+ * @param  array  $output  filled with the combined output, one line per element
+ * @return int             the exit status, or 127 if the program could not run
+ */
+function unl_exec_argv(array $argv, &$output = null)
+{
+	$output = array();
+	if (count($argv) === 0) return 127;
+
+	$desc = array(
+		0 => array('pipe', 'r'),
+		1 => array('pipe', 'w'),
+		2 => array('pipe', 'w'),
+	);
+	$pipes = array();
+	$proc = @proc_open($argv, $desc, $pipes);
+	if (!is_resource($proc)) {
+		error_log(date('M d H:i:s ') . 'ERROR: cannot run ' . $argv[0]);
+		return 127;
 	}
-	return $cmd;
+
+	fclose($pipes[0]);
+	$out = stream_get_contents($pipes[1]);
+	$err = stream_get_contents($pipes[2]);
+	fclose($pipes[1]);
+	fclose($pipes[2]);
+	$rc = proc_close($proc);
+
+	$combined = rtrim($out . $err, "\n");
+	if ($combined !== '') $output = explode("\n", $combined);
+	return $rc;
+}
+
+
+/**
+ * secureCmd() — an ALLOWLIST, and deliberately not the control.
+ *
+ * WHAT IT USED TO BE
+ *
+ *     $re = '/[#;|&]|\.{2,}/m';
+ *     if (preg_match($re, $cmd, $matches)) throw ...;
+ *     return $cmd;
+ *
+ * Five characters and a traversal check, applied to whole command lines on some
+ * paths and to bare values on others. tests/Security/SecureCmdTest.php measured
+ * what it let through: backticks, $( ), a newline, > and < redirects, a bare
+ * space, $HOME, quotes and globs — ten working injections, each asserted
+ * individually. A denylist of five characters cannot describe a shell.
+ *
+ * WHAT IT IS NOW
+ *
+ * Three named shapes, each an allowlist, and every call site has to say which
+ * one it means. That is the substantive half of the change: the old function
+ * was asked to judge `x86_64` and
+ * `sudo unl_wrapper -a start -T 'x' -S '1' 2>> /path/log` with one regex, and
+ * the answer that is right for a bare identifier is wrong for a command line.
+ *
+ *   SECURE_TOKEN  one shell word — an interface name, a session id, a port, a
+ *                 username. [A-Za-z0-9_] then [A-Za-z0-9_.:=@,+-]. No space, no
+ *                 metacharacter, and it may not begin with '-' so a value can
+ *                 never be read as an option.
+ *
+ *   SECURE_PATH   a path fragment beneath a fixed base — a lab or folder path
+ *                 off the request. Letters and digits in any script, plus
+ *                 space and _ . / @ + , = ( ) [ ] - and no '..' anywhere.
+ *                 Unicode is allowed because lab names are user-facing text and
+ *                 no shell metacharacter lives above U+007F; invalid UTF-8 is
+ *                 refused, because a string PCRE cannot decode is a string
+ *                 nothing downstream can reason about either.
+ *
+ *   SECURE_LINE   a whole command line. Parsed, not pattern-matched: the line
+ *                 must consist of single-quoted runs (what escapeshellarg()
+ *                 emits, including its '\'' joiner), double-quoted runs that
+ *                 contain no expansion, and unquoted text drawn from a safe
+ *                 class. Redirections are permitted, `2>&1` included, because
+ *                 the call sites build them.
+ *
+ * WHAT SECURE_LINE PROVES, AND WHAT IT DOES NOT
+ *
+ * It proves the string cannot spawn a second command: no $( ), no backtick, no
+ * ; | & newline, no unquoted glob or brace, no ~ or $ expansion. It does NOT
+ * prove the arguments are the intended ones. An unquoted space is still a word
+ * separator, so a value interpolated raw can still become several arguments.
+ *
+ * That distinction is the whole reason this function is defence in depth and
+ * not defence. The control is escapeshellarg() at the interpolation, or
+ * proc_open() with an argv array and no shell at all. Where a call site is
+ * correct only because this function ran, that is a bug in the call site, and
+ * two were found and fixed when this was written — see the commit.
+ *
+ * NON-STRING INPUT IS AN ERROR, NOT A PASS
+ *
+ * device_qemu::command() returns array(False, False) when it cannot resolve an
+ * architecture. The old body handed that to preg_match(), a TypeError on PHP 8
+ * reached before any caller's emptiness check — a QEMU node with an
+ * unresolvable template took the request down with a fatal and left its taps
+ * behind. Integers are accepted and stringified for SECURE_TOKEN, because ports
+ * and session ids arrive as ints; everything else is refused by name.
+ */
+const SECURE_TOKEN = 'token';
+const SECURE_PATH  = 'path';
+const SECURE_LINE  = 'line';
+
+/**
+ * Unquoted bytes a command line may contain. No shell metacharacter is in it:
+ * no $ ` ; | & < > ( ) { } [ ] * ? ~ ! # ^ " ' \ and no control byte. The
+ * operators the call sites genuinely build are handled separately below.
+ */
+const SECURE_LINE_PLAIN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 \t_./:=@,+-%";
+
+function secureCmd($value, $shape = SECURE_TOKEN)
+{
+	// $v, and NOT `$value = (string) $value`. That self-assignment is invisible to
+	// the tokenizer sweep in tests/Security/ShellEscapingTest.php: resolving
+	// $value finds an assignment whose right-hand side is $value, and the cycle
+	// guard that stops the walk looping also stops it reporting. Writing it that
+	// way silently retired `includes/functions.php $cmd` from the baseline —
+	// which would have been a lie, because this function still hands its argument
+	// back unescaped and devices/device.php still interpolates the result.
+	// Assigning to a second name keeps the chain resolvable and the entry honest.
+	//
+	// The default shape is the strictest one on purpose: a call site added
+	// without declaring what it is fails closed rather than being waved through.
+	// Written as an if/else rather than a ternary for the same reason: a call in
+	// the assigned expression becomes its own baseline entry, so `is_int()` on the
+	// right-hand side would report as a second violation that means nothing.
+	if (is_int($value)) {
+		$v = (string) $value;
+	} else {
+		$v = $value;
+	}
+	if (!is_string($v)) {
+		throw new Exception('secureCmd() needs a string, got ' . gettype($value));
+	}
+
+	switch ($shape) {
+		case SECURE_TOKEN:
+			// \z, not $. Without it PCRE's $ also matches before a trailing
+			// newline, so "vnet1_1\n" would pass and then be two words to
+			// anything reading line by line. The same trap is recorded on
+			// unl_valid_ifname() in includes/cli.php.
+			if (preg_match('/\A[A-Za-z0-9_][A-Za-z0-9_.:=@,+-]*\z/', $v) !== 1) {
+				throw new Exception('not a permitted token: ' . json_encode($v));
+			}
+			return $v;
+
+		case SECURE_PATH:
+			if (strpos($v, '..') !== false) {
+				throw new Exception('path traversal: ' . json_encode($v));
+			}
+			// preg_match() returns false, not 0, on malformed UTF-8 under /u.
+			// Both are refusals here, which is why this tests for !== 1.
+			if (preg_match('#\A[\p{L}\p{N}_ ./@+,=()\[\]-]*\z#u', $v) !== 1) {
+				throw new Exception('not a permitted path: ' . json_encode($v));
+			}
+			return $v;
+
+		case SECURE_LINE:
+			secure_line_parse($v);
+			return $v;
+	}
+
+	throw new Exception('secureCmd() called with an unknown shape: ' . json_encode($shape));
+}
+
+/**
+ * Walk a command line and refuse anything that is not literal text, a quoted
+ * run, or one of the redirections the call sites build.
+ *
+ * Written as a scanner rather than a regex because the question is stateful:
+ * a byte's meaning depends on whether a quote is open, and that is exactly the
+ * distinction the old denylist could not make. Inside single quotes the shell
+ * expands nothing, so a run is opaque; inside double quotes it still expands
+ * $ and backtick, so those two are refused there and nowhere else is different.
+ */
+function secure_line_parse($cmd)
+{
+	$n = strlen($cmd);
+	for ($i = 0; $i < $n; $i++) {
+		$c = $cmd[$i];
+
+		// No shell metacharacter is above U+007F, and node and lab names are
+		// user-facing text. High bytes are literal wherever they appear.
+		if (ord($c) >= 0x80) continue;
+
+		if ($c === "'") {
+			$end = strpos($cmd, "'", $i + 1);
+			if ($end === false) {
+				throw new Exception('unterminated single quote: ' . json_encode($cmd));
+			}
+			$i = $end;
+			continue;
+		}
+
+		if ($c === '"') {
+			$j = $i + 1;
+			for (; $j < $n && $cmd[$j] !== '"'; $j++) {
+				if ($cmd[$j] === '$' || $cmd[$j] === '`' || $cmd[$j] === '\\') {
+					throw new Exception('expansion inside double quotes: ' . json_encode($cmd));
+				}
+				if (ord($cmd[$j]) < 0x20) {
+					throw new Exception('control byte inside double quotes: ' . json_encode($cmd));
+				}
+			}
+			if ($j >= $n) {
+				throw new Exception('unterminated double quote: ' . json_encode($cmd));
+			}
+			$i = $j;
+			continue;
+		}
+
+		// escapeshellarg() splices an embedded apostrophe as '\'' — close,
+		// escaped quote, reopen. The backslash is legal only in that one place.
+		if ($c === '\\') {
+			if ($i + 1 < $n && $cmd[$i + 1] === "'") { $i++; continue; }
+			throw new Exception('backslash outside an escaped quote: ' . json_encode($cmd));
+		}
+
+		// Redirections. `>` and `>>` write a file, which the call sites do on
+		// purpose (wrapper.txt, unl_wrapper.txt); `&` is permitted only as the
+		// `>&` of `2>&1`, never as a separator or a background operator.
+		if ($c === '>') continue;
+		if ($c === '&') {
+			if ($i > 0 && $cmd[$i - 1] === '>') continue;
+			throw new Exception('& is a command separator here: ' . json_encode($cmd));
+		}
+
+		if (strpos(SECURE_LINE_PLAIN, $c) !== false) continue;
+
+		throw new Exception('not permitted in a command line: ' . json_encode($c)
+			. ' in ' . json_encode($cmd));
+	}
 }
 
 

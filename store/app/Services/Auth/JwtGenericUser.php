@@ -43,6 +43,26 @@ class JwtGenericUser implements UserContract
     }
 
     /**
+     * Get the name of the password column for the user.
+     *
+     * Required by Illuminate\Contracts\Auth\Authenticatable since Laravel 11;
+     * without it this class cannot be declared at all, and the failure is a
+     * fatal at the point Auth resolves the guard rather than anything that
+     * looks like an upgrade problem.
+     *
+     * The framework asks for this so it can rehash a stored password whose work
+     * factor has fallen behind. It is answered honestly -- 'authen_pass' is the
+     * column JwtUserProvider::validateCredentials() reads -- but see
+     * JwtUserProvider::rehashPasswordIfRequired() for why nothing acts on it.
+     *
+     * @return string
+     */
+    public function getAuthPasswordName()
+    {
+        return AUTHEN_PASS;
+    }
+
+    /**
      * Get the password for the user.
      *
      * @return string

@@ -15,6 +15,7 @@ use App\Helpers\DB\Models;
 use Exception;
 use Illuminate\Queue\RedisQueue;
 use Illuminate\Support\Facades\Cookie;
+use App\Helpers\Auth\AuthCookie;
 use Illuminate\Support\Facades\Hash;
 
 class LoginController extends Controller
@@ -78,7 +79,7 @@ class LoginController extends Controller
             $localPass = uniqid("pnetlab");
 
             $userData = [
-                USER_PASSWORD => hash('sha256', $localPass),
+                USER_PASSWORD => \unl_password_hash($localPass),
                 USER_ROLE => null,
                 USER_HTML5 => $html,
                 USER_LICENSE => $license,
@@ -95,7 +96,7 @@ class LoginController extends Controller
 
             return redirect($request->input('link', '/'));
         } catch (\Exception $e) {
-            return redirect('/auth/login/manager?error=' . str_limit($e->getMessage(), 500));
+            return redirect('/auth/login/manager?error=' . \Illuminate\Support\Str::limit($e->getMessage(), 500));
         }
 
     }
@@ -141,9 +142,24 @@ class LoginController extends Controller
         if (!$user['result'] || !isset($user['data'][0])) throw new Exception('Username is not existed');
         $user = $user['data'][0];
 
-        $hashPass = hash('sha256', $password);
+        if (!\unl_password_verify($password, $user->{USER_PASSWORD})) {
+            throw new Exception('Password is Wrong');
+        }
 
-        if ($user->{USER_PASSWORD} != $hashPass) throw new Exception('Password is Wrong');
+        // Upgrade the stored hash in place. Existing installations hold unsalted
+        // sha256 digests and users cannot be asked to reset a password they
+        // cannot log in to change, so the migration happens on the one occasion
+        // the plaintext is legitimately available.
+        if (\unl_password_needs_rehash($user->{USER_PASSWORD})) {
+            $userModel->edit([
+                DATA_KEY => [[[USER_POD, '=', $user->{USER_POD}]]],
+                DATA_EDITOR => [USER_PASSWORD => \unl_password_hash($password)],
+            ]);
+        }
+
+        // Guacamole is given a per-installation derived credential, not anything
+        // related to the user's password. See unl_guacamole_secret().
+        $hashPass = \unl_guacamole_secret($username);
 
         $userModel->edit([
             DATA_KEY => [[[USER_POD, '=', $user->{USER_POD}]]],
@@ -162,13 +178,16 @@ class LoginController extends Controller
 		$statement = $html5_db->prepare($query);
         $statement->execute(['entity_id'=> $html5Pod, 'name'=>$username]);
 		
-        $query = "REPLACE INTO guacamole_user (user_id, entity_id, password_hash, password_date) VALUES (:user_id, :entity_id, UNHEX(SHA2('".$hashPass."',256) ), NOW())";
-        //echo $query; die;
+        $query = "REPLACE INTO guacamole_user (user_id, entity_id, password_hash, password_date) VALUES (:user_id, :entity_id, UNHEX(SHA2(:hash, 256)), NOW())";
 		$statement = $html5_db->prepare($query);
-        $statement->execute(['user_id'=> $html5Pod, 'entity_id'=> $html5Pod]);
+        $statement->execute(['user_id'=> $html5Pod, 'entity_id'=> $html5Pod, 'hash'=> $hashPass]);
 		
         $role = 'READ';
-        if ($user->{USER_ROLE} == 0) $role = 'UPDATE';
+        // Same root test as Role::checkRoot(), and the same PHP 8 trap: the
+        // built-in admin's role is the string 'admin', which stopped being == 0
+        // in PHP 8. Left as `== 0` this silently downgraded the admin's
+        // Guacamole permission from UPDATE to READ.
+        if (\App\Helpers\Auth\Role::isRootRole($user->{USER_ROLE})) $role = 'UPDATE';
         $query = "REPLACE INTO guacamole_user_permission (entity_id, affected_user_id, permission) VALUES ( :entity_id , :affected_user_id , :permission ) ;";
         $statement = $html5_db->prepare($query);
         $statement->execute([
@@ -179,7 +198,7 @@ class LoginController extends Controller
 
         updateUserToken($username, $hashPass, $pod);
         
-        Cookie::queue(Cookie::make('token', $cookie, 60, '/', $_SERVER['SERVER_NAME']));
+        AuthCookie::issue($cookie, 60);
 
         return true;
     }
@@ -245,7 +264,7 @@ class LoginController extends Controller
 
             $result = $userModel->add([[
                 USER_USERNAME => 'admin',
-                USER_PASSWORD => hash('sha256', LOCAL_PASS),
+                USER_PASSWORD => \unl_password_hash(LOCAL_PASS),
                 USER_ROLE => '0',
                 USER_OFFLINE => '1',
                 USER_ONLINE_TIME => time(),

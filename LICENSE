@@ -1,0 +1,95 @@
+BSD 3-Clause License
+
+Copyright (c) 2026, the pnetlab_main fork contributors
+<https://github.com/3levated-Kn0wledge/pnetlab_main>
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+================================================================================
+WHAT THIS LICENCE COVERS, AND WHAT IT DOES NOT
+================================================================================
+
+This repository is a fork and does not hold copyright in everything it
+contains. The licence above is the fork's grant over the fork's own work. It
+cannot and does not relicense anyone else's.
+
+Read this section together with THIRD-PARTY.md, which carries the attribution
+that must accompany any redistribution, and docs/LICENSING.md, which sets out
+the evidence and the reasoning in full.
+
+
+1. COVERED BY THE LICENCE ABOVE
+
+   Work originated in this fork: the installer (install/), the platform layer
+   and the clean-room console wrappers (platform/), the test suite (tests/),
+   the tooling (tools/), the documentation (docs/, README.md, SECURITY.md,
+   THIRD-PARTY.md, this file), and the fork's modifications to inherited files.
+
+
+2. INHERITED UNDER BSD-3-CLAUSE FROM UNetLab / EVE-NG
+
+   130 files carry an intact BSD-3-Clause notice from Andrea Dainese and Alain
+   Degreffe: 111 device templates under templates/, 16 files under includes/,
+   and 3 under themes/default/js/. A further 9 files are the same lineage and
+   had their notice restored by this fork after it was found to have been
+   removed upstream.
+
+   Those notices are the grant. Do not remove them. THIRD-PARTY.md reproduces
+   the notice in full, which is what condition 2 above asks of a binary
+   redistribution.
+
+   This project is not affiliated with, endorsed by, or a product of UNetLab
+   Ltd or EVE-NG Ltd.
+
+
+3. INHERITED FROM PNETLab WITH NO LICENCE GRANT AT ALL
+
+   A substantial part of this tree originates in pnetlab/pnetlab_main, which
+   was published publicly with no LICENSE file and reports no licence. That
+   includes the device driver layer under devices/, the Laravel application
+   under store/app/, and the React frontend source under store/resources/.
+
+   No licence has been granted for that code by its author, and this fork
+   cannot grant one on its author's behalf. The licence above does not extend
+   to it. Anyone relying on this repository should read docs/LICENSING.md
+   section 2.3, which states the position, the evidence, and its limits
+   plainly.
+
+
+4. THIRD-PARTY COMPONENTS UNDER THEIR OWN TERMS
+
+   Bundled libraries, fonts and assets keep their own licences: Slim (MIT),
+   Parsedown (MIT), Ace (BSD-3-Clause), jQuery, Bootstrap, jsPlumb and others
+   (MIT), the Ubuntu font family (Ubuntu Font Licence 1.0), DejaVu (Bitstream
+   Vera / public domain amendment), Apache Guacamole (Apache-2.0). Each is
+   listed in THIRD-PARTY.md.
+
+   One of them is copyleft and it matters: CKEditor 5 is licensed
+   GPL-2.0-or-later, and it is compiled into the frontend build output that
+   this repository commits under store/public/react/ and vendors~. .
+   Those built files are a combined work and carry GPL-2.0-or-later terms. The
+   licence above does not apply to them. See docs/LICENSING.md section 2.4.

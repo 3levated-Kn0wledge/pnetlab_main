@@ -2,10 +2,11 @@
 
 namespace App\Exceptions;
 
-use Exception;
+use Throwable;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use App\Helpers\Request\Reply;
 use Illuminate\Support\Facades\Cookie;
+use App\Helpers\Auth\AuthCookie;
 
 class Handler extends ExceptionHandler
 {
@@ -34,7 +35,7 @@ class Handler extends ExceptionHandler
     protected function unauthenticated($request, \Illuminate\Auth\AuthenticationException $exception)
     {
        $actual_link = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://{$_SERVER['HTTP_HOST']}{$_SERVER['REQUEST_URI']}";
-       Cookie::queue(Cookie::make('token', null, -3600, '/', APP_DOMAIN));
+       AuthCookie::forget();
        return $request->expectsJson()
                     ? Reply::finish(false, ERROR_AUTHEN, 'Please login again') 
                     : redirect()->guest('/auth/login/manager?error='.$exception->getMessage().'&link='.urlencode(get($actual_link, '/')));
@@ -49,7 +50,7 @@ class Handler extends ExceptionHandler
      * @param  \Exception  $exception
      * @return void
      */
-    public function report(Exception $exception)
+    public function report(Throwable $exception): void
     {
         parent::report($exception);
     }
@@ -61,7 +62,7 @@ class Handler extends ExceptionHandler
      * @param  \Exception  $exception
      * @return \Illuminate\Http\Response
      */
-    public function render($request, Exception $exception)
+    public function render($request, Throwable $exception)
     {
         return parent::render($request, $exception);
     }

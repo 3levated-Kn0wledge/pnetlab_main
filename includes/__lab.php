@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * includes/__lab.php
+ *
+ * Class for labs.
+ *
+ * Derived from UNetLab html/includes/__lab.php.
+ * Its BSD-3-Clause notice was absent from the copy this fork inherited
+ * and is restored below. See docs/LICENSING.md section 2.2.
+ *
+ * @author Andrea Dainese <andrea.dainese@gmail.com>
+ * @copyright 2014-2016 Andrea Dainese
+ * @license BSD-3-Clause https://github.com/dainok/unetlab/blob/master/LICENSE
+ * @link http://www.unetlab.com/
+ *
+ * Substantially modified by PNETLab and by the pnetlab_main fork. Those
+ * modifications are licensed under the terms in this repository's LICENSE;
+ * the notice above must be retained regardless.
+ */
+
 
 class Lab
 {
@@ -1431,7 +1450,11 @@ class Lab
     public function lockLab($pass = null)
     {
         if ($pass != null) {
-            $this->password = md5($pass);
+            // Was md5($pass): unsalted, and compared with == in unlockLab(), which
+            // let the 0e... magic-hash collision open any lab whose password
+            // happened to digest that way. unl_lab_password_hash() is salted and
+            // unl_lab_password_verify() compares with hash_equals().
+            $this->password = unl_lab_password_hash($pass);
             $rc = $this->save();
         }
         if (session_status() == PHP_SESSION_NONE) session_start();
@@ -1447,7 +1470,10 @@ class Lab
     public function unlockLab($pass, $clearpass = false)
     {
         if (!isset($this->password) || $this->password == '') return 0;
-        if (md5($pass) == $this->password) {
+        // unl_lab_password_verify() still accepts the bare md5 digests that
+        // existing labs hold, so those keep opening; it just does it in constant
+        // time and without loose comparison.
+        if (unl_lab_password_verify($pass, $this->password)) {
             if ($clearpass) {
                 $this->password = '';
                 $rc = $this->save();

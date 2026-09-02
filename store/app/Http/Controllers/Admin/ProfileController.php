@@ -67,11 +67,11 @@ class ProfileController extends Controller
 
         if($userPass == '') Reply::finish(false, 'New password can not be empty');
         
-        if(hash('sha256', $oldPass) != Auth::user()->{USER_PASSWORD}) Reply::finish(false, 'Password is wrong');
+        if (!\unl_password_verify($oldPass, Auth::user()->{USER_PASSWORD})) Reply::finish(false, 'Password is wrong');
     
         return $this->userModel->edit( [
             DATA_KEY => [[[USER_POD, '=', Auth::user()->{USER_POD}]]],
-            DATA_EDITOR => [USER_PASSWORD => hash('sha256', $userPass)]
+            DATA_EDITOR => [USER_PASSWORD => \unl_password_hash($userPass)]
         ]);
     }
     

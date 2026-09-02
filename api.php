@@ -1,5 +1,24 @@
 <?php
 
+/**
+ * api.php
+ *
+ * REST API router. Slim 2.6 routes onto includes/api_*.php.
+ *
+ * Derived from UNetLab html/api.php.
+ * Its BSD-3-Clause notice was absent from the copy this fork inherited
+ * and is restored below. See docs/LICENSING.md section 2.2.
+ *
+ * @author Andrea Dainese <andrea.dainese@gmail.com>
+ * @copyright 2014-2016 Andrea Dainese
+ * @license BSD-3-Clause https://github.com/dainok/unetlab/blob/master/LICENSE
+ * @link http://www.unetlab.com/
+ *
+ * Substantially modified by PNETLab and by the pnetlab_main fork. Those
+ * modifications are licensed under the terms in this repository's LICENSE;
+ * the notice above must be retained regardless.
+ */
+
 
 require_once('/opt/unetlab/html/includes/init.php');
 require_once(BASE_DIR . '/html/includes/Slim/Slim.php');
@@ -10,6 +29,7 @@ require_once(BASE_DIR . '/html/includes/api_folders.php');
 require_once(BASE_DIR . '/html/includes/api_labs.php');
 require_once(BASE_DIR . '/html/includes/api_networks.php');
 require_once(BASE_DIR . '/html/includes/api_nodes.php');
+require_once(BASE_DIR . '/html/includes/api_origin_guard.php');
 require_once(BASE_DIR . '/html/includes/api_pictures.php');
 require_once(BASE_DIR . '/html/includes/api_status.php');
 require_once(BASE_DIR . '/html/includes/api_textobjects.php');
@@ -20,7 +40,16 @@ require_once(BASE_DIR . '/html/includes/api_uusers.php');
 
 $app = new \Slim\Slim(array(
 	'mode' => 'production',
-	'debug' => True,					// Change to False for production
+	// Slim 2.6's debug handler renders an uncaught exception as a full HTML
+	// page: the message, the stack trace, and the absolute path of every file
+	// on it. Shipped as True under 'mode' => 'production', with a comment
+	// telling the reader to change it — which nobody did in three years. The
+	// API answers unauthenticated requests, so this leaked the install layout
+	// to anyone who could provoke an error.
+	//
+	// Off unless PNETLAB_API_DEBUG=1 is in the environment, so turning it on
+	// for development no longer means editing a file you might commit.
+	'debug' => getenv('PNETLAB_API_DEBUG') === '1',
 	'log.level' => \Slim\Log::WARN,		// Change to WARN for production, DEBUG to develop
 	'log.enabled' => True,
 	'log.writer' => new \Slim\LogWriter(fopen('/opt/unetlab/data/Logs/api.txt', 'a'))
@@ -40,6 +69,17 @@ $app->response->headers->set('Cache-Control', 'no-store, no-cache, must-revalida
 $app->response->headers->set('Cache-Control', 'post-check=0, pre-check=0');
 $app->response->headers->set('Pragma', 'no-cache');
 
+// CSRF. /api/* is rewritten here by the root .htaccess and never enters
+// Laravel's kernel, so VerifyCsrfToken cannot reach any of the eighteen routes
+// below; they authenticate from the `token` cookie and nothing else. This is
+// their own defence, hooked in once ahead of the router rather than repeated in
+// eighteen handlers, so a route added later is covered by default. It refuses a
+// mutating request whose Origin or Referer names another host, and one whose
+// body encoding is not something these handlers read. A request with no Origin
+// and no Referer -- curl, a script, tools/integration/lab-functional.sh -- is
+// NOT a CSRF signal and is allowed through. See includes/api_origin_guard.php.
+apiRegisterOriginGuard($app);
+
 $app->notFound(function () use ($app) {
 	$output['code'] = 404;
 	$output['status'] = 'fail';
@@ -57,7 +97,13 @@ $forbidden = array(
 	'message' => $GLOBALS['messages']['90032']
 );
 
-$app->get('/api/auth/logout', function () use ($app) {
+// POST, not GET. SameSite=Lax is sent on a top-level GET navigation, so while
+// this was a GET any page on the internet could log the user out with a link or
+// a redirect. It mutates -- apiLogout() invalidates the server-side session --
+// so it belongs on a verb the guard above polices. Callers updated:
+// store/resources/react/components/menu/Logout.js, its two built bundles under
+// store/public/react/js, and logoutUser() in themes/default/js/functions.js.
+$app->post('/api/auth/logout', function () use ($app) {
 	// Logout (DELETE request does not work with cookies)
 	$cookie = $app->getCookie('token');
 	$app->deleteCookie('token');
@@ -98,6 +144,11 @@ $app->get('/api/auth', function () use ($app) {
 	}
 
 	$user['lang'] = $langData;
+
+	// Never hand the client its own credential material. This endpoint returned
+	// the stored password hash and the session cookie on every call; with an
+	// unsalted hash that is close to disclosing the password itself.
+	unset($user['password'], $user['cookie']);
 
 	$output['code'] = 200;
 	$output['status'] = 'success';
@@ -1453,7 +1504,7 @@ $app->post('/api/labs/session/(:object)/(:action)', function ($object, $action) 
 				} else if ($action == 'capture') {
 					$interface_id = get($p['interface_id'], '');
 					$node_id = get($p['node_id'], '');
-					$checkExistLog = exec('sudo docker images pnetlab/pnet-wireshark:latest | grep pnetlab/pnet-wireshark');
+					$checkExistLog = exec('docker -H=unix:///var/run/docker.sock images pnetlab/pnet-wireshark:latest | grep pnetlab/pnet-wireshark');
 					if ($checkExistLog == '') throw new Exception('You have not installed Wireshark for the HTML Console. Go to the Devices tab and get the Wireshark node then try to capture again.');
 					$output = addWiresharkSystem($lab, $node_id, $interface_id);
 				} else if ($action == 'delete') {

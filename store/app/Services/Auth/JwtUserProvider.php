@@ -68,6 +68,43 @@ class JwtUserProvider implements UserProvider
     }
 
 /**
+     * Rehash the user's password if the hashing work factor has moved on.
+     *
+     * Required by Illuminate\Contracts\Auth\UserProvider since Laravel 11.
+     * Omitting it is not a deprecation: PHP refuses to declare a class that
+     * does not implement every method of its interface, so the application
+     * fatals the moment Auth resolves this provider.
+     *
+     * This implementation is deliberately a no-op, and the reason is that this
+     * provider has no write path. Every mutating method on it -- retrieveById(),
+     * retrieveByToken(), updateRememberToken() -- is an empty stub inherited
+     * from upstream; the only method that does real work is
+     * retrieveByCredentials(), which reads. Storing a rehashed password would
+     * mean reaching into App\Helpers\DB\Models from here and inventing an
+     * update path that this class has never had, on a code path nothing in this
+     * application currently reaches.
+     *
+     * Nothing reaches it because the framework calls this from
+     * Illuminate\Auth\SessionGuard::attempt(), and this application does not
+     * use SessionGuard: config/auth.php makes 'jwt' the default guard, and
+     * App\Services\Auth\JwtGuard::attempt() is hand-written and calls
+     * validateCredentials() directly. So the method exists to satisfy the
+     * contract and to keep the class declarable, and it is inert.
+     *
+     * If a password-write path is ever added to this provider, this is where
+     * the rehash belongs -- do not silently leave it a stub then.
+     *
+     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  array  $credentials
+     * @param  bool  $force
+     * @return void
+     */
+    public function rehashPasswordIfRequired(\Illuminate\Contracts\Auth\Authenticatable $user, array $credentials, bool $force = false)
+    {
+        // No-op. See the doc block above.
+    }
+
+/**
    * Retrieve a user by the given credentials.
    *
    * @param  array  $credentials

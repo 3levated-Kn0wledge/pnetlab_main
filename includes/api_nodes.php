@@ -103,12 +103,12 @@ function apiDeleteLabNode($lab, $id, $tenant)
 
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a delete';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
-	secureCmd($cmd);
+	secureCmd($cmd, SECURE_LINE);
 	exec($cmd, $o, $rc);
 	error_log(date('M d H:i:s ') . 'INFO: delete node ' . $cmd);
 
@@ -212,12 +212,12 @@ function apiExportLabNode($lab, $id, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a export';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
-	secureCmd($cmd);
+	secureCmd($cmd, SECURE_LINE);
 	exec($cmd, $o, $rc);
 	error_log(date('M d H:i:s ') . 'INFO: export configuration ' . $cmd);
 	if ($rc == 0) {
@@ -245,11 +245,11 @@ function apiExportLabNodes($lab, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a export';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
-	secureCmd($cmd);
+	secureCmd($cmd, SECURE_LINE);
 	exec($cmd, $o, $rc);
 	error_log(date('M d H:i:s ') . 'INFO: export configuration ' . $cmd);
 	if ($rc == 0) {
@@ -612,12 +612,12 @@ function apiStartLabNode($lab, $id, $tenant)
 	set_time_limit(0);
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a start';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
-	secureCmd($cmd);
+	secureCmd($cmd, SECURE_LINE);
 	exec($cmd, $o, $rc);
 	error_log(date('M d H:i:s ') . 'INFO: starting node ' . $cmd);
 	if ($rc == 0) {
@@ -679,12 +679,12 @@ function apiStopLabNode($lab, $id, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a stop';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
-	secureCmd($cmd);
+	secureCmd($cmd, SECURE_LINE);
 	exec($cmd, $o, $rc);
 	error_log(date('M d H:i:s ') . 'INFO: stop node ' . $cmd);
 	if ($rc == 0) {
@@ -744,12 +744,12 @@ function apiWipeLabNode($lab, $id, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a wipe';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -D ' . $id;
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -D ' . escapeshellarg($id);
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
-	secureCmd($cmd);
+	secureCmd($cmd, SECURE_LINE);
 	exec($cmd, $o, $rc);
 	error_log(date('M d H:i:s ') . 'INFO: wiping node ' . $cmd);
 	if ($rc == 0) {
@@ -777,11 +777,11 @@ function apiWipeLabNodes($lab, $tenant)
 {
 	$cmd = 'sudo /opt/unetlab/wrappers/unl_wrapper';
 	$cmd .= ' -a wipe';
-	$cmd .= ' -T ' . $tenant;
-	$cmd .= ' -S ' . $lab->getSession();
-	$cmd .= ' -F "' . $lab->getPath() . '/' . $lab->getFilename() . '"';
+	$cmd .= ' -T ' . escapeshellarg($tenant);
+	$cmd .= ' -S ' . escapeshellarg($lab->getSession());
+	$cmd .= ' -F ' . escapeshellarg($lab->getPath() . '/' . $lab->getFilename());
 	$cmd .= ' 2>> /opt/unetlab/data/Logs/unl_wrapper.txt';
-	secureCmd($cmd);
+	secureCmd($cmd, SECURE_LINE);
 	exec($cmd, $o, $rc);
 	error_log(date('M d H:i:s ') . 'INFO: wiping nodes ' . $cmd);
 	if ($rc == 0) {

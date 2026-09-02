@@ -7,9 +7,6 @@
  * @author   Taylor Otwell <taylor@laravel.com>
  */
 
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Headers: *"); 
-
 //$source = '/home/nhngcx2r/ngsi.vn/storage/app/public';
 //$dest = '/home/nhngcx2r/ngsi.vn/public/public';
 //symlink($source,$dest);

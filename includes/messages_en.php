@@ -344,6 +344,7 @@ $messages[80086] = 'Cannot import iou-web file (80086).';
 $messages[80087] = 'iou-web file imported (80087).';
 $messages[80088] = 'Cannot find vpcs installation (80088).';
 $messages[80089] = 'Cannot disable ipv6 (80089).';
+$messages[80099] = 'Invalid interface name (80099).';
 
 // Authentication (90000-99999)
 $messages[90001] = 'User is not authenticated or session timed out (90001).';

@@ -11,6 +11,19 @@
 class device_vpcs extends device
 {
 
+    /**
+     * VPCS runs as the tenant account.
+     *
+     * It needs the tap, which prepare() has already handed to unl<session> with
+     * `tunctl -u`, the running directory, which is root:unl 0775, and a console
+     * port at 3xxxx. Nothing on that list is privileged, and running it as root
+     * was never a requirement — only the default.
+     */
+    protected function runsAsTenant()
+    {
+        return true;
+    }
+
     public function createEthernets($quantity)
     {
         $ethernets = [];
@@ -42,12 +55,49 @@ class device_vpcs extends device
 
     public function command()
     {
-        $cmd = '/opt/vpcsu/bin/vpcs -m ' . $this->getSession() . ' -N ' . $this->name;
-        $flags = ' -i 1 -p ' . $this->getPort();
+        $binary = '/opt/vpcsu/bin/vpcs';
+
+        $cmd = $binary . ' -m ' . escapeshellarg($this->getSession());
+
+        // -N (node name in the prompt) is not a VPCS option. It exists only in
+        // the EVE-NG-modified build the appliance ships; stock VPCS 0.5b2, which
+        // is what Ubuntu packages, rejects it and the node fails to start. Ask
+        // the binary what it supports rather than assuming a patched one.
+        if (self::vpcsSupportsNodeName($binary)) {
+            $cmd .= ' -N ' . escapeshellarg($this->name);
+        }
+        $flags = ' -i 1 -p ' . escapeshellarg($this->getPort());
+        // sweep-exempt: the template's flag string supplies multiple arguments.
         $flags .= ' ' . $this->getFlag();
-        $cmd .= $flags . ' > ' . $this->getRunningPath() . '/wrapper.txt';
+        $cmd .= $flags . ' > ' . escapeshellarg($this->getRunningPath() . '/wrapper.txt');
 
         return $cmd;
+    }
+
+    /**
+     * Does this VPCS build accept -N (set the node name)?
+     *
+     * Cached for the life of the request: command() is called per node and this
+     * shells out. Returns false for stock VPCS, true for the EVE-NG build.
+     *
+     * @param   string  $binary             Path to the vpcs binary
+     * @return  bool                        True if -N is supported
+     */
+    private static function vpcsSupportsNodeName($binary)
+    {
+        static $supported = null;
+        if ($supported !== null) return $supported;
+
+        $o = array();
+        $rc = 0;
+        exec(escapeshellarg($binary) . ' -h 2>&1', $o, $rc);
+        $supported = (bool) preg_grep('/^\s*-N\s/', $o);
+
+        if (!$supported) {
+            error_log(date('M d H:i:s ') . 'INFO: this VPCS build does not support -N; node names will not appear in the VPCS prompt');
+        }
+
+        return $supported;
     }
 
     public function prepare()
