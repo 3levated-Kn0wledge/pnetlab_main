@@ -174,6 +174,16 @@ netstat -a -t -n 2>/dev/null | grep LISTEN | grep -q ":$PORT" \
 udpbound "$PORT" && ok "the data plane is bound to UDP $PORT, the console port number" \
 	|| bad "the data plane is bound to UDP $PORT"
 
+# And to LOOPBACK. What arrives on this port is checked by iol_from_udp() alone
+# -- tenant 0, a device id, an interface -- so a wildcard bind let any host that
+# could reach the appliance inject frames into a node's serial interface. The
+# fork writes localhost into every -l map; -R is the opt-in for the old bind.
+BOUND=$(ss -lunH "sport = :$PORT" 2>/dev/null | awk '{print $4}' | head -1)
+case "$BOUND" in
+	127.0.0.1:"$PORT") ok "the data plane is bound to 127.0.0.1, not to every interface" ;;
+	*) bad "the data plane is bound to 127.0.0.1, not to every interface" "bound to: $BOUND" ;;
+esac
+
 WPID=$(pgrep -f "iol_wrapper -D 11 -S $SESSION" | head -1)
 [ -n "$WPID" ] && ok "the wrapper is running" || bad "the wrapper is running" "$(cat "$DIR/wrapper.txt" 2>/dev/null)"
 chk "the wrapper's cwd is the running directory (R2)" "$(readlink -f "/proc/$WPID/cwd" 2>/dev/null)" "$(readlink -f "$DIR")"
