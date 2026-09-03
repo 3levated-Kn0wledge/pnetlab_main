@@ -4,10 +4,8 @@ import(/* webpackMode: "eager" */'./responsive/menu_client.scss')
 import UserName from './UserName'
 import { a, withRouter } from 'react-router-dom';
 import mnf from './menu_func';
-import Syslog from './Syslog'
 import RunningLabButton from '../realtime/RunningLabButton';
 import Upgrade from '../admin/system/Upgrade';
-import OffSyslog from './OffSyslog';
 
 class MenuClient extends Component {
 
@@ -115,8 +113,6 @@ class MenuClient extends Component {
 				}}></div> 
 
 				<div style={{ margin: 'auto 15px auto auto' }} className='box_flex'>
-					{isOffline()?<OffSyslog></OffSyslog>:<Syslog></Syslog>} 
-					<div style={{width:20}}></div>
 					<UserName name={formatName(App.server.user[USER_USERNAME])} /> 
 					
 				</div>

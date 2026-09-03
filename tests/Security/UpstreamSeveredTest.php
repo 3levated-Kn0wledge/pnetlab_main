@@ -13,6 +13,8 @@
  *      cron jobs and artisan commands that drove them
  *   3. the lab marketplace -- selling labs, downloading bought labs and their
  *      dependencies, versioning them, and the image uploader behind it
+ *   4. the notices -- the bell in the menu bar, which asked the licensing
+ *      server for news on every page load
  *
  * Every assertion below is source-level and comment-stripped, in the style of
  * RoutingTest: the files that lost this code explain at length what they
@@ -157,5 +159,20 @@ foreach ($react as $p) {
     }
 }
 assert_same([], $reactHits, 'no React source reaches a marketplace endpoint or links to the store');
+
+echo "4. the notices are gone\n";
+
+assert_true(!is_file($root . '/store/app/Http/Controllers/Notice/NoticeController.php'), 'NoticeController is gone');
+foreach (['components/menu/Syslog.js', 'components/menu/OffSyslog.js', 'pages/notice/NoticeView.js'] as $f) {
+    assert_true(!file_exists($root . '/store/resources/react/' . $f), "React $f is gone");
+}
+$reactHits = [];
+foreach ($react as $p) {
+    $src = file_get_contents($p);
+    foreach (['notice/notice/', 'OffSyslog', 'Syslog'] as $needle) {
+        if (strpos($src, $needle) !== false) $reactHits[] = basename($p) . ': ' . $needle;
+    }
+}
+assert_same([], $reactHits, 'no React source polls the notice endpoints or renders the bell');
 
 test_summary();
