@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Helpers\Admin\Upgrade;
 use App\Helpers\Auth\Role;
-use App\Helpers\Box\License;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Helpers\Request\Reply;
@@ -82,12 +81,6 @@ class DefaultController extends Controller
             DATA_KEY => [[[USER_USERNAME, '=', Auth::user()->{USER_USERNAME}]]],
             DATA_EDITOR => [USER_ONLINE_TIME => time(), USER_SESSION => time() + SESSION],
         ]);
-        Reply::finish(true, 'success', '');
-    }
-
-    function relicense()
-    {
-        License::relicense(false, Auth::user());
         Reply::finish(true, 'success', '');
     }
 

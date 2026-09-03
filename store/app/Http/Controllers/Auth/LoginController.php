@@ -6,7 +6,6 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Helpers\Auth\AuthenticatesUsers;
-use App\Helpers\Box\License;
 use App\Helpers\Captcha\Captcha;
 use App\Helpers\Request\Reply;
 use Illuminate\Http\Request;
@@ -59,48 +58,6 @@ class LoginController extends Controller
         $captcha = Captcha::createCaptcha($id);
         Reply::finish(true, 'Success', $captcha);
     }
-
-    public function license(Request $request)
-    {
-
-        // Is called affter login success from evestore.
-        //update user and license to database
-        try {
-
-            exec('sudo ntpdate -u 1.pool.ntp.org > /dev/null 2>&1 &');
-
-            $license = $request->input('license', false);
-            if (!$license) throw new \Exception('No license. Login again');
-            $html = $request->input('html', 1);
-            /**
-             *In case success create an account in local db then run origin login proccess of evelabbox
-             */
-
-            $localPass = uniqid("pnetlab");
-
-            $userData = [
-                USER_PASSWORD => \unl_password_hash($localPass),
-                USER_ROLE => null,
-                USER_HTML5 => $html,
-                USER_LICENSE => $license,
-                USER_ONLINE_TIME => time(),
-            ];
-
-            $result = License::relicense(true, (object) $userData);
-
-            if (!$result['result'])  throw new \Exception(get($result['data']['data'], ''));
-
-            $userData = $result['data'];
-
-            $this->apiLogin($userData->{USER_USERNAME}, $localPass, $html, 0);
-
-            return redirect($request->input('link', '/'));
-        } catch (\Exception $e) {
-            return redirect('/auth/login/manager?error=' . \Illuminate\Support\Str::limit($e->getMessage(), 500));
-        }
-
-    }
-
 
     /**
      * 
@@ -205,43 +162,35 @@ class LoginController extends Controller
 
     public function manager(Request $request)
     {
-        // forward to coresponse login page
-        $default = Ctrl::get(CTRL_DEFAULT_MODE, '');
-        $isOffine = Ctrl::get(CTRL_OFFLINE_MODE, 0);
-        $isOnline = Ctrl::get(CTRL_ONLINE_MODE, 0);
-
+        // Every login is an offline login now. The online path -- a redirect to
+        // authen.pnetlab.com and a return leg carrying a licence -- was removed
+        // in Phase 05 (docs/OFFLINE-FIRST.md). A box whose offline mode has
+        // not been switched on yet is sent through initialOffline(), which
+        // switches it on and seeds the admin account; everything else goes to
+        // the login page.
         $link = urlencode($request->input('link', '/'));
         $error = $request->input('error', '');
         $success = $request->input('success', '');
 
-        if ($default == '' || ($isOffine == 0 && $isOnline == 0)) return redirect('/auth/login/initial');
-        if ($default == 'online') return redirect('/auth/login/online?link=' . $link . '&error=' . $error . '&success=' . $success);
-        if ($default == 'offline') return redirect('/auth/login/offline?link=' . $link . '&error=' . $error . '&success=' . $success);
-    }
-
-    public function initialOnline()
-    {
-        $isOffine = Ctrl::get(CTRL_OFFLINE_MODE, 0);
-        $isOnline = Ctrl::get(CTRL_ONLINE_MODE, 0);
-        if ($isOffine == 1 && $isOnline == 0) return redirect('/auth/login/initial?error=ONLINE Mode is disabled. If you want to using ONLINE mode, login by OFFLINE account then active ONLINE mode first.');
-        if ($isOnline == 1) return redirect('/auth/login/online');
-        Ctrl::set(CTRL_ONLINE_MODE, 1);
-        Ctrl::set(CTRL_DEFAULT_MODE, 'online');
-        return redirect('/auth/login/online?success=ONLINE mode is turned on. You need to register and login to PNETLab right now. The first ONLINE account logged into PNETLab will becomes the owner.');
+        if (Ctrl::get(CTRL_OFFLINE_MODE, 0) != 1) return redirect('/auth/login/initialOffline');
+        return redirect('/auth/login/offline?link=' . $link . '&error=' . $error . '&success=' . $success);
     }
 
     public function initialOffline()
     {
-        $isOnline = Ctrl::get(CTRL_ONLINE_MODE, 0);
-        $isOffine = Ctrl::get(CTRL_OFFLINE_MODE, 0);
-        if ($isOnline == 1 && $isOffine == 0) return redirect('/auth/login/initial?error=OFFLINE Mode is disabled. If you want to using OFFLINE mode, login by ONLINE account then active OFFLINE mode.');
-        if ($isOffine == 1) return redirect('/auth/login/offline');
-
+        // First contact with a box that has never been logged into: switch
+        // offline mode on and make sure there is an admin account to log in
+        // with. Idempotent -- a box that is already in offline mode is simply
+        // sent to the login page. This is reachable without authentication
+        // because it has to be: nobody can log in before it has run. It
+        // creates nothing on a box that already has an admin, and it never
+        // resets an existing admin's password.
         $userModel = Models::get('Admin/Users');
+        if (Ctrl::get(CTRL_OFFLINE_MODE, 0) == 1) return redirect('/auth/login/offline');
+
         Ctrl::set(CTRL_OFFLINE_MODE, 1);
         Ctrl::set(CTRL_DEFAULT_MODE, 'offline');
         if ($userModel->is_exist([[ [USER_OFFLINE, '=', 1], [USER_ROLE, '=', 0] ]])) {
-            License::keepalive();
             return redirect('/auth/login/offline?success=OFFLINE mode is turned on. Using OFFLINE Accounts to login');
         } else if($userModel->is_exist([[[USER_USERNAME, '=', 'admin']]])) {
 
@@ -257,8 +206,7 @@ class LoginController extends Controller
             ]]);
 
             if (!$result['result']) return $result;
-            License::keepalive();
-            Reply::finish(true, 'success', 'OFFLINE mode is turned on successfully. The Account with name "admin" has been set as Admin');
+            return redirect('/auth/login/offline?success=OFFLINE mode is turned on successfully. The Account with name "admin" has been set as Admin');
 
         }else{
 
@@ -272,44 +220,18 @@ class LoginController extends Controller
             ]]);
 
             if (!$result['result']) return $result;
-            License::keepalive();
             return redirect('/auth/login/offline?success=OFFLINE mode is turned on successfully. Default account to login is admin/'.LOCAL_PASS.'. For security reasons you should change it');
         }
-    }
-
-    public function initial()
-    {
-        $version = Ctrl::get(CTRL_VERSION, '4.0.0');
-        return view($this->viewblade,  ['server'=>['version' => $version]]);
     }
 
     public function offline()
     {
         // offline login page
-        $offline = Ctrl::get(CTRL_OFFLINE_MODE, 0);
-        $online = Ctrl::get(CTRL_ONLINE_MODE, 1);
-        if ($offline != 1) return redirect('/auth/login/initial?error=OFFLINE Mode is disabled. Login by ONLINE account and enable OFFLINE Mode first');
+        if (Ctrl::get(CTRL_OFFLINE_MODE, 0) != 1) return redirect('/auth/login/initialOffline');
         $isCaptcha = Ctrl::get(CTRL_CAPTCHA, '1');
         $version = Ctrl::get(CTRL_VERSION, '4.0.0');
         $console = Ctrl::get(CTRL_DEFAULT_CONSOLE, '');
-        
-        return view($this->viewblade, ['server'=>['captcha' => $isCaptcha, 'version' => $version, 'console' => $console, 'online' => $online]]);
-    }
 
-
-    public function online(Request $request)
-    {
-        // offline login page
-
-        $link = urlencode($request->input('link', '/'));
-        $error = $request->input('error', '');
-        $success = $request->input('success', '');
-
-        $box_link = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://{$_SERVER['HTTP_HOST']}/store/public/auth/login/license";
-
-        $online = Ctrl::get(CTRL_ONLINE_MODE, 0);
-        $defaultConsole = Ctrl::get(CTRL_DEFAULT_CONSOLE, '');
-        if ($online != 1) return redirect('/auth/login/initial?error=ONLINE Mode is disabled. Login by OFFLINE account and enable ONLINE Mode first');
-        return redirect(APP_AUTHEN . '/login?console='.$defaultConsole.'&box=' . $box_link . '&link=' . $link . '&error=' . $error . '&success=' . $success);
+        return view($this->viewblade, ['server'=>['captcha' => $isCaptcha, 'version' => $version, 'console' => $console]]);
     }
 }

@@ -112,11 +112,12 @@ assert_true($csrfPos !== false && $bindPos !== false && $csrfPos < $bindPos,
 | 2. $except is minimal, and every survivor is explained
 |--------------------------------------------------------------------------
 |
-| Each entry is an unauthenticated write. 'auth/login/license' earns its place:
-| APP_AUTHEN redirects the browser back to it from a server this box does not
-| control, so no token this box issued can be on that request. Nothing else
-| does -- everything else is same-origin JavaScript, and axios already sends
-| the token.
+| Each entry would be an unauthenticated write. 'auth/login/license' used to
+| earn its place: APP_AUTHEN redirected the browser back to it from a server
+| this box did not control, so no token this box issued could be on that
+| request. Phase 05 removed the online login, and with it the last entry.
+| Everything else is same-origin JavaScript, and axios already sends the
+| token -- so the list is empty, and a new entry is a hole to justify.
 */
 
 $csrfCode = code_without_comments($csrfPath);
@@ -125,8 +126,8 @@ if (preg_match('/\$except\s*=\s*\[(.*?)\]\s*;/s', $csrfCode, $m)) {
     preg_match_all('/[\'"]([^\'"]+)[\'"]/', $m[1], $e);
     $exceptEntries = $e[1];
 }
-assert_same(['auth/login/license'], $exceptEntries,
-    'VerifyCsrfToken::$except contains exactly the one genuinely cross-site route');
+assert_same([], $exceptEntries,
+    'VerifyCsrfToken::$except is empty: the online login that needed an exemption is gone');
 
 // The removal of 'admin/box/*' rests on there being no such controller. Assert
 // the fact, not the absence of the string, so that adding an Admin\BoxController

@@ -65,7 +65,12 @@ Route::match(['post', 'get'], '/admin/default/language', function () {
 | that never ran: App::call() invokes the method directly and does not
 | apply controller middleware. Nothing was gating this.
 |
-| Each endpoint the login flow actually uses is now listed explicitly.
+| Each endpoint the login flow actually uses is now listed explicitly. Phase 05
+| removed the online half of that flow -- initial (the mode chooser),
+| initialOnline, online (the redirect to authen.pnetlab.com) and license (the
+| return leg carrying a licence) -- so what remains is the offline login and
+| the first-boot switch that enables it. See docs/OFFLINE-FIRST.md.
+|
 | Callers were checked in store/resources/react, in the built bundles under
 | store/public/react/js, and in themes/. The dispatch shape is kept exactly
 | as it was (App::call from a closure) so behaviour is unchanged for the
@@ -83,17 +88,11 @@ Route::match(['post', 'get'], '/admin/default/language', function () {
 | anywhere uses /auth/login/captcha, so it is not re-published here.
 */
 
-// First-run mode chooser. Necessarily anonymous: on a fresh install neither
-// mode is set and no account exists yet, so there is nobody who could be
-// authenticated. Both initial* methods no-op once a mode has been chosen.
-// pages/auth/LoginInitial.js links to these.
-Route::get('/auth/login/initial', function () {
-    return App::call('\App\Http\Controllers\Auth\LoginController@initial');
-});
+// The first-boot switch. Necessarily anonymous: on a fresh install offline
+// mode is not yet on and no account exists, so there is nobody who could be
+// authenticated. It no-ops once offline mode is on, and LoginController
+// redirects here whenever it is not.
 
-Route::get('/auth/login/initialOnline', function () {
-    return App::call('\App\Http\Controllers\Auth\LoginController@initialOnline');
-});
 
 Route::get('/auth/login/initialOffline', function () {
     return App::call('\App\Http\Controllers\Auth\LoginController@initialOffline');
@@ -112,9 +111,6 @@ Route::get('/auth/login/offline', function () {
     return App::call('\App\Http\Controllers\Auth\LoginController@offline');
 });
 
-Route::get('/auth/login/online', function () {
-    return App::call('\App\Http\Controllers\Auth\LoginController@online');
-});
 
 // The offline login POST. pages/auth/LoginOffline.js posts here.
 Route::post('/auth/login/login', function () {
@@ -126,9 +122,6 @@ Route::post('/auth/login/login', function () {
 // license. Cross-site by design, which is why it is already listed in
 // VerifyCsrfToken::$except. Both verbs are accepted because the remote end
 // chooses the method.
-Route::match(['post', 'get'], '/auth/login/license', function () {
-    return App::call('\App\Http\Controllers\Auth\LoginController@license');
-});
 
 /*
 |--------------------------------------------------------------------------

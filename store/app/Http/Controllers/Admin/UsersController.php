@@ -496,9 +496,6 @@ class UsersController extends Controller
         $data = $request->all();
         $result = Query::boxCenter(APP_CENTER.'/api/offboxs/malicense/active', $data, ['dataType'=>'json']);
         if(!$result) Reply::finish(false, 'Can not connect to server');
-        if($result['result']){
-            License::keepalive();
-        }
         return $result;
     }
 
@@ -508,9 +505,6 @@ class UsersController extends Controller
         $data = $request->all();
         $result = Query::boxCenter(APP_CENTER.'/api/offboxs/malicense/delete', $data, ['dataType'=>'json']);
         if(!$result) Reply::finish(false, 'Can not connect to server');
-        if($result['result']){
-            License::keepalive();
-        } 
         return $result;
     }
 

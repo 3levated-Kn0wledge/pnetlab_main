@@ -76,6 +76,4 @@ class SystemHelper {
         }
     }
 
-    public static function updateDomain(){
-    }
 }

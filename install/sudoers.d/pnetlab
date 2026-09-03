@@ -105,7 +105,6 @@ www-data ALL=(root) NOPASSWD: /usr/bin/ps
 # arguments and nothing else; the grants now say so.
 www-data ALL=(root) NOPASSWD: /usr/sbin/shutdown -h now
 www-data ALL=(root) NOPASSWD: /usr/sbin/reboot ""
-www-data ALL=(root) NOPASSWD: /usr/sbin/ntpdate
 
 # --- ROOT-EQUIVALENT. Remove these first; route behind unl_wrapper. --------
 # Each of these can be turned into a root shell by anyone who controls its

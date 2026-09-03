@@ -34,10 +34,7 @@ class UserName extends Component {
 								</select> 
 						</div>
 
-						{isOffline()
-							? <a className="dropdown-item" href='/store/public/admin/profile/view'><i className="fa fa-user"></i>&nbsp;{lang('Profile')}</a>
-							: <a className="dropdown-item" href={`${App.server.common['APP_CENTER']}/auth/profile/view?box=${window.location.origin}`}><i className="fa fa-user"></i>&nbsp;{lang('Profile')}</a>
-						}
+						<a className="dropdown-item" href='/store/public/admin/profile/view'><i className="fa fa-user"></i>&nbsp;{lang('Profile')}</a>
 						<div className='dropdown-item'><Logout /></div>
 					</div>
 				</div>

@@ -29,7 +29,6 @@ class LoginOffline extends Component {
         this.nexlink = get(App.parsed['link'], '/');
         this.isCaptcha = get(App.server['captcha'], '1');
         this.version = get(App.server['version'], '4.0.0');
-        this.online = get(App.server['online'], '1');
 
     }
     
@@ -80,14 +79,8 @@ class LoginOffline extends Component {
                         <div tabIndex="0" className='button btn btn-info' style={{padding:8, flexGrow:1}} onClick = {()=>this.login()}>{lang("Login")}</div>
                     </div>
 
-                    {this.online == '1' && <div style={{marginBottom:30}} className='box_flex'>
-                        <a href="/store/public/auth/login/online" style={{width:'100%'}}>
-                            <div className='button btn btn-info' style={{padding:8, width:200, background:'none', width:'100%'}}>{lang("Login by Online Account")}</div>
-                        </a>
-                    </div>}
 
                 </div>
-                {/* <div style={{textAlign:'center', textDecoration:'underline', color:'white', position:'fixed', bottom:15, right:15}} className='button'><a href="/store/public/auth/login/online">Login by Online Account</a></div> */}
 			</div>
 
                     <style>{`

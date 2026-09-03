@@ -3,7 +3,3 @@ if [ $1 = "upgrade" ]
 then
     /usr/bin/php /opt/unetlab/html/store/artisan upgrade now
 fi
-if [ $1 = "keepalive" ] 
-then
-    /usr/bin/php /opt/unetlab/html/store/artisan keepalive now
-fi
