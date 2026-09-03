@@ -1265,6 +1265,8 @@ $app->post('/api/labs/session/(:object)/(:action)', function ($object, $action) 
 
 					$lab->save();
 				} else if ($action == 'setquality') {
+					checkLabPermission($lab, USER_PER_EDIT_LAB);
+					checkLockLab($lab);
 					$p = $variables;
 					$nodeId = get($p['node_id'], '');
 					if ($nodeId === '') throw new Exception('No node defined');
@@ -1279,6 +1281,8 @@ $app->post('/api/labs/session/(:object)/(:action)', function ($object, $action) 
 					$interface->setQuality($p);
 			
 				} else if ($action == 'setSuspend') {
+					checkLabPermission($lab, USER_PER_EDIT_LAB);
+					checkLockLab($lab);
 					$p = $variables;
 					$nodeId = get($p['node_id'], '');
 					if ($nodeId === '') throw new Exception('No node defined');
@@ -1504,16 +1508,22 @@ $app->post('/api/labs/session/(:object)/(:action)', function ($object, $action) 
 			case 'wireshark':
 				$p = $variables;
 				if ($action == 'add') {
+					checkLabPermission($lab, USER_PER_EDIT_LAB);
+					checkLockLab($lab);
 					$interface_id = get($p['interface_id'], '');
 					$node_id = get($p['node_id'], '');
 					addWireshark($lab, $node_id, $interface_id);
 				} else if ($action == 'capture') {
+					checkLabPermission($lab, USER_PER_EDIT_LAB);
+					checkLockLab($lab);
 					$interface_id = get($p['interface_id'], '');
 					$node_id = get($p['node_id'], '');
 					$checkExistLog = exec('docker -H=unix:///var/run/docker.sock images pnetlab/pnet-wireshark:latest | grep pnetlab/pnet-wireshark');
 					if ($checkExistLog == '') throw new Exception('You have not installed Wireshark for the HTML Console. Go to the Devices tab and get the Wireshark node then try to capture again.');
 					$output = addWiresharkSystem($lab, $node_id, $interface_id);
 				} else if ($action == 'delete') {
+					checkLabPermission($lab, USER_PER_EDIT_LAB);
+					checkLockLab($lab);
 					$interface_id = get($p['interface_id'], '');
 					$node_id = get($p['node_id'], '');
 					if ($interface_id === '' || $node_id === '') throw new Exception('Missing data');
@@ -1536,6 +1546,8 @@ $app->post('/api/labs/session/(:object)/(:action)', function ($object, $action) 
 					$output['message'] = "Add Start-up Config successfully.";
 					// }
 				} else if ($action == 'active') {
+					checkLabPermission($lab, USER_PER_EDIT_LAB);
+					checkLockLab($lab);
 					$name = get($variables['name'], '');
 					$lab->setMulti_config_active($name);
 					$lab->save();
