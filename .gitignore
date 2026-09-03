@@ -34,6 +34,3 @@ mix-manifest.json
 
 # Agent worktrees live inside the repo; never commit them.
 .claude/
-
-# Retired docs: kept on disk for reference, history in git, not tracked.
-/docs/inactive/

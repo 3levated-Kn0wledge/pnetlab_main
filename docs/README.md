@@ -7,18 +7,16 @@ is built, what it supports, and what its security and licence positions are.
 They are expected to stay current; when one goes stale, it is corrected, not
 deleted.
 
-**Finished docs move to `docs/inactive/`, which is gitignored.** When a
-document describes work that is complete — an exit gate that has been cleared, a
-migration that has landed — it is moved there rather than deleted. The file
-stays on disk for reference and its history stays in git (up to the commit that
-moved it; `git log --follow -- docs/<name>.md` finds it), but it is no longer
-part of the tracked tree, so it stops adding noise to greps, diffs and reviews
-of live work. Nothing in `docs/inactive/` is guaranteed to still be accurate; it
-is a record of a decision at a point in time.
+**Finished docs move to `docs/inactive/`.** When a document describes work
+that is complete — an exit gate that has been cleared, a migration that has
+landed — it is moved there rather than deleted. It stays tracked, so it travels
+with every clone and archive and `git log --follow` reaches its whole history,
+but it is out of the way of greps and reviews of live work and nothing in it is
+guaranteed to still be accurate: it is a record of a decision at a point in
+time, and it is not updated.
 
-To retire a doc: `git rm --cached docs/<name>.md`, move the file into
-`docs/inactive/`, and note it here. To bring one back, move it out and
-`git add` it.
+To retire a doc: `git mv docs/<name>.md docs/inactive/`, update anything that
+links to it, and note it here. To bring one back, `git mv` it out.
 
 ## Active
 
@@ -38,7 +36,7 @@ To retire a doc: `git rm --cached docs/<name>.md`, move the file into
 `THIRD-PARTY.md` and `LICENSE` are at the repository root, and
 `platform/wrappers/src/README.md` documents the wrapper core.
 
-## Inactive (untracked, under `docs/inactive/`)
+## Inactive (under `docs/inactive/`)
 
 | File | What it was | Retired |
 |---|---|---|

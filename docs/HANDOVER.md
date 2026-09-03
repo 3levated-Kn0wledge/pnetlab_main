@@ -717,7 +717,7 @@ workstation.
 
 ## Documents
 
-Active docs live in `docs/` and are tracked. A doc for work that is finished moves to `docs/inactive/`, which is gitignored — the file stays on disk for reference and its history stays in git, but it is no longer part of the tracked tree. `docs/README.md` is the index of both.
+Active docs live in `docs/`. A doc for work that is finished moves to `docs/inactive/` — still tracked, so it travels with every clone and keeps its history, but out of the way of live work and no longer updated. `docs/README.md` is the index of both.
 
 | File | What it is |
 |---|---|
@@ -735,7 +735,7 @@ Active docs live in `docs/` and are tracked. A doc for work that is finished mov
 | `docs/DOCKER-IMAGES.md` | seeding Docker images onto an offline host, and why it is not a package yet |
 | `docs/OFFLINE-FIRST.md` | the accepted architectural direction |
 | `platform/wrappers/src/README.md` | the wrapper core API and its provenance |
-| `docs/inactive/PHASE-04-EXIT-FIXES.md` | **archived (untracked):** the Phase 04 exit gate, cleared and merged into `main` |
+| `docs/inactive/PHASE-04-EXIT-FIXES.md` | **archived:** the Phase 04 exit gate, cleared and merged into `main` |
 | `docs/audit.html` | single-page summary of the live-box findings |
 
 `docs/ROADMAP.md` predates most of this session. Where it and this document
