@@ -2,7 +2,6 @@
 namespace App\Helpers\Admin;
 
 
-use App\Helpers\Box\License;
 use App\Helpers\Control\Ctrl;
 use App\Helpers\DB\Models;
 use App\Helpers\Packages\PackageClient;

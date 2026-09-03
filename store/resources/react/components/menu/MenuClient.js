@@ -64,12 +64,8 @@ class MenuClient extends Component {
 										<i className="fa fa-group"></i>&nbsp;{lang('Accounts')}&nbsp;<span className="caret"></span>
 									</div>
 									<ul className="menu_group">
-										{isOffline()
-											? <li className="menu_item"><a href="/store/public/admin/users/offline">
+										<li className="menu_item"><a href="/store/public/admin/users/offline">
 											<i className="fa fa-user"></i>&nbsp;{lang('Users Management')}</a></li>
-											: <li className="menu_item"><a href="/store/public/admin/users/view">
-											<i className="fa fa-user"></i>&nbsp;{lang('Users Management')}</a></li>
-										}
 										
 										<li className="menu_item"><a href="/store/public/admin/user_roles/view">
 											<i className="fa fa-id-card-o"></i>&nbsp;{lang('Roles Management')}</a></li>

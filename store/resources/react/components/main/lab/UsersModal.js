@@ -16,7 +16,6 @@ import FuncRefresh from '../../table/FuncRefresh'
 import FuncExport from '../../table/FuncExport'
 import FuncEditRows from '../../table/FuncEditRows'
 import TableStatic from '../../table/TableStatic'
-import AddUserModal from '../../admin/user/AddUserModal'
 
 
 class UsersModal extends Component {

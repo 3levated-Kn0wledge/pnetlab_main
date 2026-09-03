@@ -61,7 +61,6 @@ return [
     'admin/status/view',            // menu, and window.open from StatusModal.js:75
     'admin/sync/view',              // pages/admin/SyncView.js
     'admin/system/view',            // menu
-    'admin/users/view',             // menu
     'admin/users/offline',          // menu, offline mode
     'admin/user_roles/view',        // menu
 

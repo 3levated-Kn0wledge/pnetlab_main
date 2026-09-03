@@ -15,6 +15,9 @@
  *      dependencies, versioning them, and the image uploader behind it
  *   4. the notices -- the bell in the menu bar, which asked the licensing
  *      server for news on every page load
+ *   5. the multi-access licences -- the online accounts page, the "apply"
+ *      that registered accounts upstream, the account limit, the offline
+ *      licence keys, and the machine UUID the box showed as its identity
  *
  * Every assertion below is source-level and comment-stripped, in the style of
  * RoutingTest: the files that lost this code explain at length what they
@@ -174,5 +177,31 @@ foreach ($react as $p) {
     }
 }
 assert_same([], $reactHits, 'no React source polls the notice endpoints or renders the bell');
+
+echo "5. the multi-access licences are gone\n";
+
+assert_true(!is_file($root . '/store/app/Helpers/Box/License.php'), 'Helpers/Box/License.php is gone');
+assert_same([], app_files_mentioning($root, 'License::'), 'nothing under store/app refers to the licence helper');
+$users = code_only($root . '/store/app/Http/Controllers/Admin/UsersController.php');
+$userMethods = public_methods($users);
+foreach (['apply', 'getLimit', 'view', 'getOffLimit', 'getKeys', 'activeKey', 'deleteKey'] as $gone) {
+    assert_true(!in_array($gone, $userMethods, true), "Admin/UsersController has no $gone()");
+}
+assert_true(strpos($users, 'Query::') === false, 'Admin/UsersController reaches no server');
+assert_true(strpos($users, 'dmidecode') === false, 'and never reads the machine UUID');
+assert_true(!in_array('admin/users/view', $readonly, true), 'admin/users/view is not on the GET allowlist');
+foreach (['pages/admin/UsersView.js', 'components/admin/user/AddUserModal.js',
+          'components/admin/user/OfflineLicenseModal.js'] as $f) {
+    assert_true(!file_exists($root . '/store/resources/react/' . $f), "React $f is gone");
+}
+$reactHits = [];
+foreach ($react as $p) {
+    $src = file_get_contents($p);
+    foreach (['users/getLimit', 'users/getOffLimit', 'users/apply', 'users/getKeys', 'users/activeKey',
+              'users/deleteKey', 'admin/users/view', 'OfflineLicenseModal', 'AddUserModal', "Box's ID"] as $needle) {
+        if (strpos($src, $needle) !== false) $reactHits[] = basename($p) . ': ' . $needle;
+    }
+}
+assert_same([], $reactHits, 'no React source reaches a licence endpoint or the online accounts page');
 
 test_summary();

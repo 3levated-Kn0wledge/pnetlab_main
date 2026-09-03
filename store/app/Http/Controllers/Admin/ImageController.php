@@ -3,7 +3,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Helpers\Admin\Upgrade;
 use App\Helpers\Auth\Role;
-use App\Helpers\Box\License;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Helpers\Request\Reply;

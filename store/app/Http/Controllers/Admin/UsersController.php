@@ -3,7 +3,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Helpers\Admin\SystemHelper;
 use App\Helpers\Auth\Role;
-use App\Helpers\Box\License;
 use App\Helpers\DB\Edge;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
@@ -12,7 +11,6 @@ use App\Helpers\Request\Reply;
 use Illuminate\Support\Facades\Auth;
 use App\Helpers\Uploader\FileFunc;
 use App\Helpers\DB\Models;
-use App\Helpers\Request\Query;
 
 class UsersController extends Controller  
 {
@@ -186,117 +184,8 @@ class UsersController extends Controller
     }
 
    
-    public function apply(Request $request){
-        Checker::method('post');
-        if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        $data = $request->all();
-
-        $data = get($data['data'], []);
-        $addData = [];
-        
-        foreach($data as $account){
-            if(isset($account[USER_OFFLINE]) && $account[USER_OFFLINE] == 1) continue;
-            $addData[] = [
-                MULTI_ACCESS_EMAIL => $account[USER_EMAIL],
-                MULTI_ACCESS_NOTE => $account[USER_NOTE],
-            ];
-        } 
-
-        $uuid = License::get_uuid();
-        $ip = $_SERVER['SERVER_NAME'];
-
-        $uploadData = [
-            'uuid' => $uuid,
-            'data' => $addData,
-            'ip' => $ip,
-        ];
-
-        $result = Query::center(APP_CENTER.'/api/boxs/multi_access/apply', 'post',  $uploadData, ['dataType'=>'json']);
-        
-        if(!$result) Reply::finish(false, 'Apply multi access to server fail');
-        if(!$result['result']) return $result;
-
-        $returnData = $result['data'];
-
-        $result = $this->mainModel->read([[[USER_OFFLINE, '=', '0']]]);
-        if(!$result['result']) return $result;
-        $result = $result['data'];
-        $oldAccount = [];
-       
-        foreach($result as $account){
-            $oldAccount[$account->{USER_EMAIL}] = $account;
-        }
-
-        $deleteAccount = $oldAccount;
-
-        $addData = [];
-        foreach($data as $account){
-
-            if(isset($account[USER_WORKSPACE])){
-                $wspace = str_replace('//', '/', $account[USER_WORKSPACE]);
-                if($wspace == '/') $wspace = '';
-                if($wspace[0] != '/') $wspace = '/'. $wspace;
-                $account[USER_WORKSPACE] = $wspace;
-            }
-
-            if(isset($account[USER_ROLE]) && $account[USER_ROLE] == 0){
-                $account[USER_STATUS] = USER_STATUS_ACTIVE;
-                $account[USER_EXPIRED_TIME] = null;
-                $account[USER_ACTIVE_TIME] = null;
-                $account[USER_WORKSPACE] = null;
-                $account[USER_MAX_NODE] = null;
-                $account[USER_MAX_NODELAB] = null;
-                
-            }
-            if(isset($oldAccount[$account[USER_EMAIL]])){
-                unset($deleteAccount[$account[USER_EMAIL]]);
-                $this->mainModel->edit([
-                    DATA_KEY => [[ [USER_EMAIL, '=', $account[USER_EMAIL]] ]],
-                    DATA_EDITOR => [
-                        USER_ROLE => $account[USER_ROLE],
-                        USER_NOTE => $account[USER_NOTE],
-                        USER_ACTIVE_TIME => $account[USER_ACTIVE_TIME],
-                        USER_EXPIRED_TIME => $account[USER_EXPIRED_TIME],
-                        USER_STATUS => $account[USER_STATUS],
-                        USER_WORKSPACE => $account[USER_WORKSPACE],
-                    ],
-                ]);
-            }else{
-                $addData[] = $account;
-            }
-        }
-        if(count($deleteAccount) > 0){
-           
-            $result = $this->mainModel->drop('All', function($db)use($deleteAccount){
-                $db->whereIn(USER_EMAIL, array_keys($deleteAccount));
-            });
-
-            if(!$result['result']) return $result;
-        }
-        if(count($addData) > 0){
-            $result = $this->mainModel->add($addData);
-            if(!$result['result']) return $result;
-        }
 
 
-        Reply::finish(true, 'success', $returnData);
-    }
-
-    public function getLimit(){
-        $result = Query::center(APP_CENTER.'/api/boxs/multi_access/getLimit', 'post', null, ['dataType'=>'json']);
-        if(!$result) Reply::finish(false, 'Can not get information, check your internet');
-        if(!$result['result']) return $result;
-        return Reply::finish(true, 'success', [
-            'limit'=> $result['data'],
-            'UUID' => License::get_uuid(),
-        ]);
-    }
-
-    public function view() 
-    {
-        if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        return view($this->viewblade);
-    }
 
 
 
@@ -473,40 +362,9 @@ class UsersController extends Controller
     }
     
 
-    public function getOffLimit(){
-        Checker::method('post');
-        if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        return Reply::finish(true, 'success', [
-            'limit'=> "Unlimit",
-            'UUID' => License::get_uuid(),
-        ]);
-    }
 
-    public function getKeys(Request $request){
-        Checker::method('post');
-        if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        $data = $request->all();
-        $result = Query::boxCenter(APP_CENTER.'/api/offboxs/malicense/getKeys', $data, ['dataType'=>'']);
-        return $result;
-    }
 
-    public function activeKey(Request $request){
-        Checker::method('post');
-        if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        $data = $request->all();
-        $result = Query::boxCenter(APP_CENTER.'/api/offboxs/malicense/active', $data, ['dataType'=>'json']);
-        if(!$result) Reply::finish(false, 'Can not connect to server');
-        return $result;
-    }
 
-    public function deleteKey(Request $request){
-        Checker::method('post');
-        if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        $data = $request->all();
-        $result = Query::boxCenter(APP_CENTER.'/api/offboxs/malicense/delete', $data, ['dataType'=>'json']);
-        if(!$result) Reply::finish(false, 'Can not connect to server');
-        return $result;
-    }
 
     public function offline() 
     {

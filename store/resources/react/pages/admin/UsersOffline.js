@@ -15,7 +15,6 @@ import FuncExport from '../../components/table/FuncExport'
 import FuncEditRows from '../../components/table/FuncEditRows'
 import AddOfflineUserModal from '../../components/admin/user/AddOfflineUserModal'
 import { Prompt } from 'react-router-dom';
-import OfflineLicenseModal from '../../components/admin/user/OfflineLicenseModal'
 import EditOfflineUserModal from '../../components/admin/user/EditOfflineUserModal'
 
 class Users extends Component {
@@ -316,8 +315,6 @@ class Users extends Component {
 		};
 
 		this.state = {
-			maximum: '',
-			UUID: '',
 			consume: {},
 		}
 
@@ -343,11 +340,6 @@ class Users extends Component {
 				>
 					<div className='box_flex'>
 						<FilterBar></FilterBar>
-						<div style={{margin:'auto 0px auto auto'}}>
-							<div className='button' style={{padding:0}} onClick={() => this.licenseModal.modal()}>Maximum Accounts: <b>{this.state.maximum}</b></div>
-							<div>Box's ID: <b>{this.state.UUID}</b></div>
-							<br/>
-						</div>
 					</div>
 					<FuncBar
 						left={<><FuncHideCol /></>}
@@ -361,7 +353,6 @@ class Users extends Component {
 						}></FuncBar>
 					<MainTable className='table table-bordered table-resizable'></MainTable>
 					<Pagination></Pagination>
-					<OfflineLicenseModal ref = {c => this.licenseModal = c}></OfflineLicenseModal>
 					<AddOfflineUserModal ref = {c => this.addUserModal = c}></AddOfflineUserModal>
 					<EditOfflineUserModal ref = {c => this.editUserModal = c}></EditOfflineUserModal>
 
@@ -373,7 +364,6 @@ class Users extends Component {
 
 	componentDidMount() {
 		
-		this.getLimit();
 		this.getConsume();
 
 		this.nodeTableInteval = setInterval(()=>{
@@ -391,32 +381,6 @@ class Users extends Component {
 		if(this.loadOriginInteval) clearInterval(this.loadOriginInteval);
 	}
 
-	getLimit(){
-		return axios.request({
-			url: '/store/public/admin/users/getOffLimit',
-			method: 'post',
-		})
-
-			.then(response => {
-				App.loading(false);
-				response = response['data'];
-				if(response['result']){
-					this.setState({
-						maximum: response['data']['limit'],
-						UUID: response['data']['UUID'],
-					});
-				}else{
-					error_handle(response);
-				}
-			})
-
-			.catch((error)=>{
-				console.log(error); 
-				App.loading(false);
-				error_handle(error);
-			})
-
-	}
 
 
 	getConsume(){
