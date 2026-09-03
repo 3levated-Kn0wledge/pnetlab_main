@@ -1,13 +1,13 @@
 # Handover
 
-**State at end of session, 2026-09-03.** `main` now carries the merged
-`phase-04-exit-fixes` (merge `5e2bb03`). Work since is on branch
-`security-review-fixes`, eight commits ahead of `main`, none pushed, nothing
-uncommitted: six findings from an external security review, fixed one per
-commit, plus a test-infrastructure commit and this documentation. See
-**Security review fixes (2026-09-03)** below. The rest of this document is the
-state at the close of the Phase 04 session, still current except where that
-section supersedes it.
+**State at end of session, 2026-09-03.** `main` carries the merged
+`phase-04-exit-fixes` (merge `5e2bb03`) and, on top of it, the merged
+`security-review-fixes`: six findings from an external security review, fixed
+one per commit, plus a test-infrastructure commit and documentation, verified
+from scratch on the reference VM through the installer before merging. Both
+merges are pushed. See **Security review fixes (2026-09-03)** below. The rest
+of this document is the state at the close of the Phase 04 session, still
+current except where that section supersedes it.
 
 **Everything below was measured on a host that was rolled back to its
 post-provision snapshot and built from nothing** — a clean `git archive` of the
@@ -71,25 +71,36 @@ nothing would catch a mistake in the start path. Only the drop's *completeness*
 was fixed, which needs no image. `docs/inactive/PHASE-04-EXIT-FIXES.md` and
 `docs/ROADMAP-STATUS.md` carry the same deferral.
 
-**Verified locally, not through the installer this session.** The workstation
-has no PHP, so the PHP suite ran under a static PHP 8.3 build; the C wrappers
-built locally.
+**Verified from scratch on the reference VM, 2026-09-03.** The VM was at its
+post-provision snapshot (the interrupted `dpkg` again, cleared with
+`dpkg --configure -a`); a clean `git archive` of `cef483c` was unpacked, the
+Guacamole artefacts and the CirrOS image staged, the captcha turned off, and
+the installer run end to end — the same recipe as "Deploying onto a clean
+host" below, nothing carried over.
 
 ```
-tools/run-tests.sh (static PHP 8.3)  → 2022 assertions across 36 files, 0 failed
-                                        PackageApplyTest (37th) needs ext-sodium,
-                                        absent from the static build; it passes on
-                                        a real host
-tools/php-lint.sh                    → 359 files, 0 failed
-make -C platform/wrappers/src test   → 284 unit assertions, 0 failed
-                                        also clean under -fsanitize=address,undefined
+sudo bash install/install.sh --server-name pnetlab.test
+→ INSTALLER-EXIT=0, every step, 0 [fail], all verification checks passed
+
+tools/run-tests.sh (as root, PHP 8.4)      → 2149 assertions across 37 files, 0 failed
+tools/php-lint.sh (8.4)                    → 359 files, 0 failed
+make -C platform/wrappers/src test         → 279 unit assertions, 0 failed
+bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
+bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/db-backup-restore.sh→ 67 passed, 0 failed, 0 skipped
+bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
+bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
+bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
+bash tools/integration/iol-dataplane.sh    → 76 assertions, 0 failed  (was 75: the loopback bind check)
 ```
 
-The five new PHP test files add 305 assertions; the C unit count moved from 253
-to 284. **A full installer run on the reference VM has not been done for this
-branch** — it is the natural next step, with the recipe in
-`docs/REFERENCE-ENVIRONMENT.md`, and it is what would re-measure the integration
-suites (the numbers in "Where this got to" below are the Phase 04 VM baseline).
+Zero `unl*` accounts and zero taps left on the host afterwards. The five new
+PHP test files add 305 assertions over the Phase 04 baseline. The C unit count
+is host-dependent now: the `iol_udp_open` loopback test asserts once per
+non-loopback interface, so it reads 279 on the VM (one NIC) and 284 on the
+workstation (several); it is also clean under `-fsanitize=address,undefined`.
+The integration numbers match the Phase 04 baseline in "Where this got to"
+below except `iol-dataplane.sh`, which gained the bind check.
 
 ---
 
@@ -638,11 +649,8 @@ review and several had been shipping for years.
 
 ## Suggested next steps, in order
 
-1. **Review and merge `phase-04-exit-fixes`.** 38 commits, each individually
-   scoped, each message carrying the reasoning and what was measured. One
-   commit (`9bcff23`) closes two gate items at once because they are two
-   findings on the same allowlist and the same test. Then open Phase 05:
-   nothing gates it any more.
+1. ~~**Review and merge `phase-04-exit-fixes`.**~~ Merged (`5e2bb03`), and
+   the security-review fixes after it. Nothing gates Phase 05 any more.
 2. **IOL, with a licensed image.** Everything else is proven; this is the only
    feature claim resting on unit tests alone.
 3. **Finish the sudo migration.** `rm` is the last of the file-mutation grants,
