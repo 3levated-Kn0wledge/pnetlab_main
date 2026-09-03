@@ -470,26 +470,71 @@ design, and that is the review that a shell script never permitted.
 
 ### 5. Serve it
 
-Any static HTTP server. The box resolves a device to a package in this order:
-
-1. `device_package` in the marketplace's device record, if it is an http(s) URL;
-2. otherwise `${PNET_PACKAGE_CENTER}/devices/<device_id>.pnetpkg`;
-3. otherwise it reports that no package exists and installs nothing.
-
-Set the repository on the box:
+Any static HTTP server. Set the repository on the box:
 
 ```bash
 PNET_PACKAGE_CENTER=https://packages.example.com
 ```
 
-An optional `device_package_sha256` in the listing is checked after download.
+The box resolves a device to a package in this order:
+
+1. `device_package` in the device's index record, if it is an http(s) URL;
+2. otherwise `${PNET_PACKAGE_CENTER}/devices/<device_id>.pnetpkg`;
+3. otherwise it reports that no package exists and installs nothing.
+
+An optional `device_package_sha256` in the index is checked after download.
 That is a transport check only — it catches a truncated or swapped file early.
 **The signature inside the package is what decides whether the contents are
 believed**, and it is checked by root, after the web layer has stopped being
 able to touch the file.
 
-For updates, have `/api/offboxs/upgrade/upgrade` return a `package` field with
-the URL of an `.pnetpkg` whose `kind` is `update`.
+### 6. The index
+
+`${PNET_PACKAGE_CENTER}/index.json` is how the box learns what the repository
+serves. It replaced two upstream calls — the device listing and the update
+check — when Phase 05 severed them. One document, two keys, both optional:
+
+```json
+{
+  "devices": [
+    {
+      "device_id": "vios",
+      "device_name": "Cisco vIOS",
+      "device_des": "IOSv 15.9, L3 image",
+      "device_img": "https://packages.example.com/img/vios.png",
+      "device_package": "https://packages.example.com/devices/vios.pnetpkg",
+      "device_package_sha256": "<64 hex characters>",
+      "device_guide": "https://packages.example.com/guides/vios.html"
+    }
+  ],
+  "appliance": {
+    "version": "5.3.14",
+    "package": "https://packages.example.com/pnetlab-5.3.14.pnetpkg",
+    "sha256": "<64 hex characters>",
+    "note": "What changed, as plain text."
+  }
+}
+```
+
+`devices` is what the device store lists; `device_id` is the only required
+field and must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`. `appliance` is what
+the version dialog compares against `ctrl_version`; it needs `version` and
+`package` or it is ignored.
+
+The box treats the index as data from the network, because it is. It is
+capped at 1 MiB; every URL must be http(s) with a host, so a `javascript:` or
+`data:` image never reaches the page; digests must be 64 hex characters; text
+is trimmed and bounded; a record without a valid id is dropped, and a
+duplicate id keeps the first record. `note` is rendered as text, not HTML.
+None of this decides what an install does — that is the signed manifest
+inside the package — but it is what stops a hostile index from being a
+cross-site scripting vector. `tests/Security/PackageIndexTest.php` feeds it
+the hostile shapes.
+
+**It is fetched only when `PNET_PACKAGE_CENTER` is set, and only from the two
+screens that ask** — the device store and the version dialog. With no
+repository configured, nothing is contacted and the store says so. This is
+the one outbound request the admin UI still makes, and it is an opt-in.
 
 ---
 
@@ -571,7 +616,5 @@ are actions on it.
 * **A signed index.** Package *discovery* is unauthenticated; only package
   *contents* are signed. A repository that lies about which version is current
   can withhold an update, though it cannot forge one.
-* **Removing the legacy path.** `device_script`, `device_check` and
-  `device_delete` are no longer read by any code here, but the upstream API
-  still returns them. Retiring the upstream calls belongs to the phase that
-  severs the upstream dependency.
+* ~~**Removing the legacy path.**~~ Done in Phase 05: the box no longer asks
+  upstream for device records or versions at all. It reads the index above.

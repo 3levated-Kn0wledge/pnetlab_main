@@ -10,3 +10,6 @@ global.DEVICE_PUBLIC = 'device_public';
 global.DEVICE_COUNT = 'device_count';
 global.DEVICE_TARGET = 'device_target';
 global.DEVICE_DELETE = 'device_delete';
+global.DEVICE_PACKAGE = 'device_package';
+global.DEVICE_PACKAGE_SHA256 = 'device_package_sha256';
+global.DEVICE_GUIDE = 'device_guide';

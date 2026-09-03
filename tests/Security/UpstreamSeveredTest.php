@@ -18,6 +18,8 @@
  *   5. the multi-access licences -- the online accounts page, the "apply"
  *      that registered accounts upstream, the account limit, the offline
  *      licence keys, and the machine UUID the box showed as its identity
+ *   6. the device store -- listed from the repository's own index now, not
+ *      from user.pnetlab.com
  *
  * Every assertion below is source-level and comment-stripped, in the style of
  * RoutingTest: the files that lost this code explain at length what they
@@ -203,5 +205,23 @@ foreach ($react as $p) {
     }
 }
 assert_same([], $reactHits, 'no React source reaches a licence endpoint or the online accounts page');
+
+echo "6. the device store reads the repository index\n";
+
+$devices = code_only($root . '/store/app/Http/Controllers/Admin/DevicesController.php');
+assert_true(strpos($devices, 'Query::') === false && strpos($devices, 'APP_CENTER') === false,
+    'Admin/DevicesController reaches no server of its own');
+assert_true(strpos($devices, 'PackageClient::index()') !== false && strpos($devices, 'PackageClient::device(') !== false,
+    'and lists and resolves devices through the repository index');
+assert_true(!is_file($root . '/store/app/Console/Commands/DeviceFactory.php'),
+    'the legacy device_factory command, which downloaded from a link it was handed, is gone');
+$client = code_only($root . '/store/app/Helpers/Packages/PackageClient.php');
+assert_true(preg_match('/if \(PACKAGE_CENTER === \'\'\) \{\s*return null;/', $client) === 1,
+    'PackageClient::indexUrl() is null with no repository configured, so nothing is fetched by default');
+assert_true(strpos($client, "'strict_transport' => true") !== false,
+    'and the index is fetched with strict transport');
+$item = file_get_contents($root . '/store/resources/react/components/admin/device/DeviceItem.js');
+assert_true(strpos($item, 'APP_CENTER') === false, 'DeviceItem no longer links to the upstream guide page');
+assert_true(strpos($item, 'file_public(') === false, 'and does not rewrite image URLs through the upstream uploader');
 
 test_summary();
