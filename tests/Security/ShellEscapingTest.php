@@ -68,6 +68,13 @@
 
 require_once __DIR__ . '/../bootstrap.php';
 
+// The analyser indexes the tokens of every first-party PHP file and keeps them
+// for the whole run, so its footprint grows with the tree: at 355 files it
+// passed php-cli's default 128M limit by a few MB and adding one 14 KB include
+// (includes/html_sanitizer.php) took it over. Sized for the tree, not the
+// default; the assertions do not change.
+ini_set('memory_limit', '512M');
+
 $root = realpath(__DIR__ . '/../..');
 
 // ---------------------------------------------------------------- the analyser
