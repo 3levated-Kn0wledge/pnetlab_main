@@ -281,9 +281,9 @@ function sudo_offences($path)
     return $found;
 }
 
+// User/DependenceController.php and User/VersionsController.php were on this
+// list too, until Phase 05 deleted them with the rest of the lab marketplace.
 $rewritten = [
-    '/store/app/Http/Controllers/User/DependenceController.php',
-    '/store/app/Http/Controllers/User/VersionsController.php',
     '/store/app/Http/Controllers/Admin/SystemController.php',
     '/store/app/Http/Controllers/Admin/DefaultController.php',
     '/store/app/Helpers/Request/Query.php',

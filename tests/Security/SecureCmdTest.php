@@ -425,13 +425,17 @@ assert_true(strpos($folders, "mv \"") === false,
 assert_true(substr_count($folders, 'unl_exec_argv(') === 2,
     'both are argv arrays, which reach no shell');
 
+// getDepends() -- the one site genuinely held up by the old blocklist, which
+// interpolated an uploaded lab's image path into `sudo qemu-img info
+// --backing-chain <path> | grep image` -- was rewritten as an argv array
+// without sudo, and then removed altogether in Phase 05 with the lab
+// marketplace it served. What is asserted now is that neither the shell
+// shape nor a sudo comes back into the controller that remains.
 $labsCtl = secure_cmd_code($root . '/store/app/Http/Controllers/Admin/LabsController.php');
-assert_true(strpos($labsCtl, 'qemu-img info --backing-chain') === false,
-    'getDepends() no longer interpolates an image path into a sudo qemu-img command');
-assert_true(strpos($labsCtl, "'qemu-img', 'info', '--backing-chain', '--', \$file") !== false,
-    'it execs qemu-img through an argv array instead');
+assert_true(strpos($labsCtl, 'qemu-img') === false,
+    'Admin/LabsController no longer runs qemu-img at all (getDepends() went with the marketplace)');
 assert_true(strpos($labsCtl, 'sudo') === false,
-    'and without sudo, because reading a qcow2 header needs no privilege');
+    'and holds no sudo');
 
 // checkFolder() is what actually held the folder routes, so it is asserted here
 // rather than left as a comment. If this allowlist is ever widened, the note

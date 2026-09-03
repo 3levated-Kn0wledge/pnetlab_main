@@ -54,11 +54,6 @@ global.error_handle = (error)=>{
 			return;
 		}
 
-		if(data['error_code'] == 10000){
-			var labId = data['data'] && data['data']['id'];
-			labExpireHandle(data['message'], labId);
-			return;
-		}
 		
 		showLog( lang(data['message'], data['data']), 'error' );
 		
@@ -83,25 +78,4 @@ global.showLog = (message, type)=>{
 		Swal('', message, type);
 	}
 	console.log(message);
-}
-
-global.labExpireHandle=(message, labId)=>{
-
-	if(App.labExpireHandled) return;
-	App.labExpireHandled = true;
-	return Swal({
-        title: lang('Warning')+'!',
-        text: lang(message),
-        type: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#3085d6',
-        cancelButtonColor: '#d33',
-        confirmButtonText: lang('Go To Store'),
-        cancelButtonText: lang('Cancel')
-    }).then((result) => {
-		App.labExpireHandled = false;
-        if(result.value){
-			window.open(`${App.server.common['APP_CENTER']}/store/labs/detail?id=${labId}&href=${window.location.origin}/store/public/admin/labs/store`);
-		}
-    })
 }

@@ -40,7 +40,7 @@ class MenuClient extends Component {
 		return (<>
 			<div className="menu menu_expand_lg">
 
-				<a href={`${App.server.common['APP_CENTER']}/store/labs/view?box=${window.location.origin}`}>
+				<a href="/">
 					<img style={{ height: 40, margin: 'auto 20px auto 40px' }} src='/store/public/assets/auth/img/logo.png'></img>
 				</a>
 
@@ -96,11 +96,6 @@ class MenuClient extends Component {
 								</li>
 
 
-								{isOffline()
-									? <li className="menu_item menu_item_parent"><a href={`${App.server.common['APP_CENTER']}/store/labs/view?box=${window.location.origin}`}><i className="fa fa-cloud-download"></i>&nbsp;{lang('Download Labs')}</a></li>
-									: <li className="menu_item menu_item_parent"><a href="/store/public/admin/labs/store"><i className="fa fa-cloud-download"></i>&nbsp;{lang('Download Labs')}</a></li>
-								}
-								{isOffline()? '' : <li className="menu_item menu_item_parent"><a href="/store/public/admin/labs/view"><i className="fa fa-shopping-cart"></i>&nbsp;{lang('Sell Your Labs')}</a></li>}
 								<li className="menu_item menu_item_parent"><a href="/store/public/admin/devices/store"><i className="fa fa-arrows" style={{
 									border: 'solid thin',
 									borderRadius: '50%',

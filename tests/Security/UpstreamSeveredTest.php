@@ -11,6 +11,8 @@
  *      carrying a licence, and the mode chooser in front of both
  *   2. the licence machinery -- relicense, keepalive, the alive key, and the
  *      cron jobs and artisan commands that drove them
+ *   3. the lab marketplace -- selling labs, downloading bought labs and their
+ *      dependencies, versioning them, and the image uploader behind it
  *
  * Every assertion below is source-level and comment-stripped, in the style of
  * RoutingTest: the files that lost this code explain at length what they
@@ -116,5 +118,44 @@ assert_same([], app_files_mentioning($root, 'function relicense('), 'no relicens
 
 $sudoers = file_get_contents($root . '/install/sudoers.d/pnetlab');
 assert_true(preg_match('/^www-data.*ntpdate/m', $sudoers) === 0, 'the ntpdate grant went with its only caller');
+
+echo "3. the lab marketplace is gone\n";
+
+foreach (['User/LabsController', 'User/VersionsController', 'User/DependenceController',
+          'Admin/VersionsController', 'Admin/DependenceController'] as $c) {
+    assert_true(!is_file($root . "/store/app/Http/Controllers/$c.php"), "$c is gone");
+}
+$labs = code_only($root . '/store/app/Http/Controllers/Admin/LabsController.php');
+$labMethods = public_methods($labs);
+foreach (['uploader', 'addGetId', 'getOwnLabs', 'drop', 'edit', 'read', 'mapping', 'public', 'unpublic',
+          'sellable', 'getUserAgreement', 'getDepends', 'view', 'create', 'editview', 'store'] as $gone) {
+    assert_true(!in_array($gone, $labMethods, true), "Admin/LabsController has no $gone()");
+}
+sort($labMethods);
+assert_same(['search', 'terminal', 'workbook', 'workbookview'], $labMethods,
+    'and keeps exactly the local lab pages and the lab search');
+assert_true(strpos($labs, 'Query::') === false, 'Admin/LabsController reaches no server');
+
+$readonly = include $root . '/store/config/readonly_actions.php';
+foreach (['admin/labs/view', 'admin/labs/create', 'admin/labs/editview', 'admin/labs/store',
+          'admin/labs/uploader', 'admin/versions/view', 'admin/versions/addview'] as $gone) {
+    assert_true(!in_array($gone, $readonly, true), "$gone is not on the GET allowlist");
+}
+
+foreach (['pages/admin/LabsStore.js', 'pages/admin/LabsView.js', 'pages/admin/LabsCreate.js',
+          'pages/admin/LabsEditView.js', 'pages/admin/VersionsView.js', 'pages/admin/VersionsAddView.js',
+          'helpers/lab_downloader.js', 'components/admin/store', 'components/admin/product'] as $f) {
+    assert_true(!file_exists($root . '/store/resources/react/' . $f), "React $f is gone");
+}
+$reactHits = [];
+foreach ($react as $p) {
+    $src = file_get_contents($p);
+    foreach (['user/labs/', 'user/versions/', 'user/dependence/', 'admin/versions/', 'admin/dependence/',
+              'admin/labs/uploader', 'admin/labs/store', 'admin/labs/view', 'labs/getOwnLabs',
+              'Sell Your Labs', 'Download Labs', 'Go To Store', 'labExpireHandle'] as $needle) {
+        if (strpos($src, $needle) !== false) $reactHits[] = basename($p) . ': ' . $needle;
+    }
+}
+assert_same([], $reactHits, 'no React source reaches a marketplace endpoint or links to the store');
 
 test_summary();

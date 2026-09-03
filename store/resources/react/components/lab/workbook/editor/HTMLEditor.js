@@ -555,12 +555,6 @@ class HTMLEditor extends Component {
                                     }
                                 }
 
-                                // extraPlugins: [ (editor)=>{
-                                // 	editor.plugins.get( 'FileRepository' ).createUploadAdapter = loader => new CkeditorUploadAdapter( loader, {
-                                // 		column: LAB_ARTICLE,
-                                // 		link: '/store/public/admin/labs/uploader',
-                                // 	});
-                                // } ],
 
                             }}
 

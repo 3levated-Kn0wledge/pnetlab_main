@@ -577,9 +577,11 @@ foreach (array_merge($reactFiles, $bundles, (array) glob($root . '/store/public/
 assert_same([], $assignsUploadUrl,
     'nothing assigns ckfinder.uploadUrl / simpleUpload.uploadUrl anywhere');
 
-// The three editor call sites keep their upload adapter commented out.
+// The editor call sites register no upload adapter. (They used to keep one
+// commented out, pointing at admin/labs/uploader; Phase 05 removed that
+// uploader with the lab marketplace, and the dead comment with it. The third
+// site, components/admin/product/Step_03.js, went with the marketplace too.)
 foreach ([
-    'components/admin/product/Step_03.js',
     'components/lab/text/TextEditor.js',
     'components/lab/workbook/editor/HTMLEditor.js',
 ] as $rel) {
