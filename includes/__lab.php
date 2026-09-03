@@ -2000,6 +2000,17 @@ class Lab
 					');
 
         if ($workbook->type == 'html') {
+            // Each page arrives as btoa(escape(html)) from the editor and is
+            // put into every viewer's DOM as HTML. It is reduced to the
+            // workbook allowlist HERE, on the way in, so that what the lab
+            // file holds is what may be rendered; the viewer's DOMPurify pass
+            // (default.js output_secure) is the second layer, not the only
+            // one. See includes/html_sanitizer.php.
+            if (is_array($content)) {
+                $content = array_map('unl_sanitize_workbook_page', $content);
+            } else {
+                $content = unl_sanitize_workbook_page($content);
+            }
             $workbook->menu = $menu;
             $workbook->content = $content;
         } else {

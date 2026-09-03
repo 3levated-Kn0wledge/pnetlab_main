@@ -31,6 +31,7 @@
           <script src="{{url('/')}}/extensions/nanoscroller/nanoscroller.js"></script>
           <link href="{{url('/')}}/extensions/nanoscroller/nanoscroller.css" rel = "stylesheet"/>
           
+          <script src="{{url('/')}}/assets/js/purify.min.js"></script>
           <script src="{{url('/')}}/assets/js/default.js"></script>
           <script src="{{url('/')}}/assets/js/cookies.js"></script>
           <!-- <link rel="stylesheet" href="{{url('/')}}/assets/css/common.css"> -->

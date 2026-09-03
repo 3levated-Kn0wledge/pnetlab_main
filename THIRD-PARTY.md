@@ -150,6 +150,7 @@ its own notice in its own distribution.
 | Component | Version | Licence | Location |
 |---|---|---|---|
 | **CKEditor 5** (`ckeditor5-build-classic`, `ckeditor5-react`) | 16.0.0 / 2.1.0 | **GPL-2.0-or-later** — Copyright (c) 2003-2019 CKSource, Frederico Knabben | compiled into `store/public/react/js/lab.js` and the `vendors~.` chunk; `store/public/extensions/ckeditor/ckeditor.css` |
+| **DOMPurify** | 3.2.6 | Apache-2.0 OR MPL-2.0 — Copyright (c) Cure53 and other contributors; <https://github.com/cure53/DOMPurify/blob/3.2.6/LICENSE> | `store/resources/assets/js/purify.min.js`, copied unmodified to `store/public/assets/js/purify.min.js`; the workbook viewer's output sanitizer (`default.js` `output_secure()`) |
 | Ace editor | 1.2.6 | BSD-3-Clause — Copyright (c) 2010, 2012 Ajax.org B.V. | `themes/default/js/src/` (213 files) |
 | jsPlumb Community / jsBezier | 2.4 | MIT — Copyright (c) 2010-2017 jsPlumb | `themes/default/bootstrap/js/jsPlumb-2.4*.js` |
 | jQuery | 3.2.1, 3.3.1 | MIT | `themes/default/bootstrap/js/`, `store/public/extensions/jquery/` |
