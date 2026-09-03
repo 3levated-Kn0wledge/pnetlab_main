@@ -1,8 +1,13 @@
 # Handover
 
-**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 38
-commits ahead of `main` (which now carries the merged `phase-02-shell-hardening`),
-none pushed. Nothing uncommitted.
+**State at end of session, 2026-09-03.** `main` now carries the merged
+`phase-04-exit-fixes` (merge `5e2bb03`). Work since is on branch
+`security-review-fixes`, eight commits ahead of `main`, none pushed, nothing
+uncommitted: six findings from an external security review, fixed one per
+commit, plus a test-infrastructure commit and this documentation. See
+**Security review fixes (2026-09-03)** below. The rest of this document is the
+state at the close of the Phase 04 session, still current except where that
+section supersedes it.
 
 **Everything below was measured on a host that was rolled back to its
 post-provision snapshot and built from nothing** — a clean `git archive` of the
@@ -11,7 +16,7 @@ claim than this document has carried before, and it cost four defects to make:
 see "Deploying onto a clean host" for what a fresh host needs and what it
 caught.
 
-**The Phase 04 exit gate is clear.** `docs/PHASE-04-EXIT-FIXES.md` named fifteen
+**The Phase 04 exit gate is clear.** `docs/inactive/PHASE-04-EXIT-FIXES.md` named fifteen
 defects found by reviewing the work that closed Phase 04, seven of them critical,
 plus fifteen secondary findings. All fifteen are fixed, one commit each, and
 verified on the reference VM through the installer; twelve of the secondary
@@ -39,6 +44,52 @@ each recorded in its own document:
 Phase 05 (severing the upstream dependency), 06 (frontend currency) and 07
 (maintainership) are not started, though the signed-package work makes 05
 cheaper than it was.
+
+
+---
+
+## Security review fixes (2026-09-03)
+
+An external review (Codex) of the merged tree raised six findings. Each was
+verified against this checkout first, then fixed on branch
+`security-review-fixes`, one commit per finding in the order they were asked for
+(2, 6, 5, 1, 4, 3), plus one test-infrastructure commit and a docs commit.
+
+| # | What was wrong | Fix | Test |
+|---|---|---|---|
+| 2 | `/admin/users` `filter` and `read` returned the whole active-user directory — emails, IP addresses, licence keys, notes — to any logged-in account. The `/admin/{controller}/{method}` dispatcher is `auth`-only, so each method owns its role check, and these two had none. | `read` is root-only; `filter` gives a non-root caller a five-column projection (`UsersController::PEER_COLUMNS`) with its filter and sort keys cut to match, so an unreturned column cannot be probed either. | `UsersDirectoryTest.php` |
+| 6 | `` `Net-` `` in the P2P branch of `api.php` was PHP's backtick operator — `shell_exec` — so every P2P request ran a command named `Net-` and dropped the prefix. | quoted string. | `BacktickOperatorTest.php` — tokeniser scan, no backtick anywhere in the tree. |
+| 5 | six lab-session branches (interfaces `setquality`/`setSuspend`, wireshark `add`/`capture`/`delete`, multi_cfg `active`) changed state with no edit-permission or lock check, so a read-only participant in a shared lab could use them. | both checks on each branch. | `LabActionPermissionTest.php` — the action table as a test. |
+| 1 | workbook HTML reached the DOM through `dangerouslySetInnerHTML` after an `output_secure()` that did nothing (a string literal where a RegExp was meant): stored XSS by any lab editor against every viewer, an admin included. | a server allowlist sanitiser (`includes/html_sanitizer.php`, ext-dom) on write and DOMPurify in the viewer on render, neither trusting the other. | `WorkbookHtmlTest.php` |
+| 4 | the IOL serial UDP data plane bound every interface, so any host that could reach the appliance could inject frames into a node's serial port, unauthenticated. | binds `127.0.0.1`; a `-R` flag opts into the old wildcard bind for a cross-host link. | `iol_udp_open` unit test + an `iol-dataplane.sh` bind check. |
+| 3 | the IOL in-process privilege drop kept root's supplementary groups, took the uid from an unvalidated `id -u`, and checked no return. | the drop confirms the uid against passwd, clears the groups before `setuid`, and checks and verifies every step. | `IolPrivilegeDropTest.php` |
+
+**What stays deferred.** Finding 3's real fix — moving IOL onto
+`device::spawnAsTenant()` so the wrapper stays root — is unchanged and still
+gated on a licensed IOL image, because no IOL node has ever started here and
+nothing would catch a mistake in the start path. Only the drop's *completeness*
+was fixed, which needs no image. `docs/inactive/PHASE-04-EXIT-FIXES.md` and
+`docs/ROADMAP-STATUS.md` carry the same deferral.
+
+**Verified locally, not through the installer this session.** The workstation
+has no PHP, so the PHP suite ran under a static PHP 8.3 build; the C wrappers
+built locally.
+
+```
+tools/run-tests.sh (static PHP 8.3)  → 2022 assertions across 36 files, 0 failed
+                                        PackageApplyTest (37th) needs ext-sodium,
+                                        absent from the static build; it passes on
+                                        a real host
+tools/php-lint.sh                    → 359 files, 0 failed
+make -C platform/wrappers/src test   → 284 unit assertions, 0 failed
+                                        also clean under -fsanitize=address,undefined
+```
+
+The five new PHP test files add 305 assertions; the C unit count moved from 253
+to 284. **A full installer run on the reference VM has not been done for this
+branch** — it is the natural next step, with the recipe in
+`docs/REFERENCE-ENVIRONMENT.md`, and it is what would re-measure the integration
+suites (the numbers in "Where this got to" below are the Phase 04 VM baseline).
 
 ---
 
@@ -666,8 +717,11 @@ workstation.
 
 ## Documents
 
+Active docs live in `docs/` and are tracked. A doc for work that is finished moves to `docs/inactive/`, which is gitignored — the file stays on disk for reference and its history stays in git, but it is no longer part of the tracked tree. `docs/README.md` is the index of both.
+
 | File | What it is |
 |---|---|
+| `docs/README.md` | index of the active docs, and what has been archived |
 | `docs/LICENSING.md` | the licence position: what is inherited, what blocks publishing, a recommendation, a pre-public checklist |
 | `THIRD-PARTY.md` | the attribution that must accompany every distribution |
 | `docs/PACKAGES.md` | the signed-package format, trust model and threat model |
@@ -681,6 +735,7 @@ workstation.
 | `docs/DOCKER-IMAGES.md` | seeding Docker images onto an offline host, and why it is not a package yet |
 | `docs/OFFLINE-FIRST.md` | the accepted architectural direction |
 | `platform/wrappers/src/README.md` | the wrapper core API and its provenance |
+| `docs/inactive/PHASE-04-EXIT-FIXES.md` | **archived (untracked):** the Phase 04 exit gate, cleared and merged into `main` |
 | `docs/audit.html` | single-page summary of the live-box findings |
 
 `docs/ROADMAP.md` predates most of this session. Where it and this document
@@ -1192,7 +1247,7 @@ control; the fix is not taken on trust.
 
 ## Phase 04: the exit gate
 
-`docs/PHASE-04-EXIT-FIXES.md` is the record: every item with the commit that
+`docs/inactive/PHASE-04-EXIT-FIXES.md` is the record: every item with the commit that
 fixed it and what was measured. This section is what that file does not say —
 the shape of the work, and what to watch for.
 

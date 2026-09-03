@@ -7,7 +7,7 @@
  * fork-then-drop path is the real fix and is deferred, gated on a licensed IOL
  * image -- no IOL node has ever started on this platform, so nothing here would
  * catch a mistake in the start path itself (docs/HANDOVER.md,
- * docs/ROADMAP-STATUS.md, docs/PHASE-04-EXIT-FIXES.md).
+ * docs/ROADMAP-STATUS.md, docs/inactive/PHASE-04-EXIT-FIXES.md).
  *
  * What this test guards is a DIFFERENT thing, which does not need an image: the
  * drop device_iol::prepare() already performs was incomplete. It read the uid
