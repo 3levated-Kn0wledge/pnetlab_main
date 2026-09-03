@@ -1146,7 +1146,13 @@ $app->post('/api/labs/session/(:object)/(:action)', function ($object, $action) 
 					$networkParams['postfix'] = 0;
 					$networkParams['top'] = 0;
 					$networkParams['left'] = 0;
-					$networkParams['name'] = `Net-` . get($variables['name']);
+					// Backticks, not quotes, sat around Net- here: PHP's backtick
+					// operator is shell_exec(), so every P2P request ran a command
+					// called `Net-`, took its (empty) stdout as the prefix, and
+					// named the network after the bare id. A `Net-` on PHP-FPM's
+					// PATH would have chosen the prefix. ShellEscapingTest never
+					// saw it because the operand was a constant.
+					$networkParams['name'] = 'Net-' . get($variables['name'], '');
 					$networkParams['count'] = 2;
 					$result = apiAddLabNetwork($lab, $networkParams, false);
 					if ($result['status'] == 'success') {
