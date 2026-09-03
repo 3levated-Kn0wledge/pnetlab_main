@@ -476,11 +476,19 @@ runs the container), and the host-side work left over needs CAP_NET_ADMIN and
 CAP_SYS_ADMIN. **Dynamips is not flipped**, and an earlier revision of this
 paragraph said that was only for want of an IOS image. That was wrong and the
 reason is in "The shell layer" below: for a node with serial interfaces it is a
-three-part change, not a one-line one. **IOL is
-untouched**, still dropping in-process; moving it would also delete a latent bug
-(a second IOL node in one start-all cannot create its account), but no IOL node
-has ever run here and `iol-dataplane.sh` drives `iol_wrapper` directly rather
-than `device_iol`, so nothing would have caught a mistake.
+three-part change, not a one-line one. **IOL still drops in-process** -- the
+move onto `device::spawnAsTenant()` is unchanged and still deferred, because no
+IOL node has ever run here and `iol-dataplane.sh` drives `iol_wrapper` directly
+rather than `device_iol`, so nothing would catch a mistake in the start path;
+the latent bug that move would also fix (a second IOL node in one start-all
+cannot create its account) is still there. Two IOL hardenings that do NOT need
+an image landed with the security-review fixes, though: `device_iol::prepare()`
+now completes the drop it already performed -- it confirms the uid against the
+passwd database instead of parsing `id -u`, clears root's supplementary groups
+before `setuid()`, and checks and verifies every step (a compromised IOL used
+to keep group 0) -- and the `iol_wrapper` serial data plane binds `127.0.0.1`
+rather than every interface, with a `-R` opt-in for a cross-host link. See
+`tests/Security/IolPrivilegeDropTest.php` and the `iol_udp_open` unit test.
 
 ---
 

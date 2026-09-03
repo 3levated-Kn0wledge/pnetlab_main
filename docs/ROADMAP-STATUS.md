@@ -99,7 +99,7 @@ rounded up.
 | Bullet | State |
 |---|---|
 | **Convert call sites to argument arrays** | **partial, and the remainder is smaller than the number suggests.** The baseline still reads 47, down from 73, but for VPCS and QEMU those values no longer reach a shell at all: `device::spawnAsTenant()` execs the emulator directly. See below |
-| **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is **not** one line away; the reason is below. IOL still drops in-process |
+| **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is **not** one line away; the reason is below. IOL still drops in-process (the `spawnAsTenant()` move is deferred, gated on a licensed image), but that in-process drop is now complete -- supplementary groups cleared, uid confirmed, every step checked -- and its serial data plane binds loopback |
 
 ### Closed: `secureCmd` is an allowlist
 
