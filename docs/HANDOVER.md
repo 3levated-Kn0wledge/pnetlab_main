@@ -1,8 +1,13 @@
 # Handover
 
-**State at end of session, 2026-09-02.** Branch `phase-04-exit-fixes`, 38
-commits ahead of `main` (which now carries the merged `phase-02-shell-hardening`),
-none pushed. Nothing uncommitted.
+**State at end of session, 2026-09-03.** `main` carries the merged
+`phase-04-exit-fixes` (merge `5e2bb03`) and, on top of it, the merged
+`security-review-fixes`: six findings from an external security review, fixed
+one per commit, plus a test-infrastructure commit and documentation, verified
+from scratch on the reference VM through the installer before merging. Both
+merges are pushed. See **Security review fixes (2026-09-03)** below. The rest
+of this document is the state at the close of the Phase 04 session, still
+current except where that section supersedes it.
 
 **Everything below was measured on a host that was rolled back to its
 post-provision snapshot and built from nothing** — a clean `git archive` of the
@@ -11,7 +16,7 @@ claim than this document has carried before, and it cost four defects to make:
 see "Deploying onto a clean host" for what a fresh host needs and what it
 caught.
 
-**The Phase 04 exit gate is clear.** `docs/PHASE-04-EXIT-FIXES.md` named fifteen
+**The Phase 04 exit gate is clear.** `docs/inactive/PHASE-04-EXIT-FIXES.md` named fifteen
 defects found by reviewing the work that closed Phase 04, seven of them critical,
 plus fifteen secondary findings. All fifteen are fixed, one commit each, and
 verified on the reference VM through the installer; twelve of the secondary
@@ -39,6 +44,63 @@ each recorded in its own document:
 Phase 05 (severing the upstream dependency), 06 (frontend currency) and 07
 (maintainership) are not started, though the signed-package work makes 05
 cheaper than it was.
+
+
+---
+
+## Security review fixes (2026-09-03)
+
+An external review (Codex) of the merged tree raised six findings. Each was
+verified against this checkout first, then fixed on branch
+`security-review-fixes`, one commit per finding in the order they were asked for
+(2, 6, 5, 1, 4, 3), plus one test-infrastructure commit and a docs commit.
+
+| # | What was wrong | Fix | Test |
+|---|---|---|---|
+| 2 | `/admin/users` `filter` and `read` returned the whole active-user directory — emails, IP addresses, licence keys, notes — to any logged-in account. The `/admin/{controller}/{method}` dispatcher is `auth`-only, so each method owns its role check, and these two had none. | `read` is root-only; `filter` gives a non-root caller a five-column projection (`UsersController::PEER_COLUMNS`) with its filter and sort keys cut to match, so an unreturned column cannot be probed either. | `UsersDirectoryTest.php` |
+| 6 | `` `Net-` `` in the P2P branch of `api.php` was PHP's backtick operator — `shell_exec` — so every P2P request ran a command named `Net-` and dropped the prefix. | quoted string. | `BacktickOperatorTest.php` — tokeniser scan, no backtick anywhere in the tree. |
+| 5 | six lab-session branches (interfaces `setquality`/`setSuspend`, wireshark `add`/`capture`/`delete`, multi_cfg `active`) changed state with no edit-permission or lock check, so a read-only participant in a shared lab could use them. | both checks on each branch. | `LabActionPermissionTest.php` — the action table as a test. |
+| 1 | workbook HTML reached the DOM through `dangerouslySetInnerHTML` after an `output_secure()` that did nothing (a string literal where a RegExp was meant): stored XSS by any lab editor against every viewer, an admin included. | a server allowlist sanitiser (`includes/html_sanitizer.php`, ext-dom) on write and DOMPurify in the viewer on render, neither trusting the other. | `WorkbookHtmlTest.php` |
+| 4 | the IOL serial UDP data plane bound every interface, so any host that could reach the appliance could inject frames into a node's serial port, unauthenticated. | binds `127.0.0.1`; a `-R` flag opts into the old wildcard bind for a cross-host link. | `iol_udp_open` unit test + an `iol-dataplane.sh` bind check. |
+| 3 | the IOL in-process privilege drop kept root's supplementary groups, took the uid from an unvalidated `id -u`, and checked no return. | the drop confirms the uid against passwd, clears the groups before `setuid`, and checks and verifies every step. | `IolPrivilegeDropTest.php` |
+
+**What stays deferred.** Finding 3's real fix — moving IOL onto
+`device::spawnAsTenant()` so the wrapper stays root — is unchanged and still
+gated on a licensed IOL image, because no IOL node has ever started here and
+nothing would catch a mistake in the start path. Only the drop's *completeness*
+was fixed, which needs no image. `docs/inactive/PHASE-04-EXIT-FIXES.md` and
+`docs/ROADMAP-STATUS.md` carry the same deferral.
+
+**Verified from scratch on the reference VM, 2026-09-03.** The VM was at its
+post-provision snapshot (the interrupted `dpkg` again, cleared with
+`dpkg --configure -a`); a clean `git archive` of `cef483c` was unpacked, the
+Guacamole artefacts and the CirrOS image staged, the captcha turned off, and
+the installer run end to end — the same recipe as "Deploying onto a clean
+host" below, nothing carried over.
+
+```
+sudo bash install/install.sh --server-name pnetlab.test
+→ INSTALLER-EXIT=0, every step, 0 [fail], all verification checks passed
+
+tools/run-tests.sh (as root, PHP 8.4)      → 2149 assertions across 37 files, 0 failed
+tools/php-lint.sh (8.4)                    → 359 files, 0 failed
+make -C platform/wrappers/src test         → 279 unit assertions, 0 failed
+bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
+bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/db-backup-restore.sh→ 67 passed, 0 failed, 0 skipped
+bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
+bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
+bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
+bash tools/integration/iol-dataplane.sh    → 76 assertions, 0 failed  (was 75: the loopback bind check)
+```
+
+Zero `unl*` accounts and zero taps left on the host afterwards. The five new
+PHP test files add 305 assertions over the Phase 04 baseline. The C unit count
+is host-dependent now: the `iol_udp_open` loopback test asserts once per
+non-loopback interface, so it reads 279 on the VM (one NIC) and 284 on the
+workstation (several); it is also clean under `-fsanitize=address,undefined`.
+The integration numbers match the Phase 04 baseline in "Where this got to"
+below except `iol-dataplane.sh`, which gained the bind check.
 
 ---
 
@@ -476,11 +538,19 @@ runs the container), and the host-side work left over needs CAP_NET_ADMIN and
 CAP_SYS_ADMIN. **Dynamips is not flipped**, and an earlier revision of this
 paragraph said that was only for want of an IOS image. That was wrong and the
 reason is in "The shell layer" below: for a node with serial interfaces it is a
-three-part change, not a one-line one. **IOL is
-untouched**, still dropping in-process; moving it would also delete a latent bug
-(a second IOL node in one start-all cannot create its account), but no IOL node
-has ever run here and `iol-dataplane.sh` drives `iol_wrapper` directly rather
-than `device_iol`, so nothing would have caught a mistake.
+three-part change, not a one-line one. **IOL still drops in-process** -- the
+move onto `device::spawnAsTenant()` is unchanged and still deferred, because no
+IOL node has ever run here and `iol-dataplane.sh` drives `iol_wrapper` directly
+rather than `device_iol`, so nothing would catch a mistake in the start path;
+the latent bug that move would also fix (a second IOL node in one start-all
+cannot create its account) is still there. Two IOL hardenings that do NOT need
+an image landed with the security-review fixes, though: `device_iol::prepare()`
+now completes the drop it already performed -- it confirms the uid against the
+passwd database instead of parsing `id -u`, clears root's supplementary groups
+before `setuid()`, and checks and verifies every step (a compromised IOL used
+to keep group 0) -- and the `iol_wrapper` serial data plane binds `127.0.0.1`
+rather than every interface, with a `-R` opt-in for a cross-host link. See
+`tests/Security/IolPrivilegeDropTest.php` and the `iol_udp_open` unit test.
 
 ---
 
@@ -579,11 +649,8 @@ review and several had been shipping for years.
 
 ## Suggested next steps, in order
 
-1. **Review and merge `phase-04-exit-fixes`.** 38 commits, each individually
-   scoped, each message carrying the reasoning and what was measured. One
-   commit (`9bcff23`) closes two gate items at once because they are two
-   findings on the same allowlist and the same test. Then open Phase 05:
-   nothing gates it any more.
+1. ~~**Review and merge `phase-04-exit-fixes`.**~~ Merged (`5e2bb03`), and
+   the security-review fixes after it. Nothing gates Phase 05 any more.
 2. **IOL, with a licensed image.** Everything else is proven; this is the only
    feature claim resting on unit tests alone.
 3. **Finish the sudo migration.** `rm` is the last of the file-mutation grants,
@@ -658,8 +725,11 @@ workstation.
 
 ## Documents
 
+Active docs live in `docs/`. A doc for work that is finished moves to `docs/inactive/` — still tracked, so it travels with every clone and keeps its history, but out of the way of live work and no longer updated. `docs/README.md` is the index of both.
+
 | File | What it is |
 |---|---|
+| `docs/README.md` | index of the active docs, and what has been archived |
 | `docs/LICENSING.md` | the licence position: what is inherited, what blocks publishing, a recommendation, a pre-public checklist |
 | `THIRD-PARTY.md` | the attribution that must accompany every distribution |
 | `docs/PACKAGES.md` | the signed-package format, trust model and threat model |
@@ -673,6 +743,7 @@ workstation.
 | `docs/DOCKER-IMAGES.md` | seeding Docker images onto an offline host, and why it is not a package yet |
 | `docs/OFFLINE-FIRST.md` | the accepted architectural direction |
 | `platform/wrappers/src/README.md` | the wrapper core API and its provenance |
+| `docs/inactive/PHASE-04-EXIT-FIXES.md` | **archived:** the Phase 04 exit gate, cleared and merged into `main` |
 | `docs/audit.html` | single-page summary of the live-box findings |
 
 `docs/ROADMAP.md` predates most of this session. Where it and this document
@@ -1184,7 +1255,7 @@ control; the fix is not taken on trust.
 
 ## Phase 04: the exit gate
 
-`docs/PHASE-04-EXIT-FIXES.md` is the record: every item with the commit that
+`docs/inactive/PHASE-04-EXIT-FIXES.md` is the record: every item with the commit that
 fixed it and what was measured. This section is what that file does not say —
 the shape of the work, and what to watch for.
 

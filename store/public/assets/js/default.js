@@ -35,8 +35,36 @@ function HtmlDecode(s) {
 	return $('<div>').html(s).text();
 }
 
+// HTML that came from a user and is about to go into the DOM through
+// dangerouslySetInnerHTML: workbook pages, status notes. What was here before,
+//
+//     string.replace('/<\/?script>?/gmi', '')
+//
+// had a string literal where a RegExp was meant, so it searched for those
+// twenty characters and changed nothing -- and even as a RegExp it would have
+// left onerror=, <svg onload>, javascript: and the rest alone. This is now
+// DOMPurify (assets/js/purify.min.js, loaded before this file), restricted to
+// the HTML profile plus what the workbook editor emits: CKEditor's <oembed>
+// placeholder with its url, the contents menu's menu_id, and target=_blank on
+// links. <style> is refused: a stylesheet in content restyles the whole page.
+//
+// The server reduces workbook pages to the same allowlist on the way in
+// (includes/html_sanitizer.php). Two layers, neither trusting the other.
+//
+// If DOMPurify is somehow not loaded this returns the text ENCODED, so the
+// content shows as markup rather than running as it: fail closed.
 function output_secure(string) {
-	return string.replace('/<\/?script>?/gmi', '');
+	if (typeof string !== 'string') return '';
+	if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
+		return HtmlEncode(string);
+	}
+	return DOMPurify.sanitize(string, {
+		USE_PROFILES: { html: true },
+		ADD_TAGS: ['oembed'],
+		ADD_ATTR: ['menu_id', 'url', 'target'],
+		FORBID_TAGS: ['style', 'form', 'input', 'button', 'select', 'textarea'],
+		ALLOW_DATA_ATTR: false,
+	});
 }
 
 function str_limit(string, limit) {

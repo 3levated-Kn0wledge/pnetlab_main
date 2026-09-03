@@ -10,7 +10,7 @@ because "are we done with phase N" was a question nothing in the repo could
 answer.
 
 **Phases 05, 06 and 07 are not started** and are not audited here. Phase 05
-was additionally gated on `docs/PHASE-04-EXIT-FIXES.md`, the fifteen blocking
+was additionally gated on `docs/inactive/PHASE-04-EXIT-FIXES.md`, the fifteen blocking
 fixes found by reviewing the work that closed Phase 04. **That gate is clear
 as of 2026-09-02**: all fifteen are fixed and verified on the reference VM,
 and every secondary finding is fixed or carries a written deferral in that
@@ -99,7 +99,7 @@ rounded up.
 | Bullet | State |
 |---|---|
 | **Convert call sites to argument arrays** | **partial, and the remainder is smaller than the number suggests.** The baseline still reads 47, down from 73, but for VPCS and QEMU those values no longer reach a shell at all: `device::spawnAsTenant()` execs the emulator directly. See below |
-| **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is **not** one line away; the reason is below. IOL still drops in-process |
+| **Run emulators as the tenant user** | **partial.** VPCS and QEMU do. Docker cannot — there is no emulator process, the daemon runs the container as root, and the host-side work needs `CAP_NET_ADMIN`. Dynamips is **not** one line away; the reason is below. IOL still drops in-process (the `spawnAsTenant()` move is deferred, gated on a licensed image), but that in-process drop is now complete -- supplementary groups cleared, uid confirmed, every step checked -- and its serial data plane binds loopback |
 
 ### Closed: `secureCmd` is an allowlist
 
@@ -317,7 +317,7 @@ The bullets below are assessed against what was actually built.
 |---|---|
 | Migrate `brctl`/`tunctl`/`ifconfig` to iproute2 | **deferred** — see below |
 | Validate 32-bit IOL via i386 multiarch | **blocked.** Needs a licensed IOL image, which this project deliberately does not carry |
-| Fix what the review of this work found | **done** — `docs/PHASE-04-EXIT-FIXES.md`, all fifteen, one commit each, verified on the VM |
+| Fix what the review of this work found | **done** — `docs/inactive/PHASE-04-EXIT-FIXES.md`, all fifteen, one commit each, verified on the VM |
 
 ### Cleared: the review findings that gated Phase 05
 
@@ -327,7 +327,7 @@ bullet asks whether the thing was built, a review asks whether it works.
 Fifteen of them blocked, seven at critical.
 
 They are listed with evidence, and now with the commit that fixed each and
-what was measured, in **`docs/PHASE-04-EXIT-FIXES.md`**. Two of the fifteen
+what was measured, in **`docs/inactive/PHASE-04-EXIT-FIXES.md`**. Two of the fifteen
 defeated changes made in this branch: the read-only allowlist omitted the
 session keep-alive, so admins were silently logged out after an hour, and
 three actions on that same allowlist took `?relicense=1` and performed a

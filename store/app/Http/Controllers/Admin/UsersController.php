@@ -29,12 +29,46 @@ class UsersController extends Controller
         
     }
 
+    /**
+     * What one account may see of another.
+     *
+     * The /admin/{controller}/{method} dispatcher (routes/web.php) requires a
+     * LOGIN, not the root role, so every method here that is not for everyone
+     * has to say so itself -- apply(), view(), offAdd() and the rest do, with
+     * Role::checkRoot(). filter() and read() did not, and between them they
+     * returned the whole active-user directory -- licence keys, IP addresses,
+     * session and pod ids, workspace paths, admin notes, expiry dates, resource
+     * limits -- to any account that could log in.
+     *
+     * filter() cannot simply become root-only: the lab-sharing dialog
+     * (react/components/main/lab/UsersModal.js) lists accounts through it so an
+     * owner can pick who to share with, and ChangeTelesaleModal.js does the
+     * same. Those dialogs render username, email and role, mark offline
+     * accounts, and key the rows by pod. That is the projection a non-root
+     * caller gets, and its filter and sort keys are cut to the same columns, so
+     * a column that is not returned cannot be probed through a `contain`
+     * condition either. Notes are admin-written and are not on the list; the
+     * sharing dialog's note column renders empty for a non-root user.
+     *
+     * read() has one caller, the Users administration page, and is root-only.
+     */
+    const PEER_COLUMNS = [USER_USERNAME, USER_EMAIL, USER_POD, USER_ROLE, USER_OFFLINE];
+
     public function filter(Request $request)
     {
         Checker::method('post');
         $datas = $request->input('data', array());
         
         $datas[FLAG_FILTER_LOGIC] = 'and';
+
+        if(!Role::checkRoot()){
+            $allowed = array_flip(self::PEER_COLUMNS);
+            $datas[DATA_FILTERS] = array_intersect_key((array) get($datas[DATA_FILTERS], []), $allowed);
+            $datas[DATA_SORT] = array_intersect_key((array) get($datas[DATA_SORT], []), $allowed);
+            $responseData = $this->mainModel->filter($datas, null, false, self::PEER_COLUMNS);
+            if(!$responseData['result']) Reply::finish($responseData);
+            return $responseData;
+        }
         
         $responseData = $this->mainModel->filter($datas, null, false, [
             USER_USERNAME,
@@ -66,6 +100,7 @@ class UsersController extends Controller
     public function read(Request $request)
     {
         Checker::method('post');
+        if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
         $datas = $request->input('data', array());
         foreach ($datas as $key=>$data){
             $datas[$key] =  $this->mainModel->keyToCondition($data);

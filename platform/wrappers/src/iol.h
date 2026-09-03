@@ -18,6 +18,7 @@
 
 #include <limits.h>
 #include <stddef.h>
+#include <sys/socket.h>
 
 #include "cmdline.h"
 #include "console.h"
@@ -89,6 +90,10 @@ typedef struct {
 typedef struct {
 	int  tenant;        /* -T, 0..255. Never passed by the fork; the default
 	                     * 0 is what every lab actually runs with. */
+	int  remote;        /* -R: serial links to other hosts. Binds the data
+	                     * plane on every interface and lets a -l host be
+	                     * something other than loopback. Never passed by
+	                     * the fork; see iol_udp_open(). */
 	int  device;        /* -D, 1..512. Mandatory. */
 	int  session;       /* -S, node session id; names the TAP interfaces. */
 	int  port;          /* -P, console TCP port AND data-plane UDP port. */
@@ -241,5 +246,26 @@ int iol_sh_quote(const char *in, char *out, size_t outlen);
  */
 int iol_build_command(const iol_opts_t *opts, int argc, char *const argv[],
                       cmdline_t *cmd);
+
+/*
+ * The serial data-plane listener.
+ *
+ * Bound to 127.0.0.1 unless `remote` is set, in which case to every interface
+ * (dual-stack [::], or 0.0.0.0 without IPv6). What arrives on it is validated
+ * by iol_from_udp() -- tenant byte, device id, interface -- and nothing else:
+ * there is no authentication, the tenant is always 0, and the device and
+ * interface ranges are small. On a wildcard bind that made any host that could
+ * reach the appliance able to inject frames into a node's serial interface
+ * without a PNETLab account. The fork only ever links nodes on one host
+ * (device_iol.php writes `localhost` into every -l map), so the loopback bind
+ * costs nothing and closes the port to the network.
+ *
+ * Port 0 binds an ephemeral port, which is how the unit test exercises this.
+ * Returns the fd, or -1 after logging.
+ */
+int iol_udp_open(int port, int remote);
+
+/* True for 127.0.0.0/8, ::1, and the v4-mapped form of the former. */
+int iol_sockaddr_is_loopback(const struct sockaddr *sa, socklen_t len);
 
 #endif /* WRAPPER_IOL_H */

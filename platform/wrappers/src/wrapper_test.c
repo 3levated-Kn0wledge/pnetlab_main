@@ -14,6 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
 
 #include "cmdline.h"
 #include "console.h"
@@ -1211,6 +1217,167 @@ static void test_iol_frames(void)
 	    != NULL && *iol_udp_strerror(IOL_UDP_ERR_IFACE) != '\0');
 }
 
+/* ------------------------------------------------- iol: the data-plane bind */
+
+/* One datagram to `to`, then up to `wait_ms` for it to show up on `fd`. */
+static int udp_arrives(int fd, const struct sockaddr *to, socklen_t tolen,
+                       int wait_ms)
+{
+	struct pollfd pfd;
+	unsigned char buf[64];
+	int           s, got = 0;
+
+	s = socket(to->sa_family, SOCK_DGRAM, 0);
+	if (s < 0)
+		return -1;
+	(void) sendto(s, "probe", 5, 0, to, tolen);
+	close(s);
+
+	pfd.fd = fd;
+	pfd.events = POLLIN;
+	if (poll(&pfd, 1, wait_ms) > 0 && (pfd.revents & POLLIN))
+		got = recv(fd, buf, sizeof(buf), 0) == 5;
+	return got;
+}
+
+static void test_iol_udp_bind(void)
+{
+	struct sockaddr_storage ss;
+	struct sockaddr_in      a4, *b4;
+	struct sockaddr_in6     a6;
+	struct ifaddrs         *ifa = NULL, *cur;
+	socklen_t               len;
+	int                     fd, port = 0, found = 0;
+
+	printf("\n-- iol: the serial data plane binds loopback\n");
+
+	/* The address classifier, on its own. */
+	memset(&a4, 0, sizeof(a4));
+	a4.sin_family = AF_INET;
+	inet_pton(AF_INET, "127.0.0.1", &a4.sin_addr);
+	chk("127.0.0.1 is loopback",
+	    iol_sockaddr_is_loopback((struct sockaddr *) &a4, sizeof(a4)));
+	inet_pton(AF_INET, "127.200.3.4", &a4.sin_addr);
+	chk("all of 127/8 is loopback",
+	    iol_sockaddr_is_loopback((struct sockaddr *) &a4, sizeof(a4)));
+	inet_pton(AF_INET, "10.0.0.1", &a4.sin_addr);
+	chk("10.0.0.1 is not",
+	    !iol_sockaddr_is_loopback((struct sockaddr *) &a4, sizeof(a4)));
+	inet_pton(AF_INET, "0.0.0.0", &a4.sin_addr);
+	chk("0.0.0.0 is not",
+	    !iol_sockaddr_is_loopback((struct sockaddr *) &a4, sizeof(a4)));
+	memset(&a6, 0, sizeof(a6));
+	a6.sin6_family = AF_INET6;
+	inet_pton(AF_INET6, "::1", &a6.sin6_addr);
+	chk("::1 is loopback",
+	    iol_sockaddr_is_loopback((struct sockaddr *) &a6, sizeof(a6)));
+	inet_pton(AF_INET6, "::ffff:127.0.0.1", &a6.sin6_addr);
+	chk("::ffff:127.0.0.1 is loopback",
+	    iol_sockaddr_is_loopback((struct sockaddr *) &a6, sizeof(a6)));
+	inet_pton(AF_INET6, "::ffff:10.0.0.1", &a6.sin6_addr);
+	chk("::ffff:10.0.0.1 is not",
+	    !iol_sockaddr_is_loopback((struct sockaddr *) &a6, sizeof(a6)));
+	inet_pton(AF_INET6, "2001:db8::1", &a6.sin6_addr);
+	chk("2001:db8::1 is not",
+	    !iol_sockaddr_is_loopback((struct sockaddr *) &a6, sizeof(a6)));
+	inet_pton(AF_INET6, "::", &a6.sin6_addr);
+	chk(":: is not",
+	    !iol_sockaddr_is_loopback((struct sockaddr *) &a6, sizeof(a6)));
+	chk("a NULL address is not",
+	    !iol_sockaddr_is_loopback(NULL, 0));
+	chk("a truncated address is not",
+	    !iol_sockaddr_is_loopback((struct sockaddr *) &a4, 2));
+
+	/* The default bind: a real socket, on an ephemeral port. */
+	fd = iol_udp_open(0, 0);
+	chk("iol_udp_open(port, remote=0) opens a socket", fd >= 0);
+	if (fd >= 0) {
+		len = sizeof(ss);
+		memset(&ss, 0, sizeof(ss));
+		chk("getsockname", getsockname(fd, (struct sockaddr *) &ss, &len) == 0);
+		chk("it is an IPv4 socket", ss.ss_family == AF_INET);
+		b4 = (struct sockaddr_in *) &ss;
+		chk("bound to 127.0.0.1, not INADDR_ANY",
+		    ss.ss_family == AF_INET
+		    && ntohl(b4->sin_addr.s_addr) == INADDR_LOOPBACK);
+		port = ntohs(b4->sin_port);
+		chk("on a real port", port > 0);
+
+		/* Loopback delivers. */
+		memset(&a4, 0, sizeof(a4));
+		a4.sin_family = AF_INET;
+		a4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		a4.sin_port = htons((unsigned short) port);
+		chk("a datagram sent to 127.0.0.1:<port> arrives",
+		    udp_arrives(fd, (struct sockaddr *) &a4, sizeof(a4), 500) == 1);
+
+		/* The same port on every non-loopback IPv4 address this host has
+		 * does not: that is the whole point. If the host has none (a bare
+		 * container), there is nothing to send to and the check is moot. */
+		if (getifaddrs(&ifa) == 0) {
+			for (cur = ifa; cur != NULL; cur = cur->ifa_next) {
+				struct sockaddr_in to;
+
+				if (cur->ifa_addr == NULL || cur->ifa_addr->sa_family != AF_INET)
+					continue;
+				if (iol_sockaddr_is_loopback(cur->ifa_addr, sizeof(struct sockaddr_in)))
+					continue;
+				memcpy(&to, cur->ifa_addr, sizeof(to));
+				to.sin_port = htons((unsigned short) port);
+				found++;
+				{
+					char name[INET_ADDRSTRLEN + 64];
+					char addr[INET_ADDRSTRLEN];
+
+					inet_ntop(AF_INET, &to.sin_addr, addr, sizeof(addr));
+					snprintf(name, sizeof(name),
+					         "the same port on %s (%s) does not deliver", addr,
+					         cur->ifa_name);
+					chk(name, udp_arrives(fd, (struct sockaddr *) &to,
+					                      sizeof(to), 300) == 0);
+				}
+			}
+			freeifaddrs(ifa);
+		}
+		if (found == 0)
+			printf("   (no non-loopback IPv4 address on this host; the "
+			       "reachability check has nothing to send to)\n");
+		close(fd);
+	}
+
+	/* -R: the old wildcard bind, kept for a cross-host link that opts in. */
+	fd = iol_udp_open(0, 1);
+	chk("iol_udp_open(port, remote=1) opens a socket", fd >= 0);
+	if (fd >= 0) {
+		len = sizeof(ss);
+		memset(&ss, 0, sizeof(ss));
+		chk("getsockname", getsockname(fd, (struct sockaddr *) &ss, &len) == 0);
+		if (ss.ss_family == AF_INET6) {
+			struct sockaddr_in6 *b6 = (struct sockaddr_in6 *) &ss;
+
+			chk("with -R it is bound to [::]",
+			    IN6_IS_ADDR_UNSPECIFIED(&b6->sin6_addr));
+		} else {
+			b4 = (struct sockaddr_in *) &ss;
+			chk("with -R (no IPv6 here) it is bound to 0.0.0.0",
+			    ss.ss_family == AF_INET && b4->sin_addr.s_addr == htonl(INADDR_ANY));
+		}
+		close(fd);
+	}
+
+	/* And the flag itself. */
+	{
+		iol_opts_t o;
+		char *argv_def[] = { "iol_wrapper", "-D", "1", "-P", "30001", "-F", "/bin/true", NULL };
+		char *argv_rem[] = { "iol_wrapper", "-R", "-D", "1", "-P", "30001", "-F", "/bin/true", NULL };
+
+		chk("no -R parses", iol_parse(7, argv_def, &o) == IOL_OK);
+		chk("and leaves remote off -- the fork never passes it", o.remote == 0);
+		chk("-R parses", iol_parse(8, argv_rem, &o) == IOL_OK);
+		chk("and turns remote on", o.remote == 1);
+	}
+}
+
 static void test_iol_command(void)
 {
 	iol_opts_t o;
@@ -1339,6 +1506,7 @@ int main(void)
 	test_iol_netmap();
 	test_iol_if_kind();
 	test_iol_frames();
+	test_iol_udp_bind();
 	test_iol_command();
 
 	printf("\n============================================\n");

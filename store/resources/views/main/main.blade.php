@@ -51,6 +51,7 @@
   <script src="/store/public/extensions/swal2/swal2.all.min.js"></script>
   
   <script src="/store/public/admin/default/initial" type="text/javascript"></script>
+  <script src="/store/public/assets/js/purify.min.js" type="text/javascript"></script>
   <script src="/store/public/assets/js/default.js" type="text/javascript"></script>
   <script src="/store/public/assets/js/constant.js" type="text/javascript"></script>
   <script src="/store/public/extensions/datetimepicker/js/moment.js"></script>

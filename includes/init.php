@@ -73,6 +73,7 @@ require_once(BASE_DIR.'/html/includes/__node.php');
 require_once(BASE_DIR.'/html/includes/__textobject.php');
 require_once(BASE_DIR.'/html/includes/__picture.php');
 require_once(BASE_DIR.'/html/includes/functions.php');
+require_once(BASE_DIR.'/html/includes/html_sanitizer.php');
 require_once(BASE_DIR.'/html/includes/messages_en.php');
 require_once(BASE_DIR.'/html/includes/Parsedown.php');
 require_once(BASE_DIR.'/html/includes/exceptions/response.php');

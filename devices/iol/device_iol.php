@@ -243,12 +243,95 @@ class device_iol extends device
             return 80044;
         }
 
-        $cmd = 'id -u ' . escapeshellarg($user) . ' 2>&1';
-        exec($cmd, $o, $rc);
-        $uid = $o[0];
-        if (!posix_setuid($uid)) {
+        // Complete the privilege drop, in the wrapper's OWN process.
+        //
+        // This is still an in-process drop: the wrapper setuid()s itself
+        // rather than forking, which is why unl_wrapper postpones IOL in its
+        // start-all loop and why abandonStart()'s unwind cannot sudo. Moving
+        // IOL onto device::spawnAsTenant() -- fork, drop in the child, exec --
+        // is the real fix and stays deferred: it is gated on a licensed IOL
+        // image, because no IOL node has ever started here and nothing would
+        // catch a mistake (docs/HANDOVER.md, docs/ROADMAP-STATUS.md).
+        //
+        // What is fixed here is the COMPLETENESS of the drop, which does not
+        // need an image to get right and was wrong three ways:
+        //
+        //   - the uid came from the first line of `id -u`, unvalidated: a
+        //     blank or non-numeric $o[0] went straight into posix_setuid(),
+        //     which reads it as 0 -- so a lookup failure kept root;
+        //   - device::prepare() set the primary gid to unl, but nothing
+        //     cleared root's SUPPLEMENTARY groups, so the emulator kept group
+        //     0 and could read or write whatever root:root left group-
+        //     accessible -- the tenant boundary the drop is supposed to draw;
+        //   - posix_setgid()'s and posix_setuid()'s returns were unchecked, so
+        //     a failed drop continued toward exec() still privileged.
+        //
+        // The uid is COMPUTED and CONFIRMED against the passwd database,
+        // exactly as device::spawnAsTenant() and UnlIolKeepalive do, never
+        // parsed out of `id`. 32768 + session is the platform's per-session
+        // tenant uid.
+        if (!function_exists('posix_getpwnam') || !function_exists('posix_setuid')
+            || !function_exists('posix_setgid')) {
+            error_log(date('M d H:i:s ') . 'ERROR: ext-posix is required to drop privileges for an IOL node');
+            return 80036;
+        }
+
+        $expected = 32768 + (int) $this->getSession();
+        $entry = posix_getpwnam($user);
+        if ($entry === false || (int) $entry['uid'] !== $expected) {
+            error_log(date('M d H:i:s ') . 'ERROR: tenant account ' . $user
+                . ' is missing or holds the wrong uid; not starting the IOL node');
+            return 80036;
+        }
+        $gid = (int) $entry['gid'];
+
+        // Supplementary groups FIRST, while still root and before setuid():
+        // posix_initgroups() installs the tenant's own group list from
+        // /etc/group and drops root's, and posix_setgroups([$gid]) is the
+        // fallback where initgroups is unavailable. After setuid() there is no
+        // way back to change any of this.
+        if (function_exists('posix_initgroups')) {
+            if (!posix_initgroups($user, $gid)) {
+                error_log(date('M d H:i:s ') . 'ERROR: could not set the supplementary groups for '
+                    . $user . '; not starting the IOL node');
+                return 80036;
+            }
+        } elseif (function_exists('posix_setgroups')) {
+            if (!posix_setgroups([$gid])) {
+                error_log(date('M d H:i:s ') . 'ERROR: could not clear the supplementary groups for '
+                    . $user . '; not starting the IOL node');
+                return 80036;
+            }
+        } else {
+            error_log(date('M d H:i:s ') . 'ERROR: no way to drop the supplementary groups for '
+                . $user . '; not starting the IOL node');
+            return 80036;
+        }
+
+        // Primary gid, then uid. setuid is last because it is the drop that
+        // cannot be undone, and its return is checked, unlike before.
+        if (!posix_setgid($gid) || !posix_setuid($expected)) {
             error_log(date('M d H:i:s ') . 'ERROR: ' . $GLOBALS['messages'][80036]);
             return 80036;
+        }
+
+        // Confirm the drop took before the emulator is exec'd as this
+        // identity. A setuid that silently failed would otherwise run IOL as
+        // root; the supplementary vector is checked too, because that is the
+        // hole this change closes.
+        if (posix_getuid() !== $expected || posix_geteuid() !== $expected) {
+            error_log(date('M d H:i:s ') . 'ERROR: privilege drop did not take; refusing to start '
+                . $user);
+            return 80036;
+        }
+        if (function_exists('posix_getgroups')) {
+            foreach (posix_getgroups() as $g) {
+                if ($g === 0) {
+                    error_log(date('M d H:i:s ') . 'ERROR: IOL node ' . $user
+                        . ' still holds a root supplementary group after the drop; refusing to start');
+                    return 80036;
+                }
+            }
         }
 
         return 0;

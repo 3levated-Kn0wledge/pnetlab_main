@@ -110,6 +110,10 @@ void iol_usage(const char *progname)
 	       "                opened and Ethernet ports are inert.\n"
 	       "  -T <tenant>   Tenant id, 0-255. Default 0, which is what the\n"
 	       "                fork always runs with.\n"
+	       "  -R            Remote serial links: bind the data plane on every\n"
+	       "                interface and allow a -l host other than loopback.\n"
+	       "                UNAUTHENTICATED; do not use on a shared network.\n"
+	       "                Without it the data plane listens on 127.0.0.1.\n"
 	       "  -t <title>    Console window title. Default \"%s\".\n"
 	       "  -d <seconds>  Wait this long before starting IOL, printing one\n"
 	       "                dot per second to the console. Default 0.\n"
@@ -284,6 +288,7 @@ iol_parse_t iol_parse(int argc, char *const argv[], iol_opts_t *opts)
 
 	memset(opts, 0, sizeof(*opts));
 	opts->tenant   = 0;             /* §5.2: the fork relies on this default */
+	opts->remote   = 0;             /* loopback only; the fork never sets -R */
 	opts->device   = -1;
 	opts->session  = -1;
 	opts->port     = -1;
@@ -311,8 +316,11 @@ iol_parse_t iol_parse(int argc, char *const argv[], iol_opts_t *opts)
 	               * bookkeeping, which 1 leaves behind */
 	opterr = 0;   /* leading colon: we report errors, not getopt */
 
-	while ((c = getopt(opt_argc, argv, ":vT:D:S:P:d:t:F:e:s:l:")) != -1) {
+	while ((c = getopt(opt_argc, argv, ":vRT:D:S:P:d:t:F:e:s:l:")) != -1) {
 		switch (c) {
+		case 'R':
+			opts->remote = 1;
+			break;
 		case 'T':
 			if (parse_nonneg(optarg, &opts->tenant) != 0 ||
 			    opts->tenant > 255) {
@@ -727,6 +735,96 @@ int iol_build_command(const iol_opts_t *opts, int argc, char *const argv[],
 	return 0;
 }
 
+/* ----------------------------------------------- the data-plane listener */
+/* Outside the WRAPPER_NO_MAIN guard: the unit test binds real sockets through
+ * these. The comment above udp_open(), below, is where the port and address
+ * questions are settled. */
+
+int iol_sockaddr_is_loopback(const struct sockaddr *sa, socklen_t len)
+{
+	if (sa == NULL)
+		return 0;
+	if (sa->sa_family == AF_INET && len >= sizeof(struct sockaddr_in)) {
+		const struct sockaddr_in *a4 = (const struct sockaddr_in *) sa;
+
+		return (ntohl(a4->sin_addr.s_addr) & 0xff000000u) == 0x7f000000u;
+	}
+	if (sa->sa_family == AF_INET6 && len >= sizeof(struct sockaddr_in6)) {
+		const struct sockaddr_in6 *a6 = (const struct sockaddr_in6 *) sa;
+
+		if (IN6_IS_ADDR_LOOPBACK(&a6->sin6_addr))
+			return 1;
+		if (IN6_IS_ADDR_V4MAPPED(&a6->sin6_addr))
+			return a6->sin6_addr.s6_addr[12] == 127;
+	}
+	return 0;
+}
+
+int iol_udp_open(int port, int remote)
+{
+	struct sockaddr_in6 a6;
+	struct sockaddr_in  a4;
+	int                 fd, on = 1, off = 0;
+
+	if (!remote) {
+		fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+		if (fd < 0) {
+			log_errno("socket(AF_INET, SOCK_DGRAM)");
+			return -1;
+		}
+		if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0)
+			log_wrn("SO_REUSEADDR on the data plane: %s", strerror(errno));
+		memset(&a4, 0, sizeof(a4));
+		a4.sin_family      = AF_INET;
+		a4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		a4.sin_port        = htons((unsigned short) port);
+		if (bind(fd, (struct sockaddr *) &a4, sizeof(a4)) != 0) {
+			log_err("bind(UDP 127.0.0.1:%d): %s", port, strerror(errno));
+			close(fd);
+			return -1;
+		}
+		return fd;
+	}
+
+	fd = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+	if (fd >= 0) {
+		if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off)) != 0)
+			log_wrn("could not clear IPV6_V6ONLY on the data plane: %s",
+			        strerror(errno));
+		if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0)
+			log_wrn("SO_REUSEADDR on the data plane: %s", strerror(errno));
+		memset(&a6, 0, sizeof(a6));
+		a6.sin6_family = AF_INET6;
+		a6.sin6_addr   = in6addr_any;
+		a6.sin6_port   = htons((unsigned short) port);
+		if (bind(fd, (struct sockaddr *) &a6, sizeof(a6)) != 0) {
+			log_err("bind(UDP [::]:%d): %s", port, strerror(errno));
+			close(fd);
+			return -1;
+		}
+	} else {
+		log_wrn("socket(AF_INET6, SOCK_DGRAM) failed (%s); falling back to "
+		        "IPv4", strerror(errno));
+		fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+		if (fd < 0) {
+			log_errno("socket(AF_INET, SOCK_DGRAM)");
+			return -1;
+		}
+		if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0)
+			log_wrn("SO_REUSEADDR on the data plane: %s", strerror(errno));
+		memset(&a4, 0, sizeof(a4));
+		a4.sin_family      = AF_INET;
+		a4.sin_addr.s_addr = htonl(INADDR_ANY);
+		a4.sin_port        = htons((unsigned short) port);
+		if (bind(fd, (struct sockaddr *) &a4, sizeof(a4)) != 0) {
+			log_err("bind(UDP 0.0.0.0:%d): %s", port, strerror(errno));
+			close(fd);
+			return -1;
+		}
+	}
+	return fd;
+}
+
 #ifndef WRAPPER_NO_MAIN
 
 /* ============================ runtime ==================================== */
@@ -985,49 +1083,23 @@ static void bus_send(iol_state_t *st, const unsigned char *frame, size_t len)
  * — the fifth field is the far node's CONSOLE port. The only way that field can
  * find the far node's data plane is if every wrapper listens for data on its own
  * console port number. Binding anything else here breaks every serial link.
+ *
+ * THE ADDRESS QUESTION is separate from the port, and it went the other way.
+ * This socket listened on [::] (dual-stack) or 0.0.0.0, and what it accepted
+ * was decided by iol_from_udp() alone: tenant byte 0, a device id in 1..512, an
+ * interface in 0..63. No sender check, no key. So any host that could send UDP
+ * to the appliance's node-port range could inject frames into a running node's
+ * serial interface -- routing-protocol traffic, say -- with no PNETLab account
+ * at all. The fork links nodes on one host only (every -l map says localhost),
+ * so the listener now binds 127.0.0.1 unless -R asks for the old behaviour,
+ * and link_connect() refuses a -l host that is not loopback without -R.
  */
 static int udp_open(iol_state_t *st, int port)
 {
-	struct sockaddr_in6 a6;
-	struct sockaddr_in  a4;
-	int                 fd, on = 1, off = 0;
+	int fd = iol_udp_open(port, st->o->remote);
 
-	fd = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-	if (fd >= 0) {
-		if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off)) != 0)
-			log_wrn("could not clear IPV6_V6ONLY on the data plane: %s",
-			        strerror(errno));
-		if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0)
-			log_wrn("SO_REUSEADDR on the data plane: %s", strerror(errno));
-		memset(&a6, 0, sizeof(a6));
-		a6.sin6_family = AF_INET6;
-		a6.sin6_addr   = in6addr_any;
-		a6.sin6_port   = htons((unsigned short) port);
-		if (bind(fd, (struct sockaddr *) &a6, sizeof(a6)) != 0) {
-			log_err("bind(UDP [::]:%d): %s", port, strerror(errno));
-			close(fd);
-			return -1;
-		}
-	} else {
-		log_wrn("socket(AF_INET6, SOCK_DGRAM) failed (%s); falling back to "
-		        "IPv4", strerror(errno));
-		fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-		if (fd < 0) {
-			log_errno("socket(AF_INET, SOCK_DGRAM)");
-			return -1;
-		}
-		if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0)
-			log_wrn("SO_REUSEADDR on the data plane: %s", strerror(errno));
-		memset(&a4, 0, sizeof(a4));
-		a4.sin_family      = AF_INET;
-		a4.sin_addr.s_addr = htonl(INADDR_ANY);
-		a4.sin_port        = htons((unsigned short) port);
-		if (bind(fd, (struct sockaddr *) &a4, sizeof(a4)) != 0) {
-			log_err("bind(UDP 0.0.0.0:%d): %s", port, strerror(errno));
-			close(fd);
-			return -1;
-		}
-	}
+	if (fd < 0)
+		return -1;
 
 	if (set_nonblock(fd) != 0) {
 		log_errno("O_NONBLOCK on the data-plane socket");
@@ -1036,21 +1108,26 @@ static int udp_open(iol_state_t *st, int port)
 	}
 
 	st->udp_fd = fd;
-	log_inf("serial data plane listening on UDP port %d (fd %d)", port, fd);
+	log_inf("serial data plane listening on UDP %s:%d (fd %d)%s",
+	        st->o->remote ? "*" : "127.0.0.1", port, fd,
+	        st->o->remote ? " -- -R: reachable from the network, unauthenticated"
+	                      : "");
 	return 0;
 }
 
 /* One connected sending socket per link, created on first use — the far node's
  * wrapper may not have started yet, and there is nothing to wait for: a
  * connected UDP socket succeeds regardless and reports the problem on send. */
-static int link_connect(iol_link_t *l)
+static int link_connect(iol_link_t *l, int remote)
 {
 	struct addrinfo  hints, *res = NULL, *ai;
 	char             port[16];
-	int              rc, fd = -1;
+	int              rc, fd = -1, refused = 0;
 
 	memset(&hints, 0, sizeof(hints));
-	hints.ai_family   = AF_UNSPEC;
+	/* Without -R the listener is 127.0.0.1, so the peer's must be too: an
+	 * IPv4 answer for `localhost`, and nothing that is not loopback. */
+	hints.ai_family   = remote ? AF_UNSPEC : AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
 	snprintf(port, sizeof(port), "%d", l->remote_port);
 
@@ -1062,6 +1139,10 @@ static int link_connect(iol_link_t *l)
 	}
 
 	for (ai = res; ai != NULL; ai = ai->ai_next) {
+		if (!remote && !iol_sockaddr_is_loopback(ai->ai_addr, ai->ai_addrlen)) {
+			refused = 1;
+			continue;
+		}
 		fd = socket(ai->ai_family,
 		            ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC,
 		            ai->ai_protocol);
@@ -1075,8 +1156,13 @@ static int link_connect(iol_link_t *l)
 	freeaddrinfo(res);
 
 	if (fd < 0) {
-		log_wrn("cannot open a data-plane socket to %s:%d for interface %d",
-		        l->host, l->remote_port, l->local_if);
+		if (refused)
+			log_err("interface %d: link-map host %s is not loopback; a serial "
+			        "link to another host needs -R, which is unauthenticated",
+			        l->local_if, l->host);
+		else
+			log_wrn("cannot open a data-plane socket to %s:%d for interface %d",
+			        l->host, l->remote_port, l->local_if);
 		return -1;
 	}
 
@@ -1302,7 +1388,7 @@ static void rx_bus(iol_state_t *st)
 				st->dropped++;
 				continue;
 			}
-			if (l->fd < 0 && link_connect(l) != 0) {
+			if (l->fd < 0 && link_connect(l, st->o->remote) != 0) {
 				st->dropped++;
 				continue;
 			}
