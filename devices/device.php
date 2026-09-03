@@ -641,7 +641,17 @@ class device
     {
 
         posix_setsid();
-        posix_setgid(32768);
+        // The wrapper's primary gid becomes unl (32768). The return was
+        // ignored here; it is logged now. This runs in the wrapper's own
+        // process for every node type, and for the tenant-fork types
+        // (device::spawnAsTenant()) the wrapper deliberately STAYS root after
+        // it -- so a failure is logged, not turned into a start failure. The
+        // completeness of the actual per-node drop lives in the child of
+        // spawnAsTenant() and, for IOL, in device_iol::prepare().
+        if (function_exists('posix_setgid') && !posix_setgid(32768)) {
+            error_log(date('M d H:i:s ') . 'WARNING: posix_setgid(32768) failed in prepare(): '
+                . posix_strerror(posix_get_last_error()));
+        }
 
         if (!is_file($this->getRunningPath() . '/.prepared') && !is_file($this->getRunningPath() . '/.lock')) {
 
