@@ -9,8 +9,10 @@ workspace. This file is the fork's own record of what has actually been met,
 because "are we done with phase N" was a question nothing in the repo could
 answer.
 
-**Phase 05 is done** as of 2026-09-04 — see its section below. **Phases 06
-and 07 are not started** and are not audited here. Phase 05 was gated on
+**Phase 05 is done** as of 2026-09-04 — see its section below. **Phases 06,
+07 and 08 are not started** and are not audited here; 08 (the fork's own
+package repository and lab store) was added to the roadmap on 2026-09-04 as
+the constructive half of Phase 05. Phase 05 was gated on
 `docs/inactive/PHASE-04-EXIT-FIXES.md`, the fifteen blocking fixes found by
 reviewing the work that closed Phase 04; that gate cleared on 2026-09-02.
 

@@ -2,9 +2,10 @@
 
 **State at end of session, 2026-09-04.** `main` is at `5889441` (the merged
 security-review fixes). Work since is on branch `phase-05-sever-upstream`,
-nine commits ahead of `main`, none pushed, nothing uncommitted: Phase 05,
+eleven commits ahead of `main`, none pushed, nothing uncommitted: Phase 05,
 severing the upstream dependency, one commit per surface, verified on the
-reference VM with outbound traffic rejected at the firewall. See **Phase 05:
+reference VM with outbound traffic rejected at the firewall; then the code
+that was dead once upstream was, removed at the user's call. See **Phase 05:
 severing the upstream dependency (2026-09-04)** below. The rest of this
 document is the state at the close of the Phase 04 session, still current
 except where the two sections after it supersede it.
@@ -131,14 +132,14 @@ a deployed host, which is where it caught it.
 - **The index is unsigned.** Discovery can lie about what exists; contents
   cannot be forged. That was true of the upstream listing too, and is
   recorded under "What is deliberately not here yet".
-- **Dead code was left where it was not upstream's.** `Notice_web` (its
-  controller ends in `die;`), the `Uploader` models and helpers, the
-  `pages/uploader` and `pages/control` React pages, and `ModeCmd`'s
-  online-mode branches reach no server and were not in scope. `ModeCmd`'s
-  `mode default online` still sets a control row nothing reads.
-- **`ctrl_online_mode` and `ctrl_default_mode` are still seeded** by
-  `install/sql/seed-control.sql` and read by nothing. Harmless; retire them
-  with `ModeCmd` when that is touched.
+- **The dead code went too, in the last commit.** `Notice_web`, the
+  `Uploader` module, the `pages/uploader`, `pages/control` and notice React
+  pages, `Namecard`/`Profile`, `ModeCmd`'s online-mode branches, the seven
+  control constants nothing read and the two control rows the installer
+  seeded for them. Each was confirmed unreachable first; UpstreamSeveredTest
+  section 9 pins the absences. The last commit was verified with the local
+  suite and a bundle rebuild, not on the VM: it deletes unreachable code and
+  two seed rows, and the VM run before it covers everything that executes.
 - **The workbook editors never used the upstream uploader** — their upload
   adapter was already commented out — so a workbook image is still inline or a
   URL. Nothing regressed there.
@@ -771,10 +772,14 @@ review and several had been shipping for years.
    can write every other tenant's workspace. Now that emulators run as their
    tenant, this is the seam that decides whether that isolation means anything.
 7. ~~**Phase 05, severing the upstream dependency.**~~ Done on
-   `phase-05-sever-upstream`; review and merge it. Then a package repository
-   with an `index.json` is what makes the device store and the update check
-   do something, and Phase 06 (frontend currency) and 07 (maintainership)
-   are open.
+   `phase-05-sever-upstream`; review and merge it. Phase 06 (frontend
+   currency) and 07 (maintainership) are open.
+8. **Phase 08, the fork's own package repository and lab store** — added to
+   the roadmap on 2026-09-04. The device store and the version dialog read
+   an `index.json` nobody publishes yet; a repository we run, with signed
+   packages and eventually a signed index, is what fills them. The lab store
+   is new work with decisions (hosting, accounts, what may be redistributed)
+   ahead of the code; the roadmap section says which.
 8. ~~**Backup and restore**~~ — done, and recorded in "Phase 04: backup and
    restore" at the foot of this document. What is left of it is
    `store/app/Console/Commands/MysqlRecovery.php`, which is a second copy of the
