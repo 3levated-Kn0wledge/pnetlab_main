@@ -128,7 +128,10 @@ Route::post('/auth/login/login', function () {
 | The dynamic dispatchers
 |--------------------------------------------------------------------------
 |
-| These three take the controller AND the method out of the URL, and they used
+| (There were three; the /notice dispatcher went in Phase 05 with the notice
+| controllers, which were dead once the upstream notice feed was.)
+|
+| These take the controller AND the method out of the URL, and they used
 | to accept both verbs for all of it: 157 dispatchable controller methods, each
 | reachable by GET as well as POST, of which 39 called Checker::method('post')
 | and 118 did not.
@@ -164,10 +167,6 @@ Route::match(['post', 'get'], '/user/{controller}/{method}', function ($controll
     return App::call('\App\Http\Controllers\User\\'.ucfirst($controller).'Controller@' . $method);
 })->middleware('auth');
 
-Route::match(['post', 'get'], '/notice/{controller}/{method}', function ($controller, $method) {
-    Checker::action('notice', $controller, $method);
-    return App::call('\App\Http\Controllers\Notice\\'.ucfirst($controller).'Controller@' . $method);
-})->middleware('auth');
 
 // Route::match(['get'], '/redirect', function (Request $request) {
     

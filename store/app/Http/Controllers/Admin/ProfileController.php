@@ -8,7 +8,6 @@ use App\Helpers\Request\Checker;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use App\Helpers\Request\Reply;
-use App\Helpers\Uploader\FileFunc;
 
 
 class ProfileController extends Controller  

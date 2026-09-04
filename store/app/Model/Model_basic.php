@@ -10,7 +10,6 @@ use App\Helpers\Request\Checker;
 use Illuminate\Database\QueryException;
 use App\Helpers\Request\Reply;
 use Illuminate\Support\Facades\Auth;
-use App\Helpers\Uploader\FileToken;
 use App\Helpers\DB\Transactions;
 
 class Model_basic extends Model

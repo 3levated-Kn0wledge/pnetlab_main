@@ -9,7 +9,6 @@ use Illuminate\Http\Request;
 use App\Helpers\Request\Checker;
 use App\Helpers\Request\Reply;
 use Illuminate\Support\Facades\Auth;
-use App\Helpers\Uploader\FileFunc;
 use App\Helpers\DB\Models;
 
 class UsersController extends Controller  

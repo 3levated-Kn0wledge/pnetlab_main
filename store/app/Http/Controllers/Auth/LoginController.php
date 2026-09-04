@@ -189,7 +189,6 @@ class LoginController extends Controller
         if (Ctrl::get(CTRL_OFFLINE_MODE, 0) == 1) return redirect('/auth/login/offline');
 
         Ctrl::set(CTRL_OFFLINE_MODE, 1);
-        Ctrl::set(CTRL_DEFAULT_MODE, 'offline');
         if ($userModel->is_exist([[ [USER_OFFLINE, '=', 1], [USER_ROLE, '=', 0] ]])) {
             return redirect('/auth/login/offline?success=OFFLINE mode is turned on. Using OFFLINE Accounts to login');
         } else if($userModel->is_exist([[[USER_USERNAME, '=', 'admin']]])) {

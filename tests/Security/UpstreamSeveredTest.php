@@ -25,6 +25,9 @@
  *   8. the helper layer itself -- Query::center()/boxCenter(), the https->http
  *      rewrite, the encrypted-UUID fingerprint, the six upstream hostname
  *      constants, and the upstream domain on the cookie and the token
+ *   9. the code that was dead once upstream was -- the local notice tables,
+ *      the uploader module that fronted uploader.pnetlab.com, the pages of
+ *      an earlier admin UI nothing routes to, and the mode switches
  *
  * Every assertion below is source-level and comment-stripped, in the style of
  * RoutingTest: the files that lost this code explain at length what they
@@ -305,5 +308,27 @@ assert_true(strpos($guard, 'APP_DOMAIN') === false, 'JwtGuard issues the cookie 
 assert_true(strpos(code_only($root . '/store/app/Helpers/Token/JWToken.php'), 'APP_DOMAIN') === false,
     'and the token names no upstream domain');
 assert_true(!is_file($root . '/store/app/pnetlab'), 'the stray store/app/pnetlab file (one line: pnetlab.com) is gone');
+
+echo "9. what was dead once upstream was is gone too\n";
+
+foreach (['store/app/Http/Controllers/Notice', 'store/app/Model/Notice',
+          'store/app/Constants/Notice', 'store/app/Helpers/Uploader', 'store/app/Model/Uploader',
+          'store/app/Constants/Uploader', 'store/resources/react/pages/notice', 'store/resources/react/pages/uploader',
+          'store/resources/react/pages/control', 'store/resources/react/components/notice',
+          'store/resources/react/components/menu/Namecard.js', 'store/resources/react/components/menu/Profile.js'] as $f) {
+    assert_true(!file_exists($root . '/' . $f), "$f is gone");
+}
+$routesCode = code_only($root . '/store/routes/web.php');
+assert_true(strpos($routesCode, "'/notice/{controller}/{method}'") === false, 'the /notice dispatcher is gone');
+assert_same([], app_files_mentioning($root, 'Helpers\\Uploader'), 'nothing imports the uploader module');
+assert_true(strpos(file_get_contents($root . '/store/resources/assets/js/default.js'), 'function file_public') === false,
+    'default.js no longer rewrites image URLs through the upstream uploader');
+$ctrl = code_only($root . '/store/app/Constants/Control/control_cst.php');
+foreach (['CTRL_ONLINE_MODE', 'CTRL_DEFAULT_MODE', 'CTRL_ALIVE_KEY', 'CTRL_LICENSE'] as $c) {
+    assert_true(strpos($ctrl, "'$c'") === false, "$c is no longer defined");
+}
+$seed = preg_replace('/^--.*$/m', '', file_get_contents($root . '/install/sql/seed-control.sql'));
+assert_true(strpos($seed, 'ctrl_online_mode') === false && strpos($seed, 'ctrl_default_mode') === false,
+    'and the installer no longer seeds the online-mode rows');
 
 test_summary();

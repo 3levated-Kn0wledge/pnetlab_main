@@ -157,7 +157,7 @@ $web = code_without_comments($webPath);
 assert_true(strpos($web, 'use App\Helpers\Request\Checker;') !== false,
     'web.php imports Checker');
 
-foreach (['admin', 'user', 'notice'] as $group) {
+foreach (['admin', 'user'] as $group) {
     // The guard has to be inside the closure and before App::call, or the
     // controller runs first and the guard is decoration.
     $pattern = '/Route::match\(\s*\[[^\]]*\]\s*,\s*[\'"]\/' . $group . '\/\{controller\}\/\{method\}[\'"].*?'
@@ -212,7 +212,7 @@ assert_true(count($readOnly) > 0,
 function dispatchable_methods($controllersDir)
 {
     $found = [];
-    foreach (['Admin' => 'admin', 'User' => 'user', 'Notice' => 'notice'] as $dir => $group) {
+    foreach (['Admin' => 'admin', 'User' => 'user'] as $dir => $group) {
         foreach ((array) glob($controllersDir . '/' . $dir . '/*Controller.php') as $file) {
             $src = code_without_comments($file);
             $controller = strtolower(basename($file, 'Controller.php'));
@@ -234,7 +234,10 @@ function dispatchable_methods($controllersDir)
 }
 
 $methods = dispatchable_methods($controllersDir);
-assert_true(count($methods) > 100,
+// 157 when this was written; 92 after Phase 05 removed the marketplace, the
+// licences, the notices and the online login. The floor is a sanity check
+// that the sweep still finds the controllers, not a count to preserve.
+assert_true(count($methods) > 80,
     sprintf('the controller sweep found the dispatchable methods (%d)', count($methods)));
 
 /**
