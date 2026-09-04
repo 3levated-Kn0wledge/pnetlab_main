@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Helpers\Admin\Upgrade;
+use App\Helpers\Packages\PackageClient;
 use App\Helpers\Auth\Role;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
@@ -103,27 +104,54 @@ class DefaultController extends Controller
 
     public function getVersion()
     {
+        // What the dialog shows. When there is no update channel -- no
+        // repository configured, one that did not answer, or one that
+        // publishes no appliance record -- "latest" is the current version
+        // and the note says why, so the dialog is informative rather than an
+        // error toast. That is the default state of a box, not a failure.
         $version = Ctrl::get(CTRL_VERSION, '1.0.0');
         $latest = Upgrade::checkUpgrade();
         if (!$latest['result'] || !isset($latest['data'])) {
-            Reply::finish(false, 'Can not check for updates');
+            $reason = isset($latest['data']['data']) && is_string($latest['data']['data']) ? $latest['data']['data'] : 'Can not check for updates';
+            Reply::finish(true, 'success', ['version' => $version, 'latest' => [
+                UPGRADE_VERSION => $version,
+                UPGRADE_NOTE => $reason,
+            ]]);
         }
-        $latest = $latest['data'];
-        Reply::finish(true, 'success', ['version' => $version, 'latest' => $latest]);
+        Reply::finish(true, 'success', ['version' => $version, 'latest' => [
+            UPGRADE_VERSION => $latest['data'][UPGRADE_VERSION],
+            UPGRADE_NOTE => $latest['data'][UPGRADE_NOTE],
+        ]]);
     }
 
+    /**
+     * Start the upgrade worker and return at once.
+     *
+     * This used to be `sudo ps -aux | grep "artisan upgrade"` to see whether
+     * one was running, then `sudo php .../artisan upgrade now &` -- the last
+     * two callers of the root-equivalent php and ps grants, both of which
+     * are gone from the policy with this. The worker runs as www-data, like
+     * the device-package worker: everything it does is unprivileged except
+     * the one `sudo unl_wrapper -a package` call, and it takes a lock so a
+     * second click cannot start a second applier.
+     */
     public function upgrade()
     {
         if(!Role::checkRoot()) Reply::finish(false, ERROR_PERMISSION);
-        exec('sudo ps -aux | grep "artisan upgrade" | grep -v grep', $output);
-        if(count($output) > 0) Reply::finish(true, 'success');
-        exec('sudo php /opt/unetlab/html/store/artisan upgrade now > /dev/null 2>&1 &');
+        if(!PackageClient::ensureDirectories()) Reply::finish(false, 'Cannot create '. PACKAGE_INCOMING_DIR);
         $processModel = Models::get('Admin/Process');
         $proccessId = 'upgrade';
+        // The row first, synchronously: the dialog polls a second later and
+        // expects it to be there. The worker drops it when it finishes.
         if (!$processModel->is_exist([[[PROCESS_ID, '=', $proccessId]]])) {
             $processResult = $processModel->add([[PROCESS_ID => $proccessId, PROCESS_DTOTAL => 0, PROCESS_DNOW => 0]]);
             if (!$processResult['result']) return $processResult;
         }
+        $logfile = PACKAGE_LOG_DIR . '/upgrade.log';
+        $cmd = escapeshellarg(PHP_BINARY)
+            . ' ' . escapeshellarg(base_path('artisan'))
+            . ' upgrade now >> ' . escapeshellarg($logfile) . ' 2>&1 &';
+        exec($cmd);
         Reply::finish(true, 'success');
     }
 

@@ -5,7 +5,6 @@ namespace App\Helpers\Admin;
 use App\Helpers\Control\Ctrl;
 use App\Helpers\DB\Models;
 use App\Helpers\Packages\PackageClient;
-use App\Helpers\Request\Query;
 use App\Helpers\Request\Reply;
 
 
@@ -41,6 +40,20 @@ use App\Helpers\Request\Reply;
  * apply, report — but what is downloaded is a signed package and what applies
  * it is `unl_wrapper -a package`. The version is taken from the manifest the
  * wrapper verified rather than re-read through a memoising cache.
+ *
+ * WHERE THE UPDATE COMES FROM
+ *
+ * Until Phase 05 the check and the download link still came from
+ * user.pnetlab.com (/api/offboxs/upgrade/check and /upgrade, each carrying
+ * the box's alive key and encrypted UUID). Both now read the `appliance`
+ * record of the repository's own index.json through PackageClient::index()
+ * -- see docs/PACKAGES.md "The index". With no repository configured there
+ * is no request and no update, and the dialog says so.
+ *
+ * This runs as www-data, from `php artisan upgrade now` started by
+ * Admin/DefaultController::upgrade() with no sudo. The only privileged step
+ * is PackageClient::apply(), which is `sudo unl_wrapper -a package <path>`,
+ * and root decides from the signature inside the file whether to believe it.
  */
 class Upgrade {
 
@@ -55,40 +68,18 @@ class Upgrade {
             $oldVersion = Ctrl::get(CTRL_VERSION, '');
 
             $newVersion = self::checkUpgrade();
-
             if(!$newVersion['result'] || !isset($newVersion['data'])){
                 $processModel->drop([[[PROCESS_ID, '=', $proccessId]]]);
                 return $newVersion;
             }
-
-            $newVersion = $newVersion['data'][UPGRADE_VERSION];
-
+            $update = $newVersion['data'];
+            $newVersion = $update[UPGRADE_VERSION];
             if($newVersion == $oldVersion){
                 $processModel->drop([[[PROCESS_ID, '=', $proccessId]]]);
                 return Reply::make(true, 'success');
             }
-
-            $upgradeResult = Query::boxCenter(APP_CENTER.'/api/offboxs/upgrade/upgrade', [
-                UPGRADE_VERSION=>$oldVersion,
-            ], ['dataType'=>'json']);
-
-            if(!$upgradeResult['result']){
-                $processModel->drop([[[PROCESS_ID, '=', $proccessId]]]);
-                return $upgradeResult;
-            }
-            $upgradeResult = $upgradeResult['data'];
-
-            // A package-aware update channel states where its package is. The
-            // legacy channel returns ulink+utoken pointing at a zip of shell
-            // scripts, which this will fetch and the wrapper will then refuse,
-            // because it is not a signed package — which is the correct
-            // outcome, not a regression to work around.
-            $url = isset($upgradeResult['package']) && PackageClient::validUrl($upgradeResult['package'])
-                ? $upgradeResult['package']
-                : (isset($upgradeResult['ulink'])
-                    ? $upgradeResult['ulink'].'?utoken='.$upgradeResult['utoken']
-                    : '');
-
+            $url = $update['package'];
+            $sha256 = $update['sha256'];
             if(!PackageClient::validUrl($url)){
                 $processModel->drop([[[PROCESS_ID, '=', $proccessId]]]);
                 return Reply::make(false, 'Error', 'The update channel did not offer a downloadable package');
@@ -119,7 +110,13 @@ class Upgrade {
             });
 
             if(!$download['result']) throw new \ErrorException($download['message']);
-
+            // If the index stated a digest, hold the file to it. A transport
+            // check, not a trust decision: the signature inside the package is
+            // what decides whether the contents are believed, and root checks
+            // that after this process has stopped being able to touch the file.
+            if($sha256 !== '' && !hash_equals($sha256, hash_file('sha256', $packagePath))){
+                throw new \ErrorException('The downloaded package does not match the digest the repository advertised');
+            }
             @chmod($packagePath, 0644);
 
             // One call, one argument. Whether this host ends up running new
@@ -155,14 +152,27 @@ class Upgrade {
     }
 
     private static $checkUpgradeResult=null;
+    /**
+     * What the repository says the current appliance version is.
+     *
+     * @return array Reply shape; on success data carries UPGRADE_VERSION,
+     *               UPGRADE_NOTE, package (URL) and sha256 ('' if none)
+     */
     public static function checkUpgrade(){
         if(isset(self::$checkUpgradeResult)) return self::$checkUpgradeResult;
-        $currentVersion = Ctrl::get(CTRL_VERSION, '4.0.0');
-        $upgradeResult = Query::boxCenter(APP_CENTER.'/api/offboxs/upgrade/check', ['version' => $currentVersion], ['dataType'=>'json']);
-        if(!$upgradeResult){
-            self::$checkUpgradeResult = Reply::make(false, 'ERROR', ['data'=>'Check new version faild']);
-        }else {
-            self::$checkUpgradeResult = $upgradeResult;
+        $index = PackageClient::index();
+        if(!$index['result']){
+            self::$checkUpgradeResult = Reply::make(false, 'ERROR', ['data'=>$index['message']]);
+        }elseif($index['appliance'] === null){
+            self::$checkUpgradeResult = Reply::make(false, 'ERROR', ['data'=>'The package repository publishes no appliance update']);
+        }else{
+            $a = $index['appliance'];
+            self::$checkUpgradeResult = Reply::make(true, 'success', [
+                UPGRADE_VERSION => $a['version'],
+                UPGRADE_NOTE => $a['note'],
+                'package' => $a['package'],
+                'sha256' => $a['sha256'],
+            ]);
         }
         return self::$checkUpgradeResult;
     }

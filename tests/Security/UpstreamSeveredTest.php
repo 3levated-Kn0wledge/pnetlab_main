@@ -20,6 +20,8 @@
  *      licence keys, and the machine UUID the box showed as its identity
  *   6. the device store -- listed from the repository's own index now, not
  *      from user.pnetlab.com
+ *   7. the update check and the upgrade worker -- the same index, and no
+ *      more `sudo php`
  *
  * Every assertion below is source-level and comment-stripped, in the style of
  * RoutingTest: the files that lost this code explain at length what they
@@ -223,5 +225,24 @@ assert_true(strpos($client, "'strict_transport' => true") !== false,
 $item = file_get_contents($root . '/store/resources/react/components/admin/device/DeviceItem.js');
 assert_true(strpos($item, 'APP_CENTER') === false, 'DeviceItem no longer links to the upstream guide page');
 assert_true(strpos($item, 'file_public(') === false, 'and does not rewrite image URLs through the upstream uploader');
+
+echo "7. the update check reads the index, and the worker needs no sudo php\n";
+
+$upgrade = code_only($root . '/store/app/Helpers/Admin/Upgrade.php');
+assert_true(strpos($upgrade, 'Query::') === false && strpos($upgrade, 'APP_CENTER') === false,
+    'Helpers/Admin/Upgrade reaches no server of its own');
+assert_true(strpos($upgrade, 'PackageClient::index()') !== false, 'and reads the repository index');
+assert_true(strpos($upgrade, 'hash_equals(') !== false, 'and holds the download to the advertised digest');
+$default = code_only($root . '/store/app/Http/Controllers/Admin/DefaultController.php');
+assert_true(strpos($default, 'sudo') === false, 'Admin/DefaultController holds no sudo at all');
+assert_true(strpos($default, 'ps -aux') === false, 'and does not grep the process table');
+assert_true(strpos($default, "escapeshellarg(PHP_BINARY)") !== false && strpos($default, "' upgrade now") !== false,
+    'the upgrade worker is started as the web user, through an escaped argv');
+assert_true(preg_match('/^www-data.*\/usr\/bin\/php\b/m', $sudoers) === 0, 'the php grant is gone from the policy');
+assert_true(preg_match('/^www-data.*\/usr\/bin\/ps\b/m', $sudoers) === 0, 'and so is ps');
+$cmd = code_only($root . '/store/app/Console/Commands/UpgradeCmd.php');
+assert_true(strpos($cmd, 'LOCK_EX | LOCK_NB') !== false, 'the worker takes a non-blocking exclusive lock, so two cannot run');
+$dialog = file_get_contents($root . '/store/resources/react/components/admin/system/Upgrade.js');
+assert_true(strpos($dialog, 'dangerouslySetInnerHTML') === false, 'the version dialog renders the update note as text');
 
 test_summary();
