@@ -16,6 +16,7 @@ class DevicesStore extends Component {
 			search: '',
 			filter: '',
 			limit: 16,
+			hint: '',
 		}
 
 		this.unit = 16;
@@ -67,7 +68,7 @@ class DevicesStore extends Component {
 					<div className='row'>
 
 						{devices.length == 0
-							? <a style={{width:'100%'}}><div style={{width:'100%'}} className="alert alert-warning" role="alert">{lang("No device available")}</div></a>
+							? <div style={{width:'100%'}} className="alert alert-warning" role="alert">{lang("No device available")}{this.state.hint ? <div><small>{this.state.hint}</small></div> : ''}</div>
 							: <>
 								{devices.map(item => {
 									return <DeviceItem key={item[DEVICE_ID]} device={item} onDownload={id => this.downloader.download(id)} onDelete={id => this.downloader.delete(id)}></DeviceItem>
@@ -131,6 +132,7 @@ class DevicesStore extends Component {
 					return false;
 				} else {
 					this.devices = response['data'];
+					this.setState({ hint: response['message'] == 'success' ? '' : response['message'] });
 					this.filter();
 				}
 			})

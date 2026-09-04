@@ -32,12 +32,12 @@ class VerifyCsrfToken extends Middleware
      * @var array
      */
     protected $except = [
-        // The return leg of the online login. LoginController::online() builds
-        // $box_link and redirects the browser to APP_AUTHEN; APP_AUTHEN sends
-        // it back here carrying the license. That is a genuinely cross-site
-        // request from a server this box does not control, so it cannot carry
-        // a token this box issued. routes/web.php registers it for both verbs
-        // for the same reason -- the remote end chooses the method.
-        'auth/login/license',
+        // Empty, and meant to stay that way. The one entry this list ever
+        // legitimately carried was 'auth/login/license', the return leg of
+        // the online login: authen.pnetlab.com sent the browser back to it
+        // carrying a licence, a genuinely cross-site request that could not
+        // carry a token this box issued. Phase 05 removed the online login
+        // (docs/OFFLINE-FIRST.md), so no unauthenticated write is expected
+        // from any other site any more.
     ];
 }

@@ -23,6 +23,15 @@ defined('PACKAGE_LOG_DIR') || define('PACKAGE_LOG_DIR', '/opt/unetlab/data/Logs/
 /** The one privileged entry point the web layer is allowed to use. */
 defined('PACKAGE_WRAPPER') || define('PACKAGE_WRAPPER', '/opt/unetlab/wrappers/unl_wrapper');
 
-/** Fields a package-aware marketplace adds to a device record. Absent upstream. */
+/**
+ * Fields of a device record in the repository index (PACKAGE_CENTER/index.json,
+ * see docs/PACKAGES.md "The index"). The first two name the package; the
+ * third is an optional link to the publisher's own guide page.
+ */
 defined('DEVICE_PACKAGE') || define('DEVICE_PACKAGE', 'device_package');
 defined('DEVICE_PACKAGE_SHA256') || define('DEVICE_PACKAGE_SHA256', 'device_package_sha256');
+defined('DEVICE_GUIDE') || define('DEVICE_GUIDE', 'device_guide');
+/** The file, relative to PACKAGE_CENTER, that lists what the repository serves. */
+defined('PACKAGE_INDEX_FILE') || define('PACKAGE_INDEX_FILE', 'index.json');
+/** How large an index the box will read. A listing, not a payload. */
+defined('PACKAGE_INDEX_MAX_BYTES') || define('PACKAGE_INDEX_MAX_BYTES', 1048576);

@@ -79,6 +79,30 @@ upstream infrastructure (the shared lab marketplace, in particular) do not come
 back as-is. They become local import/export, which is less convenient and more
 honest.
 
+## Status, 2026-09-04: done
+
+Phase 05 carried this out (branch `phase-05-sever-upstream`, one commit per
+surface; `docs/ROADMAP-STATUS.md` has the table). Against the lists above:
+
+**Removed** — every item. The online authentication path, the licence
+keep-alive, the installation fingerprint, `CorsMidware` (Phase 02) and
+`APP_SECURE` are gone, and so are the four things the list did not name: the
+lab marketplace, the notice bell, the multi-access licences, and the upstream
+domain on the session cookie and the token.
+
+**Replaced with local equivalents** — device templates and images arrive as
+signed packages from a repository the owner runs, discovered through that
+repository's own `index.json` (`docs/PACKAGES.md`); Docker images are seeded
+(`docs/DOCKER-IMAGES.md`); the update check reads the same index. The lab
+marketplace was *not* replaced: a lab is a file, and moving one is a copy.
+
+**Rule 1** holds with one deliberate, documented exception: the package
+repository index is fetched on the device-store and version-dialog request
+paths, only when `PNET_PACKAGE_CENTER` is set, bounded by the standard
+timeouts, and absent-by-default. Rules 2–5 hold with no exception.
+
+`tests/Security/UpstreamSeveredTest.php` fails if any of it comes back.
+
 ## Deferred: the committed `store/.env`
 
 The tracked `store/.env` and its live `APP_KEY` are **deliberately left in place

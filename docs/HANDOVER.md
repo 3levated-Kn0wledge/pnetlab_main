@@ -1,13 +1,14 @@
 # Handover
 
-**State at end of session, 2026-09-03.** `main` carries the merged
-`phase-04-exit-fixes` (merge `5e2bb03`) and, on top of it, the merged
-`security-review-fixes`: six findings from an external security review, fixed
-one per commit, plus a test-infrastructure commit and documentation, verified
-from scratch on the reference VM through the installer before merging. Both
-merges are pushed. See **Security review fixes (2026-09-03)** below. The rest
-of this document is the state at the close of the Phase 04 session, still
-current except where that section supersedes it.
+**State at end of session, 2026-09-04.** `main` is at `5889441` (the merged
+security-review fixes). Work since is on branch `phase-05-sever-upstream`,
+twelve commits ahead of `main`, none pushed, nothing uncommitted: Phase 05,
+severing the upstream dependency, one commit per surface, verified on the
+reference VM with outbound traffic rejected at the firewall; then the code
+that was dead once upstream was, removed at the user's call. See **Phase 05:
+severing the upstream dependency (2026-09-04)** below. The rest of this
+document is the state at the close of the Phase 04 session, still current
+except where the two sections after it supersede it.
 
 **Everything below was measured on a host that was rolled back to its
 post-provision snapshot and built from nothing** — a clean `git archive` of the
@@ -27,7 +28,7 @@ two things a reviewer should know before merging.
 **Phase 02's dependency bullet is closed**: axios is 1.20.0 and the committed
 bundles were rebuilt against it — see "Phase 02: the axios upgrade" below.
 
-**Roadmap phases 00 through 04 are done**, with three deliberate redefinitions,
+**Roadmap phases 00 through 05 are done**, with three deliberate redefinitions,
 each recorded in its own document:
 
 - the supported platform is **24.04, not 26.04** — 26.04 cannot be built or
@@ -41,10 +42,118 @@ each recorded in its own document:
   what a profile would have to cover and why `unl_wrapper` cannot usefully be
   one of its subjects.
 
-Phase 05 (severing the upstream dependency), 06 (frontend currency) and 07
-(maintainership) are not started, though the signed-package work makes 05
-cheaper than it was.
+Phase 05 (severing the upstream dependency) is done on its branch; 06
+(frontend currency) and 07 (maintainership) are not started.
 
+
+---
+
+## Phase 05: severing the upstream dependency (2026-09-04)
+
+Branch `phase-05-sever-upstream`, nine commits, one per surface and one for
+the bundles. `docs/OFFLINE-FIRST.md` is the decision (accepted 2026-08-29);
+`docs/ROADMAP-STATUS.md` has the bullet table; `tests/Security/
+UpstreamSeveredTest.php` pins every removal, one section per commit, and
+`tests/Security/PackageIndexTest.php` covers the one thing that was added.
+
+**What the product did before this branch.** Every box talked to
+`user.pnetlab.com` — with the caller's licence attached to each request, or
+the box's "alive key" and its machine UUID AES-encrypted under a key that was
+in the source — for: an online login (via `authen.pnetlab.com`, with an
+unauthenticated return leg that was the one CSRF exemption), an hourly licence
+keep-alive, a lab marketplace (five controllers, two of which wrote a download
+to a path the server chose), a notice bell (two upstream calls on every page
+load), account metering, the device-store listing and the update check. Every
+one of those URLs was rewritten from https to http before curl saw it.
+
+**What it does now.** Nothing, by default. The one outbound request the admin
+UI can make is the package repository's `index.json`, fetched only when the
+owner sets `PNET_PACKAGE_CENTER`, only from the device store and the version
+dialog, and parsed as hostile data (`docs/PACKAGES.md`, "The index"). The
+online login, the keep-alive, the marketplace, the bell, the licences, the
+fingerprint, the six hostname constants and the upstream domain on the session
+cookie are gone. Four sudo grants went with their only callers: `php` (the
+root-equivalent one the policy had flagged), `ps`, `ntpdate`, `dmidecode`.
+The policy is at **19 grants**.
+
+| Commit | Surface |
+|---|---|
+| `security(auth)` | the online login and the licence keep-alive |
+| `remove(store): the lab marketplace` | selling, downloading and versioning labs upstream |
+| `remove(store): the notice bell` | the notices |
+| `remove(store): the multi-access licences` | account metering, the online accounts page, "Box's ID" |
+| `packages: the device store lists the repository's own index` | the device listing |
+| `packages: the update check reads the index` | the update check; the upgrade worker off `sudo php` |
+| `security(upstream)` | `Query::center()/boxCenter()`, the https→http rewrite, the fingerprint, the constants, the cookie domain |
+| `build: rebuild the React bundles` | one rebuild for all of it, from `npm ci` |
+
+**Verified from scratch on the reference VM, 2026-09-04, with upstream
+unreachable.** The VM at its post-provision snapshot (the interrupted `dpkg`
+again, cleared with `dpkg --configure -a`), a clean `git archive` of the
+branch head, the Guacamole artefacts and the CirrOS image staged, the captcha
+turned off, the installer run end to end. Then, for the whole of the unit and
+integration run, an iptables rule rejected every packet leaving the VM's
+interface for anything outside the lab network:
+
+```
+sudo iptables -I OUTPUT 1 -o ens18 ! -d 192.168.0.0/16 -j REJECT
+curl https://user.pnetlab.com/                 → unreachable, for the whole run
+
+sudo bash install/install.sh --server-name pnetlab.test
+→ INSTALLER-EXIT=0, every step; one [fail] in verification, explained below
+
+tools/run-tests.sh (as root, PHP 8.4)      → 2295 assertions across 39 files, 0 failed
+tools/php-lint.sh (8.4)                    → 333 files, 0 failed
+make -C platform/wrappers/src test         → 279 unit assertions, 0 failed
+bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
+bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
+bash tools/integration/db-backup-restore.sh→ 67 passed, 0 failed, 0 skipped
+bash tools/integration/guacamole-console.sh→ 35 assertions, 0 failed
+bash tools/integration/wrapper-console.sh  → 44 assertions, 0 failed
+bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
+bash tools/integration/iol-dataplane.sh    → 76 assertions, 0 failed
+```
+
+Zero `unl*` accounts and zero taps afterwards; the deployed policy has 19
+grants; the rule was removed and outbound confirmed working again. Every
+integration number equals the 2026-09-03 baseline: nothing the product does
+depended on the calls that went. (An earlier run the same day, as a repeat
+deploy over the previous install, gave the same integration numbers; the
+from-scratch run is the one recorded here.)
+
+**The from-scratch discipline caught a fifth installer defect.** Verification
+reported `[fail] the daemon reports Cgroup Version: 2` on a host where the
+same check passed all fifteen times it was re-run. Not the daemon, which had
+been up for minutes: the check was `docker info | grep -q ...` under
+`set -o pipefail`, and `grep -q` exits on its first match, so a producer with
+output still to write dies of EPIPE and the pipeline fails at random — most
+often for the producer with the most output after the matched line, which
+`docker info` is. Every `producer | grep -q` in `install/lib/verify.sh`
+(seven of them) now captures the output first. Fixed in
+`install(verify): no producer | grep -q under pipefail`.
+
+`LaravelBootTest`'s route-table floor is 12, not 17, for the four login
+routes and the `/notice` dispatcher that no longer exist; that test's boot
+half runs only on a deployed host, which is where it caught it.
+
+**Things a reviewer should know.**
+
+- **The device store and the version dialog are empty until a repository
+  exists.** That is the honest state: nothing publishes signed packages yet.
+  Both screens say so rather than erroring. Standing one up is
+  `docs/PACKAGES.md` "Publishing a package" plus an `index.json`.
+- **The index is unsigned.** Discovery can lie about what exists; contents
+  cannot be forged. That was true of the upstream listing too, and is
+  recorded under "What is deliberately not here yet".
+- **The dead code went too, in the last commit.** `Notice_web`, the
+  `Uploader` module, the `pages/uploader`, `pages/control` and notice React
+  pages, `Namecard`/`Profile`, `ModeCmd`'s online-mode branches, the seven
+  control constants nothing read and the two control rows the installer
+  seeded for them. Each was confirmed unreachable first; UpstreamSeveredTest
+  section 9 pins the absences, and the from-scratch VM run above includes it.
+- **The workbook editors never used the upstream uploader** — their upload
+  adapter was already commented out — so a workbook image is still inline or a
+  URL. Nothing regressed there.
 
 ---
 
@@ -137,7 +246,7 @@ PHP 7.4; the two-version matrix in earlier revisions of this document was
 measured on a box where someone had installed it by hand. CI still covers 8.4
 and 8.5.
 
-The sudo policy is at **23 grants**, down from 42.
+The sudo policy is at **23 grants**, down from 42 (and at 19 after Phase 05, above).
 
 ---
 
@@ -673,10 +782,15 @@ review and several had been shipping for years.
    privilege-model list. Node workspaces are `root:unl 0775`, so every tenant
    can write every other tenant's workspace. Now that emulators run as their
    tenant, this is the seam that decides whether that isolation means anything.
-7. **Phase 05, severing the upstream dependency.** `License::keepalive()` still
-   relicenses against pnetlab.com and `Query::boxCenter()` still ships an
-   encrypted machine UUID upstream. The signed-package work makes this cheaper
-   than it was.
+7. ~~**Phase 05, severing the upstream dependency.**~~ Done on
+   `phase-05-sever-upstream`; review and merge it. Phase 06 (frontend
+   currency) and 07 (maintainership) are open.
+8. **Phase 08, the fork's own package repository and lab store** — added to
+   the roadmap on 2026-09-04. The device store and the version dialog read
+   an `index.json` nobody publishes yet; a repository we run, with signed
+   packages and eventually a signed index, is what fills them. The lab store
+   is new work with decisions (hosting, accounts, what may be redistributed)
+   ahead of the code; the roadmap section says which.
 8. ~~**Backup and restore**~~ — done, and recorded in "Phase 04: backup and
    restore" at the foot of this document. What is left of it is
    `store/app/Console/Commands/MysqlRecovery.php`, which is a second copy of the

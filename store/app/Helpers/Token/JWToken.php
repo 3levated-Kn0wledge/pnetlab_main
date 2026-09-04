@@ -13,8 +13,10 @@ class JWToken {
         $option = get($option, []);
         $key = get($option['key'], config('jwt.secret'));
         $algo =  get($option['algo'], config('jwt.algo', 'HS256'));
-        $payload["iss"] = get($option['iss'], APP_DOMAIN);
-        $payload["aud"] = get($option['aud'], APP_DOMAIN);
+        // iss/aud used to be APP_DOMAIN (user.pnetlab.com). Neither claim is
+        // checked on decode; they name this application now.
+        $payload["iss"] = get($option['iss'], APP_NAME);
+        $payload["aud"] = get($option['aud'], APP_NAME);
         $payload["iat"] = get($option['iat'], time()-120); 
         $payload["nbf"] = get($option['nbf'], time()-120);
         $payload["exp"] = get($option['exp'], time() + config('jwt.ttl')*60);

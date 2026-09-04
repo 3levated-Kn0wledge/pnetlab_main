@@ -1,10 +1,8 @@
 <?php
 
 namespace App\Helpers\Request;
-use App\Helpers\Control\Ctrl;
 use App\Helpers\Request\Reply;
 use App\Helpers\System\Wrapper;
-use Illuminate\Support\Facades\Auth;
 
 
 class Query {
@@ -32,27 +30,20 @@ class Query {
     public static function make($url, $method = 'get', $post=array(), $options=[]){
 
         $url = trim($url);
-        // Inherited: every upstream call had its scheme rewritten from https
-        // to http before curl saw it, so the box has always talked to the
-        // central server in the clear, login credentials included. The rewrite
-        // is kept for the upstream calls, because removing it is Phase 05's
-        // job (severing them) and a TLS failure here would present as a login
-        // outage; it is NOT applied to a caller that asks for strict transport,
-        // which is what a package download does -- there is no reason for a
-        // signed artefact's URL to be downgraded, and the redirect chain is
-        // pinned to https as well.
-        $strict = !empty($options['strict_transport']);
-        if (!$strict) {
-            $url = preg_replace('/^https/', 'http', $url);
-        }
-       
+        // Until Phase 05 every URL had its scheme rewritten from https to http
+        // here, so the box talked to user.pnetlab.com in the clear, login
+        // credentials included. The rewrite went with the calls that needed
+        // it. An https URL is https all the way now: the redirect chain is
+        // pinned to it as well.
+        $https = stripos($url, 'https://') === 0;
+
         self::$ch = curl_init();
         
         curl_setopt(self::$ch, CURLOPT_URL, $url);
         curl_setopt(self::$ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt(self::$ch, CURLOPT_FOLLOWLOCATION, true);
         curl_setopt(self::$ch, CURLOPT_MAXREDIRS, 5);
-        if ($strict && stripos($url, 'https://') === 0) {
+        if ($https) {
             curl_setopt(self::$ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
             curl_setopt(self::$ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTPS);
         } else {
@@ -127,61 +118,21 @@ class Query {
     
     }
 
-    public static function center($url, $method = 'post', $data=[], $options=[]){
-        
-        if($method == 'get'){
-            $data = self::getDataFromUrl($url);
-        }
-        if(isset($options['user'])){
-            $user = $options['user'];
-        }else{
-            $user = Auth::user();
-        };
-        if(!isset($user->{USER_LICENSE})){
-            return Reply::make(false, 'ERROR', ['data'=>'Can not get license']);
-        }
-        $data['time'] = time();
-        $data['license'] = $user->{USER_LICENSE};
-        $data = json_encode($data);
-        
-        if($method == 'get'){
-            $urlPath = explode('?', $url);
-            if(isset($urlPath[1])){
-                $url = $urlPath[0].'?'.$urlPath[1].'&'.'data='.$data;
-            }else{
-                $url = $urlPath[0].'?data='.$data;
-            }
-            
-        }
-        
-        return self::make($url, $method, ['data'=>$data], $options);
-    }
-
-
-    public static function boxCenter($url, $data=[], $options=[]){
-        
-        
-        $indenfify = new \indentify();
-        $data['license'] = Ctrl::get(CTRL_ALIVE_KEY, '');
-        $data['key'] = $indenfify->getKey();
-        $data = json_encode($data);
-        
-        return self::make($url, 'post', ['data'=>$data], $options);
-    }
-    
-    private static function getDataFromUrl($url){
-        $dataString = explode('?', $url);
-        if(!isset($dataString[1])) return [];
-        $dataString = $dataString[1];
-        $dataString = explode('&', $dataString);
-        $data = [];
-        foreach ($dataString as $value){
-            $valueArray = explode('=', $value);
-            if(!isset($valueArray[1]) || $valueArray[1]=='') continue;
-            $data[trim($valueArray[0])] = trim($valueArray[1]);
-        }
-        return $data;
-    }
+    /*
+    |----------------------------------------------------------------------
+    | center() and boxCenter() used to live here.
+    |----------------------------------------------------------------------
+    |
+    | center() attached the caller's licence to every request and posted it
+    | to user.pnetlab.com; boxCenter() attached the box's "alive key" and
+    | its machine UUID, AES-encrypted under a key that was in the source, as
+    | an installation fingerprint. Between them they carried the lab
+    | marketplace, the device store, the notices, the multi-access licences,
+    | the update check and the licence keep-alive. Phase 05 removed every
+    | caller (docs/OFFLINE-FIRST.md), and tests/Security/UpstreamSeveredTest
+    | fails if either comes back. What is left of this class is a bounded
+    | curl wrapper for the package client, and the proxy configuration.
+    */
 
     /**
      * Read the configured proxy back out of the apt configuration.

@@ -36,7 +36,6 @@ class Html5 extends Model_basic
         $this->query_builder = DB::table(HTML5_TABLE);
         $this->id = HTML5_POD;
         $this->name = HTML5_TABLE;
-        $this->uploader = APP_UPLOAD;
         
         $this->registerSql = [
             //['Auth/MapUG', AUTHEN_ID, MAP_UG_PEOPLEID, null, null, 'cascade', null],

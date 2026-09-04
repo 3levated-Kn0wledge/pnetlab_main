@@ -124,15 +124,18 @@ assert_same([], $dynamic, 'no /auth route takes a URL segment as controller or m
 
 $mustBePublic = [
     // path                        => verbs           // caller
-    '/auth/login/initial'          => ['get'],        // LoginController redirects
-    '/auth/login/initialOnline'    => ['get'],        // pages/auth/LoginInitial.js
-    '/auth/login/initialOffline'   => ['get'],        // pages/auth/LoginInitial.js
+    '/auth/login/initialOffline'   => ['get'],        // LoginController redirects (first boot)
     '/auth/login/manager'          => ['get'],        // helpers/error_helper.js
     '/auth/login/offline'          => ['get'],        // login page
-    '/auth/login/online'           => ['get'],        // login page
     '/auth/login/login'            => ['post'],       // pages/auth/LoginOffline.js
-    '/auth/login/license'          => ['get', 'post'] // return leg from APP_AUTHEN
 ];
+// Phase 05 removed the online login: /auth/login/initial (the mode chooser),
+// /auth/login/initialOnline, /auth/login/online (the redirect to
+// authen.pnetlab.com) and /auth/login/license (its return leg, and the one
+// CSRF exemption). They must not come back; docs/OFFLINE-FIRST.md says why.
+foreach (['/auth/login/initial', '/auth/login/initialOnline', '/auth/login/online', '/auth/login/license'] as $gone) {
+    assert_true(!isset($authRoutes[$gone]), "the online login endpoint stays unpublished: $gone");
+}
 
 foreach ($mustBePublic as $path => $verbs) {
     assert_true(isset($authRoutes[$path]), "login flow endpoint is published: $path");
@@ -187,8 +190,7 @@ $routedMethods = array_values(array_unique($routedMethods));
 sort($routedMethods);
 
 // Methods reachable through the routes above, including captcha via /captcha.
-$expectedRouted = ['captcha', 'initial', 'initialOffline', 'initialOnline',
-                   'license', 'login', 'manager', 'offline', 'online'];
+$expectedRouted = ['captcha', 'initialOffline', 'login', 'manager', 'offline'];
 sort($expectedRouted);
 assert_same($expectedRouted, $routedMethods, 'exactly the intended LoginController methods are routed');
 

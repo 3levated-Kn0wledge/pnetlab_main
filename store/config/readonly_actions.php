@@ -51,10 +51,6 @@ return [
     // /store/public/{folder}/{page}/{func} -- so this list and that directory
     // have to agree or a refresh on an open page 'Not Support's.
     'admin/main/view',              // the root redirect target, from Route::redirect('/')
-    'admin/labs/view',              // menu: 'Sell Your Labs'
-    'admin/labs/create',            // history.push from LabsView, and a refresh on it
-    'admin/labs/editview',          // history.push from LabsView
-    'admin/labs/store',             // menu: 'Download Labs'
     'admin/labs/workbook',          // window.open from Wb_bar.js:50
     'admin/labs/workbookview',      // <a target=_blank> Wb_bar.js:31, Wb_Modal.js:92
     'admin/labs/terminal',          // window.open from HTMLConsoleModal.js:168
@@ -65,11 +61,8 @@ return [
     'admin/status/view',            // menu, and window.open from StatusModal.js:75
     'admin/sync/view',              // pages/admin/SyncView.js
     'admin/system/view',            // menu
-    'admin/users/view',             // menu
     'admin/users/offline',          // menu, offline mode
     'admin/user_roles/view',        // menu
-    'admin/versions/view',          // history.push from VersionsAddView.js:98
-    'admin/versions/addview',       // history.push from VersionsView.js:276
 
     // --- Not page renders, but genuinely fetched with GET.
 
@@ -80,16 +73,6 @@ return [
     // app.js:59 fetches the language pack with axios method:'get' before the
     // router is even mounted. loadLanguage() reads files; nothing is written.
     'admin/default/language',
-
-    // The one mixed method on this list. The lab-image previews render
-    //     <img src="/store/public/admin/labs/uploader?action=Read&file=...">
-    // (components/input/InputImg.js:37, components/func/FuncUploadModal.js:207),
-    // and an <img> is a GET -- so the route has to stay open. The method itself
-    // then calls Checker::method('post') for every action except 'Read', which
-    // is where Upload, Delete and History are actually closed. Removing that
-    // in-method guard reopens the hole with this file still looking correct,
-    // which is why CsrfTest.php asserts it is there.
-    'admin/labs/uploader',
 
     // store/public/assets/js/default.js:169,171 -- $.get on window.onload and
     // every 20 minutes after, from every page of both UIs. It re-issues the

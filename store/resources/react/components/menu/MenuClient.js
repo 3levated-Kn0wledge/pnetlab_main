@@ -4,10 +4,8 @@ import(/* webpackMode: "eager" */'./responsive/menu_client.scss')
 import UserName from './UserName'
 import { a, withRouter } from 'react-router-dom';
 import mnf from './menu_func';
-import Syslog from './Syslog'
 import RunningLabButton from '../realtime/RunningLabButton';
 import Upgrade from '../admin/system/Upgrade';
-import OffSyslog from './OffSyslog';
 
 class MenuClient extends Component {
 
@@ -40,7 +38,7 @@ class MenuClient extends Component {
 		return (<>
 			<div className="menu menu_expand_lg">
 
-				<a href={`${App.server.common['APP_CENTER']}/store/labs/view?box=${window.location.origin}`}>
+				<a href="/">
 					<img style={{ height: 40, margin: 'auto 20px auto 40px' }} src='/store/public/assets/auth/img/logo.png'></img>
 				</a>
 
@@ -66,12 +64,8 @@ class MenuClient extends Component {
 										<i className="fa fa-group"></i>&nbsp;{lang('Accounts')}&nbsp;<span className="caret"></span>
 									</div>
 									<ul className="menu_group">
-										{isOffline()
-											? <li className="menu_item"><a href="/store/public/admin/users/offline">
+										<li className="menu_item"><a href="/store/public/admin/users/offline">
 											<i className="fa fa-user"></i>&nbsp;{lang('Users Management')}</a></li>
-											: <li className="menu_item"><a href="/store/public/admin/users/view">
-											<i className="fa fa-user"></i>&nbsp;{lang('Users Management')}</a></li>
-										}
 										
 										<li className="menu_item"><a href="/store/public/admin/user_roles/view">
 											<i className="fa fa-id-card-o"></i>&nbsp;{lang('Roles Management')}</a></li>
@@ -96,11 +90,6 @@ class MenuClient extends Component {
 								</li>
 
 
-								{isOffline()
-									? <li className="menu_item menu_item_parent"><a href={`${App.server.common['APP_CENTER']}/store/labs/view?box=${window.location.origin}`}><i className="fa fa-cloud-download"></i>&nbsp;{lang('Download Labs')}</a></li>
-									: <li className="menu_item menu_item_parent"><a href="/store/public/admin/labs/store"><i className="fa fa-cloud-download"></i>&nbsp;{lang('Download Labs')}</a></li>
-								}
-								{isOffline()? '' : <li className="menu_item menu_item_parent"><a href="/store/public/admin/labs/view"><i className="fa fa-shopping-cart"></i>&nbsp;{lang('Sell Your Labs')}</a></li>}
 								<li className="menu_item menu_item_parent"><a href="/store/public/admin/devices/store"><i className="fa fa-arrows" style={{
 									border: 'solid thin',
 									borderRadius: '50%',
@@ -120,8 +109,6 @@ class MenuClient extends Component {
 				}}></div> 
 
 				<div style={{ margin: 'auto 15px auto auto' }} className='box_flex'>
-					{isOffline()?<OffSyslog></OffSyslog>:<Syslog></Syslog>} 
-					<div style={{width:20}}></div>
 					<UserName name={formatName(App.server.user[USER_USERNAME])} /> 
 					
 				</div>

@@ -91,7 +91,9 @@ assert_true(preg_match('/return\s+\$responseData;/', $branch) === 1,
 
 // -------------------------------------------- the ones that were already right
 
-foreach (['apply', 'view', 'offAdd', 'offDrop', 'offEdit', 'offFilter', 'getKeys', 'activeKey', 'deleteKey'] as $m) {
+// apply(), view(), getKeys(), activeKey() and deleteKey() were on this list
+// until Phase 05 removed them with the multi-access licences.
+foreach (['offAdd', 'offDrop', 'offEdit', 'offFilter'] as $m) {
     $body = method_body($code, $m);
     assert_true($body !== null && strpos($body, 'Role::checkRoot()') !== false,
         "$m() is still root-only");

@@ -57,7 +57,6 @@ class User_roles extends Model_basic
         $this->query_builder = DB::table(USER_ROLES_TABLE);
         $this->id = USER_ROLE_ID;
         $this->name = USER_ROLES_TABLE;
-        $this->uploader = APP_UPLOAD;
 
         $this->registerSql = [
             ['Admin/Users', USER_ROLE_ID, USER_ROLE, null, null, function ($data) {

@@ -255,7 +255,7 @@ class MysqlRecovery extends Command
     private function main()
     {
         if (!is_dir('/opt/unetlab/html/store/')) {
-            $this->showLog("Download PNETLab from pnetlab.com");
+            $this->showLog("/opt/unetlab/html/store is missing; deploy the web layer with install/install.sh first");
             return;
         }
 
@@ -300,7 +300,7 @@ class MysqlRecovery extends Command
         exec("sed -i '/\[mysqld\]/d' /etc/mysql/mysql.cnf");
         exec("sed -i '/innodb_force_recovery/d' /etc/mysql/mysql.cnf");
 
-        $this->showLog('Reset Mysql service faild. Please contact pnetlab.com for helping');
+        $this->showLog('Reset Mysql service failed. Restore the last good backup (docs/HANDOVER.md, backup and restore)');
     }
 
     public function handle(){

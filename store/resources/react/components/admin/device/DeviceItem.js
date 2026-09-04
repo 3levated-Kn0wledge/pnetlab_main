@@ -23,7 +23,7 @@ class DeviceItem extends Component {
                 
                 
                 <div className='lab_item_image'>
-                    <img style={{width:'50%'}} src={file_public(item[DEVICE_IMG])}></img>
+                    {item[DEVICE_IMG] ? <img style={{width:'50%'}} src={item[DEVICE_IMG]}></img> : <i className="fa fa-cube" style={{fontSize:48}}></i>}
                 </div>
             
                 <strong className='lab_item_name'>{item[DEVICE_NAME]}</strong>
@@ -33,7 +33,7 @@ class DeviceItem extends Component {
                     <button className='btn button btn-sm btn-primary' onClick={()=>{
                         if(this.props.onDownload) this.props.onDownload(item[DEVICE_ID]);
                     }}>Get Device</button>&nbsp;					
-				    <a target='_blank' href={`${App.server.common['APP_CENTER']}/store/devices/guide?id=${item[DEVICE_ID]}`}><button className='btn button btn-sm btn-info'>{lang("Guide")}</button></a>
+				    {item[DEVICE_GUIDE] ? <a target='_blank' rel='noopener noreferrer' href={item[DEVICE_GUIDE]}><button className='btn button btn-sm btn-info'>{lang("Guide")}</button></a> : ''}
                 </div>
                 {item['available'] == '1'
                     ? <div className='close' title={lang("Delete Device")} onClick={()=>{if(this.props.onDelete) this.props.onDelete(item[DEVICE_ID])}} style={{position:'absolute', top:7, right:10, cursor:'pointer'}}>&times;</div>

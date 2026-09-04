@@ -47,7 +47,7 @@ class Upgrade extends Component {
                                 <tr><th>{lang("Latest Version")}</th>
                                     <td>
                                         <b>{this.state.latest}</b>
-                                        <div style={{whiteSpace: 'pre'}} dangerouslySetInnerHTML={{__html:this.state.note}}></div> 
+                                        <div style={{whiteSpace: 'pre-wrap'}}>{this.state.note}</div>
                                     </td>
                                 </tr>
                             </tbody>
@@ -64,7 +64,9 @@ class Upgrade extends Component {
                             </div>
                         </div>
                         </>
-                        : <div className='button btn btn-primary' onClick={()=>{this.upgrade()}}>{lang("Upgrade")}</div>
+                        : (this.state.latest != this.state.version
+                            ? <div className='button btn btn-primary' onClick={()=>{this.upgrade()}}>{lang("Upgrade")}</div>
+                            : <div style={{color:'green'}}><i className="fa fa-check-circle-o"></i>&nbsp;{lang("Up to date")}</div>)
                     }
 
                     <Loading ref={c=>this.loader = c} style={{position:'absolute'}}></Loading>

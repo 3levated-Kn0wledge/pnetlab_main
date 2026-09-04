@@ -85,7 +85,6 @@ class Node_sessions extends Model_basic
         $this->query_builder = DB::table(NODE_SESSIONS_TABLE);
         $this->id = NODE_SESSION_ID;
         $this->name = NODE_SESSIONS_TABLE;
-        $this->uploader = APP_UPLOAD;
 
         $this->registerSql = [
             //['Auth/MapUG', AUTHEN_ID, MAP_UG_PEOPLEID, null, null, 'cascade', null],

@@ -183,7 +183,7 @@ seed_offline_login() {
 
 	mysql_root "$APP_DB" < "${SRC_DIR}/install/sql/seed-control.sql" ||
 		die "failed to apply install/sql/seed-control.sql"
-	ok "control rows set: offline mode on, online mode off"
+	ok "control rows set: offline mode on"
 
 	local admins; admins="$(db_query "SELECT COUNT(*) FROM \`${APP_DB}\`.users WHERE username='admin';")"
 	if [[ "$admins" != 0 && "${RESET_ADMIN:-0}" != 1 ]]; then

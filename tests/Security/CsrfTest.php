@@ -112,11 +112,12 @@ assert_true($csrfPos !== false && $bindPos !== false && $csrfPos < $bindPos,
 | 2. $except is minimal, and every survivor is explained
 |--------------------------------------------------------------------------
 |
-| Each entry is an unauthenticated write. 'auth/login/license' earns its place:
-| APP_AUTHEN redirects the browser back to it from a server this box does not
-| control, so no token this box issued can be on that request. Nothing else
-| does -- everything else is same-origin JavaScript, and axios already sends
-| the token.
+| Each entry would be an unauthenticated write. 'auth/login/license' used to
+| earn its place: APP_AUTHEN redirected the browser back to it from a server
+| this box did not control, so no token this box issued could be on that
+| request. Phase 05 removed the online login, and with it the last entry.
+| Everything else is same-origin JavaScript, and axios already sends the
+| token -- so the list is empty, and a new entry is a hole to justify.
 */
 
 $csrfCode = code_without_comments($csrfPath);
@@ -125,8 +126,8 @@ if (preg_match('/\$except\s*=\s*\[(.*?)\]\s*;/s', $csrfCode, $m)) {
     preg_match_all('/[\'"]([^\'"]+)[\'"]/', $m[1], $e);
     $exceptEntries = $e[1];
 }
-assert_same(['auth/login/license'], $exceptEntries,
-    'VerifyCsrfToken::$except contains exactly the one genuinely cross-site route');
+assert_same([], $exceptEntries,
+    'VerifyCsrfToken::$except is empty: the online login that needed an exemption is gone');
 
 // The removal of 'admin/box/*' rests on there being no such controller. Assert
 // the fact, not the absence of the string, so that adding an Admin\BoxController
@@ -156,7 +157,7 @@ $web = code_without_comments($webPath);
 assert_true(strpos($web, 'use App\Helpers\Request\Checker;') !== false,
     'web.php imports Checker');
 
-foreach (['admin', 'user', 'notice'] as $group) {
+foreach (['admin', 'user'] as $group) {
     // The guard has to be inside the closure and before App::call, or the
     // controller runs first and the guard is decoration.
     $pattern = '/Route::match\(\s*\[[^\]]*\]\s*,\s*[\'"]\/' . $group . '\/\{controller\}\/\{method\}[\'"].*?'
@@ -211,7 +212,7 @@ assert_true(count($readOnly) > 0,
 function dispatchable_methods($controllersDir)
 {
     $found = [];
-    foreach (['Admin' => 'admin', 'User' => 'user', 'Notice' => 'notice'] as $dir => $group) {
+    foreach (['Admin' => 'admin', 'User' => 'user'] as $dir => $group) {
         foreach ((array) glob($controllersDir . '/' . $dir . '/*Controller.php') as $file) {
             $src = code_without_comments($file);
             $controller = strtolower(basename($file, 'Controller.php'));
@@ -233,7 +234,10 @@ function dispatchable_methods($controllersDir)
 }
 
 $methods = dispatchable_methods($controllersDir);
-assert_true(count($methods) > 100,
+// 157 when this was written; 92 after Phase 05 removed the marketplace, the
+// licences, the notices and the online login. The floor is a sanity check
+// that the sweep still finds the controllers, not a count to preserve.
+assert_true(count($methods) > 80,
     sprintf('the controller sweep found the dispatchable methods (%d)', count($methods)));
 
 /**
@@ -576,9 +580,11 @@ foreach (array_merge($reactFiles, $bundles, (array) glob($root . '/store/public/
 assert_same([], $assignsUploadUrl,
     'nothing assigns ckfinder.uploadUrl / simpleUpload.uploadUrl anywhere');
 
-// The three editor call sites keep their upload adapter commented out.
+// The editor call sites register no upload adapter. (They used to keep one
+// commented out, pointing at admin/labs/uploader; Phase 05 removed that
+// uploader with the lab marketplace, and the dead comment with it. The third
+// site, components/admin/product/Step_03.js, went with the marketplace too.)
 foreach ([
-    'components/admin/product/Step_03.js',
     'components/lab/text/TextEditor.js',
     'components/lab/workbook/editor/HTMLEditor.js',
 ] as $rel) {

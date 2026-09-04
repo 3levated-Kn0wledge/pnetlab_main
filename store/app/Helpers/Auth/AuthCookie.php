@@ -28,17 +28,17 @@ use Illuminate\Support\Facades\Cookie;
  *
  * Deletion matters as much as issuance. A browser removes a cookie only when
  * the clearing Set-Cookie matches its name, domain and path, so a clear scoped
- * to APP_DOMAIN cannot remove a cookie that was set for the served host -- and
- * that was exactly the shape of the three logout paths here. forget() therefore
- * clears every scope this application has ever issued the cookie on.
+ * to one domain cannot remove a cookie that was set for another -- and the
+ * three logout paths here used to clear only the upstream domain the online
+ * login scoped its cookie to, a no-op on any appliance. forget() therefore
+ * clears every scope this application issues the cookie on.
  */
 class AuthCookie
 {
     /**
-     * Lax, not Strict. Strict would drop the cookie on the top-level navigation
-     * back from APP_AUTHEN into /auth/login/license, and on any bookmark or
-     * external link into the UI, logging the user out for no security gain that
-     * the origin guard in includes/api_origin_guard.php does not already give.
+     * Lax, not Strict. Strict would drop the cookie on any bookmark or external
+     * link into the UI, logging the user out for no security gain that the
+     * origin guard in includes/api_origin_guard.php does not already give.
      */
     const SAME_SITE = 'Lax';
 
@@ -64,11 +64,9 @@ class AuthCookie
      *
      * @param string      $value   the session token
      * @param int         $minutes lifetime
-     * @param string|null $domain  scope; defaults to the served host. The online
-     *                             path passes APP_DOMAIN explicitly -- see the
-     *                             note on scopes() -- and keeping that a caller
-     *                             decision means this change does not quietly
-     *                             alter where the online cookie lands.
+     * @param string|null $domain  scope; defaults to the served host, which is
+     *                             the only scope in use since Phase 05 removed
+     *                             the online login and its upstream domain.
      */
     public static function issue($value, $minutes, $domain = null)
     {
@@ -78,10 +76,12 @@ class AuthCookie
     /**
      * Queue a clearing cookie for every scope the token has ever been issued on.
      *
-     * Sending more than one is not tidiness: the offline path scopes the cookie
-     * to SERVER_NAME and the online path to APP_DOMAIN, and a clear for one has
-     * no effect on the other. Logging out used to clear only APP_DOMAIN, which
-     * on an appliance served from anything else was a no-op.
+     * Iterating scopes() rather than naming one is deliberate: a clear for one
+     * scope has no effect on another, and logging out used to clear only the
+     * upstream domain (user.pnetlab.com) that the online login scoped its
+     * cookie to -- a no-op on an appliance served from anywhere else. There is
+     * one scope now, and the shape stays so a second cannot be added without
+     * being cleared here too.
      */
     public static function forget()
     {
@@ -93,19 +93,15 @@ class AuthCookie
     /**
      * Every domain scope a `token` cookie may exist under.
      *
-     * APP_DOMAIN is user.pnetlab.com, which is not a domain the appliance is
-     * served from, so the browser rejects the online path's cookie outright.
-     * That is a separate problem, tracked in docs/OFFLINE-FIRST.md; clearing it
-     * anyway costs one header and stops this method being wrong if the online
-     * path is ever repaired rather than removed.
+     * The served host, and nothing else. Until Phase 05 the online login
+     * issued the cookie on APP_DOMAIN (user.pnetlab.com) as well -- a domain
+     * the appliance was never served from, so the browser rejected that
+     * cookie outright -- and this list carried it so that forget() would
+     * clear it. The online login is gone, and so is the domain.
      */
     private static function scopes()
     {
-        $scopes = array(self::host());
-        if (defined('APP_DOMAIN') && APP_DOMAIN !== '' && !in_array(APP_DOMAIN, $scopes, true)) {
-            $scopes[] = APP_DOMAIN;
-        }
-        return $scopes;
+        return array(self::host());
     }
 
     /**

@@ -5,10 +5,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Helpers\Request\Checker;
 use App\Helpers\Request\Reply;
-use Illuminate\Support\Facades\Auth;
-use App\Helpers\Uploader\FileFunc;
 use App\Helpers\DB\Models;
-use App\Helpers\Request\Query;
 use App\Helpers\Packages\PackageClient;
 
 /**
@@ -42,6 +39,15 @@ use App\Helpers\Packages\PackageClient;
  * made by code we own, reading a manifest that can only express operations from
  * a fixed list. See docs/PACKAGES.md.
  *
+ * WHERE THE LISTING COMES FROM
+ *
+ * Until Phase 05, filter() and get() still asked user.pnetlab.com for the
+ * device records (with the box's alive key and encrypted UUID attached to
+ * every call). They now read the repository's own index.json through
+ * PackageClient::index() -- one file, fetched only when PNET_PACKAGE_CENTER
+ * is set, parsed as untrusted data. With no repository configured the store
+ * is empty and says so; nothing is contacted.
+ *
  * The HTTP contract is unchanged. /admin/devices/{filter,get,delete,process}
  * take and return exactly what they did, the Process_device rows still carry
  * the progress the dialog renders, and process() still returns the log text the
@@ -58,24 +64,20 @@ class DevicesController extends Controller
 
     public function filter(Request $request)
     {
-        $data = $request->all();
-        $result = Query::boxCenter(APP_CENTER . '/api/offboxs/devices/filter', $data, ['dataType' => 'json']);
-        if(!$result) Reply::finish(false, 'Can get data from server');
-        if(!$result['result']) return $result;
-
+        $index = PackageClient::index();
         // "Is this device already on the box?" is answered from the box's own
         // record of what it has installed. It used to be answered by running a
         // shell command the marketplace supplied, once per device, which meant
         // rendering the store gave pnetlab.com command execution as www-data.
         $installed = PackageClient::installed();
-
-        foreach($result['data'] as $key=>$device){
-            $deviceId = isset($device[DEVICE_ID]) ? (string) $device[DEVICE_ID] : '';
-            $result['data'][$key]['available'] =
-                PackageClient::isDeviceInstalled($deviceId, $installed) ? '1' : '0';
+        $devices = $index['devices'];
+        foreach($devices as $key=>$device){
+            $devices[$key]['available'] =
+                PackageClient::isDeviceInstalled($device[DEVICE_ID], $installed) ? '1' : '0';
         }
-
-        return $result;
+        // An empty store carries the reason in the message, which the page
+        // shows: no repository configured, or one that did not answer.
+        Reply::finish(true, $index['result'] ? 'success' : $index['message'], $devices);
     }
 
     public function get(Request $request)
@@ -87,10 +89,13 @@ class DevicesController extends Controller
         // checked before either, not after.
         if(!PackageClient::validId($deviceId)) Reply::finish(false, 'Invalid device id');
 
-        $result = Query::boxCenter(APP_CENTER . '/api/offboxs/devices/read', [DEVICE_ID => $deviceId], ['dataType' => 'json']);
-        if(!$result) Reply::finish(false, 'Can not get data from server');
-        if(!$result['result']) return $result;
-        $device = $result['data'];
+        $device = PackageClient::device($deviceId);
+        if($device === null){
+            $index = PackageClient::index();
+            Reply::finish(false, $index['result']
+                ? 'This device is not in the package repository index'
+                : $index['message']);
+        }
 
         if(!$overwritten && PackageClient::isDeviceInstalled($deviceId)){
             Reply::finish(false, 'device_existed_alert', ['confirm' => true]);

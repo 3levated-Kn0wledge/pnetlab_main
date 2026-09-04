@@ -209,13 +209,15 @@ assert_same([], array_values(array_unique($missingMw)),
     'every middleware named by App\\Http\\Kernel exists');
 
 $routes = $app->make('router')->getRoutes();
-assert_true(count($routes) >= 17,
+// 12 since Phase 05 removed the four online-login routes (initial,
+// initialOnline, online, license) and the /notice dispatcher; it was 17.
+assert_true(count($routes) >= 12,
     sprintf('the router resolves the full route table (%d routes)', count($routes)));
 
 $uris = [];
 foreach ($routes as $r) $uris[$r->uri()] = true;
 foreach (['/', 'auth/login/login', 'auth/login/offline', 'admin/{controller}/{method}',
-          'user/{controller}/{method}', 'notice/{controller}/{method}'] as $uri) {
+          'user/{controller}/{method}'] as $uri) {
     assert_true(isset($uris[$uri]), "route is registered: $uri");
 }
 

@@ -83,8 +83,13 @@ www-data ALL=(root) NOPASSWD: /usr/bin/nc
 # granted root for neither. Reading link state is unprivileged too, so
 # isInterface()/isInterfaceUp() no longer sudo `ip link show` — but the ip
 # grant stays, because changing links genuinely needs it.
-www-data ALL=(root) NOPASSWD: /usr/sbin/dmidecode
-www-data ALL=(root) NOPASSWD: /usr/bin/ps
+# dmidecode was removed in Phase 05. Its callers read the machine UUID to
+# fingerprint the box towards user.pnetlab.com and to show as "Box's ID";
+# neither exists now. Nothing on the box needs its own hardware identity.
+# ps was removed with the php line below: its one caller was
+# Admin/DefaultController::upgrade(), which grepped `sudo ps -aux` for a
+# running `artisan upgrade`. The worker takes a lock file now, which is what
+# that grep was standing in for.
 # There is deliberately no /bin/echo line. Its last caller was
 # Admin/SystemController's iourc write:
 #     sudo echo -e "[license]\n$license" > .../iourc
@@ -105,13 +110,19 @@ www-data ALL=(root) NOPASSWD: /usr/bin/ps
 # arguments and nothing else; the grants now say so.
 www-data ALL=(root) NOPASSWD: /usr/sbin/shutdown -h now
 www-data ALL=(root) NOPASSWD: /usr/sbin/reboot ""
-www-data ALL=(root) NOPASSWD: /usr/sbin/ntpdate
 
 # --- ROOT-EQUIVALENT. Remove these first; route behind unl_wrapper. --------
 # Each of these can be turned into a root shell by anyone who controls its
 # arguments. They are listed because the product does not currently work without
 # them, not because granting them is acceptable.
-www-data ALL=(root) NOPASSWD: /usr/bin/php               # arbitrary code
+# There is deliberately no /usr/bin/php line any more. Its last caller was
+# Admin/DefaultController::upgrade(), which ran `sudo php .../artisan upgrade
+# now`. The upgrade worker runs as www-data now, like the device-package
+# worker: everything it does is unprivileged except one `sudo unl_wrapper -a
+# package <path>`, and root decides from the signature inside that file
+# whether to believe it. A php grant is a root shell for anyone who can name a
+# script, and nothing in the tree needs one.
+#
 # There is deliberately no /usr/bin/perl line. It existed for exactly one thing:
 # the IOL L1 keepalive helper, which devices/interfc.php launched as
 #     sudo php .../Console/Commands/wrapper 32768 <uid> 'sudo perl .../keepalive.pl ...'
@@ -120,11 +131,6 @@ www-data ALL=(root) NOPASSWD: /usr/bin/php               # arbitrary code
 # It is now `unl_wrapper -a iol-keepalive -S <session> -I <iface> --state up|down`,
 # which computes the uid, confirms it against the passwd entry, and execs a FIXED
 # script path with an argv array. Nothing on that path builds a command line.
-#
-# The php line above is NOT still here for that. Its last caller is
-# Admin/DefaultController::upgrade(), which runs `sudo php .../artisan upgrade
-# now`; that file belongs to the CSRF work in flight and has not been moved yet.
-# When it goes, this line goes with it, and SudoersPolicyTest will say so.
 www-data ALL=(root) NOPASSWD: /usr/bin/nohup             # launches anything
 www-data ALL=(root) NOPASSWD: /usr/sbin/service          # launches anything
 # There is deliberately no /usr/bin/docker line. All thirty-one docker

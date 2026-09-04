@@ -2086,46 +2086,12 @@ class indentify
         return self::$user;
     }
 
-    private function crypt_data($string, $action = 'e')
-    {
-        // you may change these values to your own
-        try {
+    // crypt_data(), get_uuid() and getKey() used to be here: the machine UUID
+    // from `sudo dmidecode`, AES-encrypted under a key that was in this file,
+    // attached to every call the box made to user.pnetlab.com as its
+    // fingerprint. Phase 05 removed the calls, the fingerprint and the
+    // dmidecode grant. See docs/OFFLINE-FIRST.md.
 
-            $secret_key = "gsgsgsghkjjghksgs%^465#";
-            $secret_iv = "etwdgsio##kljhjgf%^465#";
-
-            $output = false;
-            $encrypt_method = "AES-256-CBC";
-            $key = hash('sha256', $secret_key);
-            $iv = substr(hash('sha256', $secret_iv), 0, 16);
-            if ($action == 'e') {
-                $output = base64_encode(openssl_encrypt(time() . '##time##' . $string, $encrypt_method, $key, 0, $iv));
-            } else if ($action == 'd') {
-                $output = openssl_decrypt(base64_decode($string), $encrypt_method, $key, 0, $iv);
-
-                $outputArray = explode('##time##', $output);
-                $output = [];
-                $output['payload'] = $outputArray[1];
-                $output['iat'] = $outputArray[0];
-            }
-            return $output;
-        } catch (\Exception $e) {
-            return false;
-        }
-    }
-
-
-    private function get_uuid()
-    {
-        return exec("sudo dmidecode --string system-uuid");
-    }
-
-    public function getKey()
-    {
-        return $this->crypt_data($this->get_uuid());
-    }
-
-    
     public function isOffline($pod)
     {
         $user = $this->getUser($pod);
