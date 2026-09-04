@@ -9,12 +9,10 @@ workspace. This file is the fork's own record of what has actually been met,
 because "are we done with phase N" was a question nothing in the repo could
 answer.
 
-**Phases 05, 06 and 07 are not started** and are not audited here. Phase 05
-was additionally gated on `docs/inactive/PHASE-04-EXIT-FIXES.md`, the fifteen blocking
-fixes found by reviewing the work that closed Phase 04. **That gate is clear
-as of 2026-09-02**: all fifteen are fixed and verified on the reference VM,
-and every secondary finding is fixed or carries a written deferral in that
-file.
+**Phase 05 is done** as of 2026-09-04 — see its section below. **Phases 06
+and 07 are not started** and are not audited here. Phase 05 was gated on
+`docs/inactive/PHASE-04-EXIT-FIXES.md`, the fifteen blocking fixes found by
+reviewing the work that closed Phase 04; that gate cleared on 2026-09-02.
 
 Two bullets are **declined by decision** rather than outstanding. They are
 marked as such, with the reasoning, because a deferred item that looks like an
@@ -79,7 +77,7 @@ rounded up.
 
 | Bullet | Evidence |
 |---|---|
-| Build the `www-data` sudo allowlist | 42 grants → 23 |
+| Build the `www-data` sudo allowlist | 42 grants → 23 → **19** after Phase 05 (php, ps, ntpdate, dmidecode retired with their only callers) |
 | Reap tenant accounts | `unl_wrapper -a reap-tenant`; a full lab run leaves zero `unl*` accounts |
 | Tighten `/opt/unetlab/tmp` | `755 www-data:www-data` here, against `2777 root:unl` on the appliance |
 | Replace unsalted SHA-256 with `password_hash` | `PasswordHashingTest` |
@@ -387,7 +385,7 @@ our installer disables AppArmor — which is exactly what upstream did, with
 
 20 call sites across `includes/` and `devices/` still use `brctl`, `tunctl` and
 `ifconfig`, and all three remain in the sudo policy. Migrating to `ip link` /
-`ip tuntap` would retire three grants, taking the policy from 24 to 21.
+`ip tuntap` would retire three grants, taking the policy from 19 to 16.
 
 Deferred deliberately to Phase 05 or later. All three tools still ship on 24.04
 and work correctly, so this is forward-looking rather than a live defect, and
@@ -396,6 +394,55 @@ regression risk per unit of benefit in the remaining work. The grants it would
 retire are real but are not the dangerous ones; `ip` itself stays regardless,
 and `ip netns exec` is a root shell, so the count would fall without the
 privilege surface changing much.
+
+---
+
+## 05 · Sever the upstream dependency
+
+Done, 2026-09-04, on branch `phase-05-sever-upstream`, one commit per surface.
+`docs/OFFLINE-FIRST.md` is the decision; `tests/Security/UpstreamSeveredTest.php`
+is the part a machine checks, one section per commit.
+
+| Bullet | State | Evidence |
+|---|---|---|
+| Core VPCS emulation has zero upstream dependency | done, and now the whole product | the seven integration suites and the unit suite run on the reference VM with outbound traffic to anything but the workstation rejected at the firewall — see `docs/HANDOVER.md`, "Phase 05" |
+| Cut `License::keepalive()` from the offline path | done | `Helpers/Box/License.php` deleted; no `keepalive()` or `relicense()` defined or called; the crontab and the two artisan commands that drove them deleted |
+| Stop sending the installation fingerprint | done | `Query::boxCenter()` deleted; `indentify::getKey()/crypt_data()/get_uuid()` deleted; the dmidecode grant retired |
+| Replace or stub `APP_SECURE` | done | deleted — nothing read it |
+| Make every remaining upstream call optional and non-blocking, defaulting to absent | done | there is none. The one outbound request the admin UI can make is the package repository index, fetched only when `PNET_PACKAGE_CENTER` is set and only from the device store and the version dialog, bounded by the same timeouts as everything else |
+
+What the roadmap flagged as *not verified offline* — "Docker image handling,
+QEMU/IOL image flows, the store/marketplace, and anything Guacamole-mediated" —
+resolves as: Docker images are seeded locally (`docs/DOCKER-IMAGES.md`); device
+images arrive as signed packages from a repository the owner runs
+(`docs/PACKAGES.md`); the lab marketplace is gone, not replaced — a lab is a
+file under `/opt/unetlab/labs` and moving one is a copy; Guacamole is local and
+always was.
+
+### What went, surface by surface
+
+| Surface | What it did | Commit |
+|---|---|---|
+| the online login | redirected to `authen.pnetlab.com`; an unauthenticated return leg (the one CSRF exemption) created a local account from a caller-supplied licence, ran `sudo ntpdate`, and posted the machine UUID | `security(auth)` |
+| the licence keep-alive | posted the encrypted UUID hourly and on every mode switch, stored an "alive key" | same |
+| the lab marketplace | five controllers and sixteen methods of a sixth relaying the caller's licence to the store; two of them wrote a download to a path the server chose | `remove(store): the lab marketplace` |
+| the notices | the bell in the menu bar, two upstream calls per page load | `remove(store): the notice bell` |
+| the multi-access licences | account metering by upstream; the online accounts page; "Box's ID" | `remove(store): the multi-access licences` |
+| the device store listing | device records from upstream, shell-script fields included | `packages: the device store lists the repository's own index` |
+| the update check | version and download link from upstream; `sudo php` and `sudo ps` to run the worker | `packages: the update check reads the index` |
+| the helper layer | `Query::center()/boxCenter()`, the https→http rewrite, the fingerprint, six hostname constants, the upstream cookie domain | `security(upstream)` |
+
+### Two things a reviewer should know
+
+- **The privilege surface shrank as a side effect.** Four grants left the sudo
+  policy — `php` (the one the policy's own comments called "arbitrary code"),
+  `ps`, `ntpdate`, `dmidecode` — each because its only caller was upstream
+  code. `SudoersPolicyTest` would fail if any returned without a caller.
+- **The one network path that remains is opt-in and treated as hostile.** The
+  repository index is parsed by `PackageClient::parseIndex()` under the rules
+  in `docs/PACKAGES.md` "The index", and `PackageIndexTest` feeds it the
+  hostile shapes. Discovery is still unsigned; only package contents are.
+  That was true before and is unchanged.
 
 ---
 

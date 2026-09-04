@@ -209,7 +209,9 @@ assert_same([], array_values(array_unique($missingMw)),
     'every middleware named by App\\Http\\Kernel exists');
 
 $routes = $app->make('router')->getRoutes();
-assert_true(count($routes) >= 17,
+// 13 since Phase 05 removed the four online-login routes (initial,
+// initialOnline, online, license); it was 17 before that.
+assert_true(count($routes) >= 13,
     sprintf('the router resolves the full route table (%d routes)', count($routes)));
 
 $uris = [];
