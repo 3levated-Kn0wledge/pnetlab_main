@@ -142,7 +142,6 @@ class Users extends Model_basic
         $this->query_builder = DB::table(USERS_TABLE);
         $this->id = USER_USERNAME;
         $this->name = USERS_TABLE;
-        $this->uploader = APP_UPLOAD;
 
         $this->registerSql = [
             ['Admin/Html5', USER_POD, HTML5_POD, null, null, 'cascade'],

@@ -194,9 +194,7 @@ class JwtGuard implements Guard
     
     private function refreshToken(){
         $newToken = JWToken::refresh($this->getTokenForRequest());
-        // APP_DOMAIN, as before -- see AuthCookie::scopes() for why that scope
-        // is kept rather than corrected here.
-        AuthCookie::issue($newToken, config('jwt.ttl')*60, APP_DOMAIN);
+        AuthCookie::issue($newToken, config('jwt.ttl')*60);
         return;
     }
     
@@ -238,7 +236,7 @@ class JwtGuard implements Guard
     
     public function login($token)
     {
-        AuthCookie::issue($token, config('jwt.ttl')*60, APP_DOMAIN);
+        AuthCookie::issue($token, config('jwt.ttl')*60);
     }
     
     protected function hasValidCredentials($user, $credentials)

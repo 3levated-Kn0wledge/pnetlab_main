@@ -22,6 +22,9 @@
  *      from user.pnetlab.com
  *   7. the update check and the upgrade worker -- the same index, and no
  *      more `sudo php`
+ *   8. the helper layer itself -- Query::center()/boxCenter(), the https->http
+ *      rewrite, the encrypted-UUID fingerprint, the six upstream hostname
+ *      constants, and the upstream domain on the cookie and the token
  *
  * Every assertion below is source-level and comment-stripped, in the style of
  * RoutingTest: the files that lost this code explain at length what they
@@ -220,8 +223,7 @@ assert_true(!is_file($root . '/store/app/Console/Commands/DeviceFactory.php'),
 $client = code_only($root . '/store/app/Helpers/Packages/PackageClient.php');
 assert_true(preg_match('/if \(PACKAGE_CENTER === \'\'\) \{\s*return null;/', $client) === 1,
     'PackageClient::indexUrl() is null with no repository configured, so nothing is fetched by default');
-assert_true(strpos($client, "'strict_transport' => true") !== false,
-    'and the index is fetched with strict transport');
+assert_true(strpos($client, 'PACKAGE_INDEX_MAX_BYTES') !== false, 'and the index is bounded in size');
 $item = file_get_contents($root . '/store/resources/react/components/admin/device/DeviceItem.js');
 assert_true(strpos($item, 'APP_CENTER') === false, 'DeviceItem no longer links to the upstream guide page');
 assert_true(strpos($item, 'file_public(') === false, 'and does not rewrite image URLs through the upstream uploader');
@@ -244,5 +246,64 @@ $cmd = code_only($root . '/store/app/Console/Commands/UpgradeCmd.php');
 assert_true(strpos($cmd, 'LOCK_EX | LOCK_NB') !== false, 'the worker takes a non-blocking exclusive lock, so two cannot run');
 $dialog = file_get_contents($root . '/store/resources/react/components/admin/system/Upgrade.js');
 assert_true(strpos($dialog, 'dangerouslySetInnerHTML') === false, 'the version dialog renders the update note as text');
+
+echo "8. the helper layer reaches nothing upstream\n";
+
+$query = code_only($root . '/store/app/Helpers/Request/Query.php');
+$queryMethods = public_methods($query);
+foreach (['center', 'boxCenter'] as $gone) {
+    assert_true(!in_array($gone, $queryMethods, true), "Query::$gone() is gone");
+}
+assert_true(strpos($query, "preg_replace('/^https/', 'http'") === false, 'Query::make() no longer rewrites https to http');
+assert_true(preg_match('/\$https = stripos\(\$url, \'https:\/\/\'\) === 0;/', $query) === 1
+    && strpos($query, 'CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTPS)') !== false,
+    'an https URL is pinned to https, redirects included');
+assert_true(strpos($query, 'USER_LICENSE') === false && strpos($query, 'CTRL_ALIVE_KEY') === false
+    && strpos($query, 'indentify') === false, 'and nothing attaches a licence, an alive key or a fingerprint');
+assert_same([], app_files_mentioning($root, 'Query::center('), 'nothing calls Query::center()');
+assert_same([], app_files_mentioning($root, 'Query::boxCenter('), 'nothing calls Query::boxCenter()');
+
+$labInc = code_only($root . '/includes/__lab.php');
+// The Lab class has a crypt_data() of its own (lab-file encryption); the
+// fingerprint lived in the indentify class further down, so look only there.
+$identify = substr($labInc, strpos($labInc, 'class indentify'));
+foreach (['crypt_data', 'get_uuid', 'getKey'] as $gone) {
+    assert_true(preg_match('/function\s+' . $gone . '\s*\(/', $identify) === 0, "indentify::$gone() is gone");
+}
+assert_true(strpos($labInc, 'dmidecode') === false, 'includes/__lab.php never reads the machine UUID');
+assert_true(preg_match('/^www-data.*dmidecode/m', $sudoers) === 0, 'the dmidecode grant is gone');
+
+assert_true(!is_file($root . '/store/app/Constants/domain.php'), 'Constants/domain.php, the five upstream hostnames, is gone');
+$constantsCode = '';
+foreach (php_files($root . '/store/app/Constants') as $p) {
+    $constantsCode .= code_only($p);
+}
+foreach (['APP_DOMAIN', 'APP_AUTHEN', 'APP_UPLOAD', 'APP_ADMIN', 'APP_CENTER', 'APP_SECURE'] as $c) {
+    assert_true(strpos($constantsCode, "'$c'") === false, "no constant file defines $c");
+    assert_same([], app_files_mentioning($root, $c), "and nothing under store/app uses $c");
+}
+$hostHits = [];
+foreach (array_merge(php_files($root . '/store/app'), php_files($root . '/includes'), php_files($root . '/devices'),
+                     [$root . '/api.php', $root . '/platform/wrappers/unl_wrapper']) as $p) {
+    if (preg_match('/pnet-?lab\.com/i', code_only($p))) $hostHits[] = substr($p, strlen($root) + 1);
+}
+assert_same([], $hostHits, 'no PHP outside comments names an upstream host');
+$reactHits = [];
+foreach ($react as $p) {
+    $src = preg_replace('#/\*.*?\*/|//[^\n]*#s', '', file_get_contents($p));
+    if (preg_match('/pnet-?lab\.com|APP_CENTER|APP_AUTHEN|APP_UPLOAD|APP_ADMIN|APP_DOMAIN/', $src)) $reactHits[] = basename($p);
+}
+assert_same([], $reactHits, 'no React source names an upstream host or constant');
+$blade = file_get_contents($root . '/store/resources/views/reactjs/reactjs.blade.php');
+assert_true(preg_match('/APP_(CENTER|AUTHEN|UPLOAD|ADMIN|DOMAIN)/', $blade) === 0, 'and the blade view exports none of them');
+
+$cookie = code_only($root . '/store/app/Helpers/Auth/AuthCookie.php');
+assert_true(preg_match('/function\s+scopes\s*\(\)\s*\{\s*return\s+array\(self::host\(\)\);\s*\}/', $cookie) === 1,
+    'the token cookie has one scope, the served host');
+$guard = code_only($root . '/store/app/Services/Auth/JwtGuard.php');
+assert_true(strpos($guard, 'APP_DOMAIN') === false, 'JwtGuard issues the cookie on the served host');
+assert_true(strpos(code_only($root . '/store/app/Helpers/Token/JWToken.php'), 'APP_DOMAIN') === false,
+    'and the token names no upstream domain');
+assert_true(!is_file($root . '/store/app/pnetlab'), 'the stray store/app/pnetlab file (one line: pnetlab.com) is gone');
 
 test_summary();

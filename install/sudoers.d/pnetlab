@@ -83,7 +83,9 @@ www-data ALL=(root) NOPASSWD: /usr/bin/nc
 # granted root for neither. Reading link state is unprivileged too, so
 # isInterface()/isInterfaceUp() no longer sudo `ip link show` — but the ip
 # grant stays, because changing links genuinely needs it.
-www-data ALL=(root) NOPASSWD: /usr/sbin/dmidecode
+# dmidecode was removed in Phase 05. Its callers read the machine UUID to
+# fingerprint the box towards user.pnetlab.com and to show as "Box's ID";
+# neither exists now. Nothing on the box needs its own hardware identity.
 # ps was removed with the php line below: its one caller was
 # Admin/DefaultController::upgrade(), which grepped `sudo ps -aux` for a
 # running `artisan upgrade`. The worker takes a lock file now, which is what

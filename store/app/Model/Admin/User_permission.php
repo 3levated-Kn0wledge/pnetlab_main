@@ -36,7 +36,6 @@ class User_permission extends Model_basic
         $this->query_builder = DB::table(USER_PERMISSION_TABLE);
         $this->id = USER_PER_ID;
         $this->name = USER_PERMISSION_TABLE;
-        $this->uploader = APP_UPLOAD;
         
         $this->registerSql = [
             //['Auth/MapUG', AUTHEN_ID, MAP_UG_PEOPLEID, null, null, 'cascade', null],

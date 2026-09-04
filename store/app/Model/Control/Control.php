@@ -31,7 +31,6 @@ class Control extends Model_basic
         $this->query_builder = DB::table(CONTROL_TABLE);
         $this->id = CONTROL_NAME;
         $this->name = CONTROL_TABLE;
-        $this->uploader = APP_UPLOAD;
         
         $this->registerSql = [
             //['Auth/MapUG', AUTHEN_ID, MAP_UG_PEOPLEID, null, null, 'cascade', null],

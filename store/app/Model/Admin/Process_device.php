@@ -51,7 +51,6 @@ class Process_device extends Model_basic
         $this->query_builder = DB::table(PROCESS_DEVICE_TABLE);
         $this->id = PROCESS_DEVICE_ID;
         $this->name = PROCESS_DEVICE_TABLE;
-        $this->uploader = APP_UPLOAD;
         
         $this->registerSql = [
             //['Auth/MapUG', AUTHEN_ID, MAP_UG_PEOPLEID, null, null, 'cascade', null],

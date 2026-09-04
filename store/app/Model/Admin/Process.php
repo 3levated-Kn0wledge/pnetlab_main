@@ -51,7 +51,6 @@ class Process extends Model_basic
         $this->query_builder = DB::table(PROCESS_TABLE);
         $this->id = PROCESS_ID;
         $this->name = PROCESS_TABLE;
-        $this->uploader = APP_UPLOAD;
         
         $this->registerSql = [
             //['Auth/MapUG', AUTHEN_ID, MAP_UG_PEOPLEID, null, null, 'cascade', null],

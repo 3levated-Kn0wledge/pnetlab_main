@@ -37,11 +37,7 @@ class DefaultController extends Controller
         $common = [
             'APP_SLOGAN' => APP_SLOGAN,
             'APP_TITLE' => APP_TITLE,
-            'APP_DOMAIN' => APP_DOMAIN,
-            'APP_AUTHEN' => APP_AUTHEN,
-            'APP_UPLOAD' => APP_UPLOAD,
-            'APP_ADMIN' => APP_ADMIN,
-            'APP_CENTER' => APP_CENTER,
+            'APP_NAME' => APP_NAME,
             CTRL_DOCKER_WIRESHARK => Ctrl::get(CTRL_DOCKER_WIRESHARK, '0'),
         ];
 

@@ -134,7 +134,7 @@ class PackageClient
                 'No package repository is configured. Set PNET_PACKAGE_CENTER to a repository '
                 . 'that publishes signed packages and an index.json; see docs/PACKAGES.md.');
         }
-        $body = Query::make($url, 'get', null, array('strict_transport' => true, 'timeout' => 15));
+        $body = Query::make($url, 'get', null, array('timeout' => 15));
         if (!is_string($body)) {
             return self::$index = self::emptyIndex('The package repository at ' . $url . ' did not answer');
         }
@@ -341,12 +341,11 @@ class PackageClient
             return array('result' => false, 'message' => 'Cannot write into ' . PACKAGE_INCOMING_DIR);
         }
         $lastReport = 0;
-        // strict_transport: Query::make() otherwise rewrites https to http
-        // before the request is made, and follows a redirect to any scheme.
-        // A package is verified by its signature, not by its transport, but
-        // there is no reason to hand the URL of a root-applied artefact to
-        // the network in the clear when the marketplace gave it as https.
-        $options = array('file' => $fp, 'strict_transport' => true);
+        // A package is verified by its signature, not by its transport; but
+        // Query::make() keeps an https URL https, redirects included, so a
+        // root-applied artefact is never fetched in the clear when the
+        // repository gave it as https.
+        $options = array('file' => $fp);
         if ($progress !== null) {
             $options['process'] = function ($resource, $downloadSize = 0, $downloaded = 0, $uploadSize = 0, $uploaded = 0)
                 use ($progress, &$lastReport) {

@@ -51,7 +51,7 @@ class UploadManager
         $config = config("filesystems.disks.{$diskName}", null);
         if($config != null) return $config;
         $diskModel = resolve('Models')->getModel('Uploader/Uploader_disks');
-        $disk = $diskModel->read([[ [DISK_NAME, '=', $diskName], [DISK_UPLOADER, '=', APP_UPLOAD], [DISK_ACTIVE, '=', 1] ]]);
+        $disk = $diskModel->read([[ [DISK_NAME, '=', $diskName], [DISK_ACTIVE, '=', 1] ]]);
         if(!$disk['result']) return false;
         if(!isset($disk['data'][0])) return false;
         $config = json_decode($disk['data'][0]->{DISK_CONFIG}, true);

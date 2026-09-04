@@ -69,7 +69,6 @@ class Uploader_realfiles extends Model_basic
         $this->query_builder = DB::table(UPLOADER_FILES_TABLE);
         $this->id = FILE_ID;
         $this->name = UPLOADER_FILES_TABLE;
-        $this->uploader = APP_UPLOAD;
         
         $this->registerSql = [
             //['Auth/MapUG', AUTHEN_ID, MAP_UG_PEOPLEID, null, null, 'cascade', null],

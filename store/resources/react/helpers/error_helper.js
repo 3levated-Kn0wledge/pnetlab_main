@@ -1,10 +1,7 @@
 global.error_handle = (error)=>{
 	try {
-		var authenServer = null;
 		var App = global.App;
 		if(!App) var App = {};
-		if(App.server && App.server.common) authenServer = App.server.common.APP_AUTHEN;
-		if(!authenServer && server) authenServer = server.APP_AUTHEN;
 
 		var status = 200;
 		var data = error;

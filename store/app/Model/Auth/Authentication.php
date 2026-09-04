@@ -90,7 +90,6 @@ class Authentication extends Model_basic
         $this->name = AUTHENTICATION_TABLE;
         $this->query_builder = DB::table($this->name);
         $this->id = AUTHEN_ID;
-        $this->uploader = APP_UPLOAD;
         
         $this->registerSql = [
             // ['Admin/Campaigns', AUTHEN_ID, CAMPAIGN_UID, null, null, 'cascade', null],
