@@ -98,7 +98,7 @@ _userns_restricted()  { [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_us
 # It is the only AppArmor confinement any part of this stack currently has.
 _docker_default_profile() {
 	have docker || return 0
-	aa-status 2>/dev/null | grep -q '^   docker-default$'
+	grep -q '^   docker-default$' <<<"$(aa-status 2>/dev/null)"
 }
 
 verify_apparmor() {
@@ -140,12 +140,20 @@ verify_apparmor() {
 # nothing in this tree has ever run on v1 and saying so is the point; the
 # driver is a warning because a `cgroupfs` driver on a v2 host is a real
 # configuration smell but not one this installer set or should silently change.
+# No `producer | grep -q` anywhere in this file, on purpose. install.sh runs
+# under pipefail, and grep -q exits on its first match; a producer that still
+# has output to write then dies of EPIPE and the pipeline fails -- at random,
+# and most often for the producer with the most output after the matched
+# line. On the first from-scratch deploy of Phase 05 that was `docker info`,
+# whose "Cgroup Version" line has thirty more behind it: one [fail] on a
+# host where the check passed every time it was re-run. Every check here
+# captures the whole output first and greps the string.
 _cgroup_v2()        { [[ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" == 'cgroup2fs' ]]; }
 # A hybrid host mounts v1 controllers under /sys/fs/cgroup/<controller>. On a
 # pure v2 host those directories do not exist.
-_cgroup_not_hybrid() { ! mount | grep -q '^cgroup on /sys/fs/cgroup/'; }
-_docker_cgroup_v2() { docker info 2>/dev/null | grep -q 'Cgroup Version: 2'; }
-_docker_cgroup_drv(){ docker info 2>/dev/null | grep -q 'Cgroup Driver: systemd'; }
+_cgroup_not_hybrid() { ! grep -q '^cgroup on /sys/fs/cgroup/' <<<"$(mount)"; }
+_docker_cgroup_v2() { grep -q 'Cgroup Version: 2' <<<"$(docker info 2>/dev/null)"; }
+_docker_cgroup_drv(){ grep -q 'Cgroup Driver: systemd' <<<"$(docker info 2>/dev/null)"; }
 # The web layer reaches the daemon over the unix socket and by group
 # membership; `docker info` succeeding as root does not prove WEB_USER can.
 _docker_socket_usable() { sudo -u "$WEB_USER" docker -H=unix:///var/run/docker.sock info; }
@@ -197,13 +205,13 @@ verify_docker() {
 # somebody asked for consoles and they are expected to work.
 _guac_installed()      { [[ -f /var/lib/jetty9/webapps/html5.war ]]; }
 _guacd_active()        { systemctl is-active --quiet guacd; }
-_guacd_listens()       { ss -ltnH 2>/dev/null | grep -q '127\.0\.0\.1:4822'; }
+_guacd_listens()       { grep -q '127\.0\.0\.1:4822' <<<"$(ss -ltnH 2>/dev/null)"; }
 _jetty_active()        { systemctl is-active --quiet jetty9; }
-_jetty_listens()       { ss -ltnH 2>/dev/null | grep -qE '(127\.0\.0\.1|\[::ffff:127\.0\.0\.1\]):8080'; }
+_jetty_listens()       { grep -qE '(127\.0\.0\.1|\[::ffff:127\.0\.0\.1\]):8080' <<<"$(ss -ltnH 2>/dev/null)"; }
 # The one that matters more than "is it up": Jetty's shipped default is
 # 0.0.0.0:8080, which is a second unauthenticated front door to the same
 # application. The appliance still has Tomcat exposed that way.
-_jetty_loopback_only() { ! ss -ltnH 2>/dev/null | grep -qE '(0\.0\.0\.0|\*|\[::\]):8080'; }
+_jetty_loopback_only() { ! grep -qE '(0\.0\.0\.0|\*|\[::\]):8080' <<<"$(ss -ltnH 2>/dev/null)"; }
 _guac_war_served()     { curl -sf -o /dev/null --max-time 10 http://127.0.0.1:8080/html5/; }
 _guac_jdbc_driver()    { [[ -e /etc/guacamole/lib/mariadb-java-client.jar ]]; }
 _guac_props_mode()     { [[ "$(stat -c '%a %U %G' /etc/guacamole/guacamole.properties)" == '640 root jetty' ]]; }
