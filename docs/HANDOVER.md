@@ -2,7 +2,7 @@
 
 **State at end of session, 2026-09-04.** `main` is at `5889441` (the merged
 security-review fixes). Work since is on branch `phase-05-sever-upstream`,
-eleven commits ahead of `main`, none pushed, nothing uncommitted: Phase 05,
+twelve commits ahead of `main`, none pushed, nothing uncommitted: Phase 05,
 severing the upstream dependency, one commit per surface, verified on the
 reference VM with outbound traffic rejected at the firewall; then the code
 that was dead once upstream was, removed at the user's call. See **Phase 05:
@@ -87,23 +87,23 @@ The policy is at **19 grants**.
 | `security(upstream)` | `Query::center()/boxCenter()`, the https→http rewrite, the fingerprint, the constants, the cookie domain |
 | `build: rebuild the React bundles` | one rebuild for all of it, from `npm ci` |
 
-**Verified on the reference VM, 2026-09-04, with upstream unreachable.** The
-installer was re-run over the previous session's install (a repeat deploy,
-not a snapshot rollback — the snapshot was consumed by the security-review
-verification the day before, and a repeat deploy is what an upgrade of a
-running box is). Then, for the whole of the unit and integration run, an
-iptables rule rejected every packet leaving the VM's interface for anything
-outside the lab network:
+**Verified from scratch on the reference VM, 2026-09-04, with upstream
+unreachable.** The VM at its post-provision snapshot (the interrupted `dpkg`
+again, cleared with `dpkg --configure -a`), a clean `git archive` of the
+branch head, the Guacamole artefacts and the CirrOS image staged, the captcha
+turned off, the installer run end to end. Then, for the whole of the unit and
+integration run, an iptables rule rejected every packet leaving the VM's
+interface for anything outside the lab network:
 
 ```
 sudo iptables -I OUTPUT 1 -o ens18 ! -d 192.168.0.0/16 -j REJECT
 curl https://user.pnetlab.com/                 → unreachable, for the whole run
 
 sudo bash install/install.sh --server-name pnetlab.test
-→ INSTALLER-EXIT=0, every step, 0 [fail], all verification checks passed
+→ INSTALLER-EXIT=0, every step; one [fail] in verification, explained below
 
-tools/run-tests.sh (as root, PHP 8.4)      → 2282 assertions across 39 files, 0 failed
-tools/php-lint.sh (8.4)                    → 349 files, 0 failed
+tools/run-tests.sh (as root, PHP 8.4)      → 2295 assertions across 39 files, 0 failed
+tools/php-lint.sh (8.4)                    → 333 files, 0 failed
 make -C platform/wrappers/src test         → 279 unit assertions, 0 failed
 bash tools/integration/lab-functional.sh   → 59 shell assertions, 8 data-plane checks, 0 failed
 bash tools/integration/node-types.sh       → 30 passed, 0 failed, 1 skipped (IOL)
@@ -114,14 +114,27 @@ bash tools/integration/wrapper-docker.sh   → 45 assertions, 0 failed
 bash tools/integration/iol-dataplane.sh    → 76 assertions, 0 failed
 ```
 
-Zero `unl*` accounts and zero taps afterwards; the rule was removed and
-outbound confirmed working again. Every integration number equals the
-2026-09-03 baseline: nothing the product does depended on the calls that
-went. The unit count moved from 2149 to 2282 (two new files, 180 assertions,
-against 47 retired with the code they pinned); the lint count from 359 to 349
-files (ten deleted). `LaravelBootTest`'s route-table floor is 13, not 17, for
-the four login routes that no longer exist; that test's boot half runs only on
-a deployed host, which is where it caught it.
+Zero `unl*` accounts and zero taps afterwards; the deployed policy has 19
+grants; the rule was removed and outbound confirmed working again. Every
+integration number equals the 2026-09-03 baseline: nothing the product does
+depended on the calls that went. (An earlier run the same day, as a repeat
+deploy over the previous install, gave the same integration numbers; the
+from-scratch run is the one recorded here.)
+
+**The from-scratch discipline caught a fifth installer defect.** Verification
+reported `[fail] the daemon reports Cgroup Version: 2` on a host where the
+same check passed all fifteen times it was re-run. Not the daemon, which had
+been up for minutes: the check was `docker info | grep -q ...` under
+`set -o pipefail`, and `grep -q` exits on its first match, so a producer with
+output still to write dies of EPIPE and the pipeline fails at random — most
+often for the producer with the most output after the matched line, which
+`docker info` is. Every `producer | grep -q` in `install/lib/verify.sh`
+(seven of them) now captures the output first. Fixed in
+`install(verify): no producer | grep -q under pipefail`.
+
+`LaravelBootTest`'s route-table floor is 12, not 17, for the four login
+routes and the `/notice` dispatcher that no longer exist; that test's boot
+half runs only on a deployed host, which is where it caught it.
 
 **Things a reviewer should know.**
 
@@ -137,9 +150,7 @@ a deployed host, which is where it caught it.
   pages, `Namecard`/`Profile`, `ModeCmd`'s online-mode branches, the seven
   control constants nothing read and the two control rows the installer
   seeded for them. Each was confirmed unreachable first; UpstreamSeveredTest
-  section 9 pins the absences. The last commit was verified with the local
-  suite and a bundle rebuild, not on the VM: it deletes unreachable code and
-  two seed rows, and the VM run before it covers everything that executes.
+  section 9 pins the absences, and the from-scratch VM run above includes it.
 - **The workbook editors never used the upstream uploader** — their upload
   adapter was already commented out — so a workbook image is still inline or a
   URL. Nothing regressed there.
